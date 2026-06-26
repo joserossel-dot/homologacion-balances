@@ -1,0 +1,3897 @@
+[
+  {
+    "cuenta_original": "Banco Bci $ Egresos DSI",
+    "codigo_estandar": "AC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Banco Bci USD",
+    "codigo_estandar": "AC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Banco BICE USD",
+    "codigo_estandar": "AC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Banco BICE",
+    "codigo_estandar": "AC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Banco Santander $",
+    "codigo_estandar": "AC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Banco Santander USD",
+    "codigo_estandar": "AC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Clientes Ventas a Credito",
+    "codigo_estandar": "AC.03",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Ingresos por facturar",
+    "codigo_estandar": "AC.03",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Cta.Cte. Socio los Guris",
+    "codigo_estandar": "AC.06",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Cuenta Corriente Merc. Empleados",
+    "codigo_estandar": "AC.07",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Fondos por rendir",
+    "codigo_estandar": "AC.07",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Anticipo a Proveedores",
+    "codigo_estandar": "AC.07",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Anticipo de Honorarios",
+    "codigo_estandar": "AC.07",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Cheques y dctos en Garantia",
+    "codigo_estandar": "AC.07",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Cuentas por Cobrar a Emp. Relacionada",
+    "codigo_estandar": "AC.06",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Materiales Directos",
+    "codigo_estandar": "AC.05",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Importaciones en Tránsito",
+    "codigo_estandar": "AC.05",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Otras Existencias",
+    "codigo_estandar": "AC.05",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "I.V.A. Credito Fiscal",
+    "codigo_estandar": "AC.07",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Pagos Provisionales Mensuales (Ppm)",
+    "codigo_estandar": "AC.07",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Credito Sence",
+    "codigo_estandar": "AC.07",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Otros Impuestos por Recuperar",
+    "codigo_estandar": "AC.07",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Impuestos Diferidos",
+    "codigo_estandar": "ANC.06",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Maquinarias",
+    "codigo_estandar": "ANC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Equipos Computacionales",
+    "codigo_estandar": "ANC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Muebles de Oficina",
+    "codigo_estandar": "ANC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Herramientas",
+    "codigo_estandar": "ANC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Herramientas Menores",
+    "codigo_estandar": "ANC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Otros Activos Fijos",
+    "codigo_estandar": "ANC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Dep. Acum. de Maquinarias",
+    "codigo_estandar": "ANC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Dep. Acum. de Equipos Computacionales",
+    "codigo_estandar": "ANC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Dep. Acum. de Muebles de Oficina",
+    "codigo_estandar": "ANC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Dep. Acum. de Herramientas",
+    "codigo_estandar": "ANC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Oblig. Con banco BCI",
+    "codigo_estandar": "PC.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Tarjeta de Credito BICE",
+    "codigo_estandar": "PC.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Proveedores Nacionales",
+    "codigo_estandar": "PC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Proveedores Extranjeros",
+    "codigo_estandar": "PC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Honorarios por Pagar",
+    "codigo_estandar": "PC.06",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Cheques a Fecha por Pagar",
+    "codigo_estandar": "PC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Costos por facturar",
+    "codigo_estandar": "PC.08",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Facturas por Ingresar",
+    "codigo_estandar": "PC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Otras Cuentas por Pagar del Giro",
+    "codigo_estandar": "PC.08",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Cuentas por Pagar a Empresas Relacionadas a Corto Plazo",
+    "codigo_estandar": "PC.07",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Anticipo Clientes",
+    "codigo_estandar": "PC.08",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Provisiones Vacaciones del personal",
+    "codigo_estandar": "PC.06",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Provisión Gastos por Pagar",
+    "codigo_estandar": "PC.08",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "AFP por Pagar",
+    "codigo_estandar": "PC.06",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Isapres por Pagar",
+    "codigo_estandar": "PC.06",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Mutual por pagar",
+    "codigo_estandar": "PC.06",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "IPS por pagar",
+    "codigo_estandar": "PC.06",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "C.C.A F.. por Pagar",
+    "codigo_estandar": "PC.06",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Prestamos Ccaf por Pagar",
+    "codigo_estandar": "PC.06",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Finiquitos por Pagar",
+    "codigo_estandar": "PC.06",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Seguros Complementario",
+    "codigo_estandar": "PC.06",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Otras Retenciones por Pagar",
+    "codigo_estandar": "PC.06",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "I.V.A. Débito Fiscal",
+    "codigo_estandar": "PC.05",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Impuesto de 2° Categoría por Pagar",
+    "codigo_estandar": "PC.05",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Impuesto Único Al Trabajo por Pagar",
+    "codigo_estandar": "PC.05",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "P.P.M por Pagar",
+    "codigo_estandar": "PC.05",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Otros Impuestos por Pagar",
+    "codigo_estandar": "PC.05",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "impuesto diferido por pagar a corto plazo",
+    "codigo_estandar": "PC.08",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Acreedores Varios",
+    "codigo_estandar": "PC.08",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Obligaciones Con Bancos e Inst. Financ. a Largo Plazo",
+    "codigo_estandar": "PNC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Cuentas por Pagar a Empresas Relacionadas a Largo Plazo",
+    "codigo_estandar": "PNC.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Capital Pagado",
+    "codigo_estandar": "PAT.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Utilidad o Pérdida Neta del Periodo ACUM",
+    "codigo_estandar": "PAT.03",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Fdo Revalorizacion Capital",
+    "codigo_estandar": "PAT.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Ingresos por ventas de suministros",
+    "codigo_estandar": "ER.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Ingresos por servicios de ingenieria",
+    "codigo_estandar": "ER.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Ingresos por servicios de mantencion",
+    "codigo_estandar": "ER.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Ingreso Ventas Proyectos",
+    "codigo_estandar": "ER.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Otros Ingresos",
+    "codigo_estandar": "ER.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Costo de Venta de explotacion Nacional",
+    "codigo_estandar": "ER.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Costo Venta de explotacion internacional",
+    "codigo_estandar": "ER.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Costo de Trabajo en Terreno",
+    "codigo_estandar": "ER.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Costo en Herramientas Menores",
+    "codigo_estandar": "ER.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Costo Servicio Contratistas",
+    "codigo_estandar": "ER.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Gasto de Importaciones",
+    "codigo_estandar": "ER.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Gastos directos de Capacitacion",
+    "codigo_estandar": "ER.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Implementos de Seguridad",
+    "codigo_estandar": "ER.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Honorarios Servicios de Terceros Directos",
+    "codigo_estandar": "ER.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Gasto directo de Combustibles",
+    "codigo_estandar": "ER.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Gastos directos de viajes",
+    "codigo_estandar": "ER.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Gasto directo de Alimentacion Terreno",
+    "codigo_estandar": "ER.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Arriendo Maquinarias directo",
+    "codigo_estandar": "ER.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Arriendo de Camionetas directo",
+    "codigo_estandar": "ER.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Mantencion de Camionetas directo",
+    "codigo_estandar": "ER.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Otros Gastos del personal Directo",
+    "codigo_estandar": "ER.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Otros Gastos Directos",
+    "codigo_estandar": "ER.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Fletes y Embalajes Directos",
+    "codigo_estandar": "ER.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Arriendos Directos",
+    "codigo_estandar": "ER.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Sueldo Base directo",
+    "codigo_estandar": "ER.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Bonos de Produccion directo",
+    "codigo_estandar": "ER.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Horas Extraordinarias directo",
+    "codigo_estandar": "ER.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Gratificacion directo",
+    "codigo_estandar": "ER.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Aporte Patronal directo",
+    "codigo_estandar": "ER.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Finiquitos e Indemnizaciones directo",
+    "codigo_estandar": "ER.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Sueldo Base operacion",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Comisiones por Ventas operacion",
+    "codigo_estandar": "ER.05",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Arriendo Oficinas",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Gastos de Capacitación",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Honorarios Profesionales",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Gastos Legales Abogados",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Gastos Notariales",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Gastos de Aseo y Seguridad",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Articulos de Oficina",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Seguros",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Gastos de Telefono",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Gastos de Seguridad Informatica",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Otros Gastos de Administracion",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Sueldo Base Administracion",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Gratificacion Administracion",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Aporte Patronal Administracion",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Depreciacion del Ejercicio",
+    "codigo_estandar": "ER.07",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Sueldo Base Ventas",
+    "codigo_estandar": "ER.05",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Comisiones por Ventas",
+    "codigo_estandar": "ER.05",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Gratificacion Ventas",
+    "codigo_estandar": "ER.05",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Gastos de publicidad ventas",
+    "codigo_estandar": "ER.05",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Intereses Bancarios",
+    "codigo_estandar": "ER.09",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Comisiones Bancarias",
+    "codigo_estandar": "ER.09",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Intereses Factoring",
+    "codigo_estandar": "ER.09",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Intereses devengados EERR",
+    "codigo_estandar": "ER.09",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "BANCO DE CHILE N°",
+    "codigo_estandar": "AC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "BCI N°",
+    "codigo_estandar": "AC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "BOLETAS EN GARANTIA",
+    "codigo_estandar": "AC.07",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "CLIENTES NACIONALES",
+    "codigo_estandar": "AC.03",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "PROVISION FACTURAS POR EMITIR NACIONALES (CLP)",
+    "codigo_estandar": "AC.03",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "CUENTAS POR COBRAR FACTORING",
+    "codigo_estandar": "AC.03",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "RETENCION DE VENTAS POR RECUPERAR",
+    "codigo_estandar": "AC.07",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "ANTICIPO A PROVEEDORES NACIONALES (CLP)",
+    "codigo_estandar": "AC.07",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "ANTICIPO A PROVEEDORES SEGUN ORDEN DE COMPRA",
+    "codigo_estandar": "AC.07",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "CUENTAS x COBRAR EERR",
+    "codigo_estandar": "AC.06",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "CTAS Y DOCTOS X COBRAR A EERR",
+    "codigo_estandar": "AC.06",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "EXISTENCIAS ANSUL",
+    "codigo_estandar": "AC.05",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "EXISTENCIAS NOTIFIER",
+    "codigo_estandar": "AC.05",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "EXISTENCIAS HERRAMIENTAS",
+    "codigo_estandar": "AC.05",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "OBRA EN PROCESO",
+    "codigo_estandar": "AC.05",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "IVA CREDITO FISCAL",
+    "codigo_estandar": "AC.07",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "IMPUESTOS POR RECUPERAR",
+    "codigo_estandar": "AC.07",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "FACTURAS POR RECIBIR",
+    "codigo_estandar": "PC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "FACTORING POR PAGAR",
+    "codigo_estandar": "PC.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "REMUNERACIONES POR PAGAR",
+    "codigo_estandar": "PC.06",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "HONORARIOS POR PAGAR (CLP)",
+    "codigo_estandar": "PC.06",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Otras Cuentas por Pagar",
+    "codigo_estandar": "PC.08",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "ANTICIPO DE CLIENTES NACIONALES (CLP)",
+    "codigo_estandar": "PC.08",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "RESPONS EN BOLETAS DE GARANTIA",
+    "codigo_estandar": "PC.08",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "ADMINISTRADORAS FONDOS DE PENSIONES (AFP)",
+    "codigo_estandar": "PC.06",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "ISAPRES",
+    "codigo_estandar": "PC.06",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "INST. NORMALIZ. PREVISIONAL (IPS)",
+    "codigo_estandar": "PC.06",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "CAJA DE COMPENSACION (CCAF)",
+    "codigo_estandar": "PC.06",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "MUTUAL DE SEGURIDAD (ACHS)",
+    "codigo_estandar": "PC.06",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "APORTE AFC EMPLEADOR",
+    "codigo_estandar": "PC.06",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "IVA DEBITO FISCAL",
+    "codigo_estandar": "PC.05",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "IMPUESTOS POR PAGAR (F29)",
+    "codigo_estandar": "PC.05",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "RETENCION IMPUESTO UNICO TRABAJADORES",
+    "codigo_estandar": "PC.05",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "CAPITAL",
+    "codigo_estandar": "PAT.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "UTILIDAD (PERDIDA) DEL EJERCICIO",
+    "codigo_estandar": "PAT.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "VENTAS NACIONALES POR SERVICIOS(CLP)",
+    "codigo_estandar": "ER.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "COSTOS EN MANO DE OBRA",
+    "codigo_estandar": "ER.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "COSTOS MATERIALES E INSUMOS",
+    "codigo_estandar": "ER.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "COSTO DE VENTAS DE PRODUCTOS",
+    "codigo_estandar": "ER.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "COSTOS SERVICIOS EXTERNOS",
+    "codigo_estandar": "ER.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "OTROS COSTOS OPERACIONALES",
+    "codigo_estandar": "ER.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "REMUNERACION",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "APORTES PATRONALES",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "INTERES Y GASTOS FACTORING",
+    "codigo_estandar": "ER.09",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "COMISIONES BANCO",
+    "codigo_estandar": "ER.09",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "GASTOS FINANCIEROS",
+    "codigo_estandar": "ER.09",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "IMPUESTO RENTA 1º CATEGORIA",
+    "codigo_estandar": "ER.10",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "CAJA GENERAL",
+    "codigo_estandar": "AC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "BANCOS",
+    "codigo_estandar": "AC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "DEPOSITOS A PLAZO",
+    "codigo_estandar": "AC.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "CLIENTES",
+    "codigo_estandar": "AC.03",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "ANTICIPO TRABAJADORES",
+    "codigo_estandar": "AC.07",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "ANTICIPO PROVEED Y ACREED",
+    "codigo_estandar": "AC.07",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "FONDOS DE INVERSION",
+    "codigo_estandar": "AC.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "PRESTAMO A SERVISUR",
+    "codigo_estandar": "AC.06",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "PAGOS PROV.MENSUALES",
+    "codigo_estandar": "AC.07",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "TERRENOS",
+    "codigo_estandar": "ANC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "CONSTRUCCIONES",
+    "codigo_estandar": "ANC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "PROYECTOS Y ESTUDIOS",
+    "codigo_estandar": "ANC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Obra en Curso",
+    "codigo_estandar": "ANC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "ACTIVO HABITACIONAL",
+    "codigo_estandar": "ANC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "MUEBLES Y UTILES",
+    "codigo_estandar": "ANC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "DEP. ACC. CONSTRUCCIONES",
+    "codigo_estandar": "ANC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "DEP. ACC. MAQ",
+    "codigo_estandar": "ANC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "DEP. ACC. MUEBLES Y UTILES",
+    "codigo_estandar": "ANC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "DEP. ACC. PROYEC Y ESTUD",
+    "codigo_estandar": "ANC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "DEP. ACC. OBRAS EN CURSO",
+    "codigo_estandar": "ANC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "CTA CTE. EMP. RELACIONADAS",
+    "codigo_estandar": "AC.06",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "DIVIDENDOS",
+    "codigo_estandar": "AC.07",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "PRESTAMO BANCARIO",
+    "codigo_estandar": "PC.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "PROVEEDORES",
+    "codigo_estandar": "PC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "VARIOS ACREEDORES",
+    "codigo_estandar": "PC.08",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "IMPUESTOS POR PAGAR",
+    "codigo_estandar": "PC.05",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "PROVISION IMPUESTO RENTA",
+    "codigo_estandar": "PC.05",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "SUELDOS POR PAGAR",
+    "codigo_estandar": "PC.06",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "LEYES SOC. POR PAGAR",
+    "codigo_estandar": "PC.06",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "PRESTAMO BANCO",
+    "codigo_estandar": "PNC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "UTILIDADES ACUMULADAS",
+    "codigo_estandar": "PAT.03",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "SUELDOS Y SALARIOS",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "GRATIFICACIONES",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "APORTE MUTUALIDAD",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "ASESORIAS Y HONORARIOS",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "INTERESES PAGADOS",
+    "codigo_estandar": "ER.09",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Depreciaciones",
+    "codigo_estandar": "ER.07",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "IMPUESTO RENTA",
+    "codigo_estandar": "ER.10",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "OTROS DEUDORES",
+    "codigo_estandar": "AC.07",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "MAQUINAS PARA LA VENTA",
+    "codigo_estandar": "AC.05",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "MATERIALES, REPTOS E INSUMOS",
+    "codigo_estandar": "AC.05",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "IVA C.F.",
+    "codigo_estandar": "AC.07",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "P.P.M.",
+    "codigo_estandar": "AC.07",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "MAQUINARIAS Y EQUIPOS",
+    "codigo_estandar": "ANC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "OTROS ACTIVOS",
+    "codigo_estandar": "ANC.06",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "IMPOSICIONES POR PAGAR",
+    "codigo_estandar": "PC.06",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "IMPUESTO UNICO TRABAJADOR",
+    "codigo_estandar": "PC.05",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "IMPUESTO 2º CATEGORIA",
+    "codigo_estandar": "PC.05",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "IVA POSTERGADO",
+    "codigo_estandar": "PC.05",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "REVALORIZACION CAPITAL PROPIO",
+    "codigo_estandar": "PAT.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "RESULTADOS ACUMULADOS",
+    "codigo_estandar": "PAT.03",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "VENTAS",
+    "codigo_estandar": "ER.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "COSTO DE VENTA",
+    "codigo_estandar": "ER.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "SERVICIOS INFORMATICOS",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "ARRIENDOS PLANTAS",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "GASTOS GENERALES",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "DEPRECIACION",
+    "codigo_estandar": "ER.07",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "HONORARIOS",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "GASTOS BANCARIOS",
+    "codigo_estandar": "ER.09",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "TELEFONIA FIJA",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "TELEFONIA CELULAR",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Remuneraciones",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "SERVICIOS DE CONTRATISTAS",
+    "codigo_estandar": "ER.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "SERVICIOS DE MAESTRANZA",
+    "codigo_estandar": "ER.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "MANTENC Y REPARAC MAQ Y EQ",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "ARRIENDO DE VEHICULOS",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "IMPUESTO A LA RENTA",
+    "codigo_estandar": "ER.10",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Banco Crédito e Inversiones",
+    "codigo_estandar": "AC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Banco Itaú",
+    "codigo_estandar": "AC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Banco Internacional",
+    "codigo_estandar": "AC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Banco BBVA",
+    "codigo_estandar": "AC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Vale Vista Bco",
+    "codigo_estandar": "AC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Fondo Mutuo Banco Santander",
+    "codigo_estandar": "AC.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Cheques Cartera",
+    "codigo_estandar": "AC.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Clientes Ventas a Crédito",
+    "codigo_estandar": "AC.03",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Clientes Factoring",
+    "codigo_estandar": "AC.03",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Clientes por Obra",
+    "codigo_estandar": "AC.03",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Clientes Retención Factoring Absorción Auca",
+    "codigo_estandar": "AC.03",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Clientes Dicom",
+    "codigo_estandar": "AC.03",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Clientes en Convenio",
+    "codigo_estandar": "AC.03",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Clientes Incobrables",
+    "codigo_estandar": "AC.03",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Garantía por Arriendo",
+    "codigo_estandar": "AC.07",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Préstamos del Personal",
+    "codigo_estandar": "AC.07",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Anticipo de Sueldo",
+    "codigo_estandar": "AC.07",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Anticipo Remuneraciones",
+    "codigo_estandar": "AC.07",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Otros Descuentos Personal",
+    "codigo_estandar": "AC.07",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Deudores Vtas a L/P",
+    "codigo_estandar": "ANC.05",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Préstamo a 3ros largo plazo",
+    "codigo_estandar": "ANC.05",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Préstamo 3ros a L/P",
+    "codigo_estandar": "ANC.05",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Deuda Particular Socio",
+    "codigo_estandar": "AC.06",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Cuenta Particular Socio",
+    "codigo_estandar": "AC.06",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Prestamo Empresa Relacionada",
+    "codigo_estandar": "AC.06",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Inventario de Productos",
+    "codigo_estandar": "AC.05",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Inventario de Bod. Taller (Auca)",
+    "codigo_estandar": "AC.05",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Inventario de Mercadería (Primax)",
+    "codigo_estandar": "AC.05",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Productos no Devengados",
+    "codigo_estandar": "AC.05",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Productos en Proceso (Vibrados)",
+    "codigo_estandar": "AC.05",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Productos Terminados (Vibrados)",
+    "codigo_estandar": "AC.05",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Gastos no Devengados",
+    "codigo_estandar": "AC.07",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Impuesto Específico",
+    "codigo_estandar": "AC.07",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Impuesto Renta por Recuperar",
+    "codigo_estandar": "AC.07",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Pagaré Mora Mensual",
+    "codigo_estandar": "AC.07",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Intereses por Leasing",
+    "codigo_estandar": "ER.09",
+    "fuente": "balances_reales_validado+conflicto_resuelto"
+  },
+  {
+    "cuenta_original": "Impuesto Diferidos Leasing",
+    "codigo_estandar": "ANC.06",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Crédito Banco Santander (largo plazo)",
+    "codigo_estandar": "PNC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Crédito Banco BCI",
+    "codigo_estandar": "PC.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Crédito COVID2019 Banco BCI",
+    "codigo_estandar": "PC.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Crédito COVID2019 Banco Santander",
+    "codigo_estandar": "PC.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Crédito Reactiva Banco Bice",
+    "codigo_estandar": "PC.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Línea de factoring BCI",
+    "codigo_estandar": "PC.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Línea de factoring Santander",
+    "codigo_estandar": "PC.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Línea de factoring Tanner",
+    "codigo_estandar": "PC.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Línea de factoring Eurocapital",
+    "codigo_estandar": "PC.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Línea de factoring Security",
+    "codigo_estandar": "PC.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Línea de factoring Punto Capital",
+    "codigo_estandar": "PC.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Línea de factoring Orsan",
+    "codigo_estandar": "PC.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Línea Confirming Banco Itaú",
+    "codigo_estandar": "PC.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Línea Confirming Banco Estado",
+    "codigo_estandar": "PC.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Línea Confirming Banco Chile",
+    "codigo_estandar": "PC.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Línea Confirming Banco Scotiabank",
+    "codigo_estandar": "PC.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Línea Confirming Inconfin S.A.",
+    "codigo_estandar": "PC.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Crédito Hipotecario",
+    "codigo_estandar": "PNC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Obligaciones Leasing",
+    "codigo_estandar": "PC.03",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Obligaciones con Inst. Financieras LP",
+    "codigo_estandar": "PNC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Responsabilidad Boletas de Garantías",
+    "codigo_estandar": "PC.08",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Línea Confirming Otras Sociedades",
+    "codigo_estandar": "PC.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Crédito Banco Bice CI D0449020222",
+    "codigo_estandar": "PC.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Crédito BCI N° 902445",
+    "codigo_estandar": "PC.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Obligaciones Leasing LP",
+    "codigo_estandar": "PNC.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Obligaciones Leasing CP",
+    "codigo_estandar": "PC.03",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Depreciación Activos en Leasing",
+    "codigo_estandar": "ANC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Dep. Acumulada Activos en Leasing",
+    "codigo_estandar": "ANC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Intangible Goodwill No Asignado",
+    "codigo_estandar": "ANC.03",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Promesa Edificio Cordillera (Deja) UF",
+    "codigo_estandar": "ANC.06",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Concesiones Mineras",
+    "codigo_estandar": "ANC.03",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Marca",
+    "codigo_estandar": "ANC.03",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Activo Leasing",
+    "codigo_estandar": "ANC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Estacionamientos Mirador del Country",
+    "codigo_estandar": "ANC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Dpto Mirador del Country",
+    "codigo_estandar": "ANC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Planta Hormigón Concepcíon",
+    "codigo_estandar": "ANC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Planta Hormigón Curicó",
+    "codigo_estandar": "ANC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Planta Hormigón Línares",
+    "codigo_estandar": "ANC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Planta Hormigón Los Maillines",
+    "codigo_estandar": "ANC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Planta Hormigón Cauquenes",
+    "codigo_estandar": "ANC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Galp. e Instalaciones Proyecto los Cóndor",
+    "codigo_estandar": "ANC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Créditos EERR",
+    "codigo_estandar": "PC.07",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Ctas y Doctos x Pagar a EERR",
+    "codigo_estandar": "PC.07",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Responsab en Boletas de Garantía",
+    "codigo_estandar": "PC.08",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Convenios por Pagar",
+    "codigo_estandar": "PC.08",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Retencion Judicial",
+    "codigo_estandar": "PC.06",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Descuento Fondo Solidario",
+    "codigo_estandar": "PC.06",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Línea de Crédito Banco Internacional",
+    "codigo_estandar": "PC.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Otros Descuentos Convenidos",
+    "codigo_estandar": "PC.06",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Retención Casino",
+    "codigo_estandar": "PC.06",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Retencion Honorarios",
+    "codigo_estandar": "PC.05",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "IVA Retención a Terceros",
+    "codigo_estandar": "PC.05",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Impuesto Retenc. Seg. Categoría",
+    "codigo_estandar": "PC.05",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Impuesto Único Trabajadores",
+    "codigo_estandar": "PC.05",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Im Pto Renta por Pagar",
+    "codigo_estandar": "PC.05",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Impuesto Único a Trabajadores",
+    "codigo_estandar": "PC.05",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Provisión Ingresos Arrendados",
+    "codigo_estandar": "PC.08",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Provisión Vacaciones",
+    "codigo_estandar": "PC.06",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Provisiones Varias",
+    "codigo_estandar": "PC.08",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Provisión Documentos por Recibir",
+    "codigo_estandar": "PC.08",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Pagos por Impuestos Diferidos",
+    "codigo_estandar": "PNC.05",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Obligaciones con Inst. Financ. a Largo Plazo",
+    "codigo_estandar": "PNC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Otras Reservas",
+    "codigo_estandar": "PAT.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Utilidad a Distribuir",
+    "codigo_estandar": "PAT.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Revalorización Capital Propio",
+    "codigo_estandar": "PAT.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Capital Social",
+    "codigo_estandar": "PAT.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Utilidad del Ejercicio",
+    "codigo_estandar": "PAT.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Pérdidas del Ejercicio",
+    "codigo_estandar": "PAT.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Cultivos en Formación",
+    "codigo_estandar": "ANC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Cultivos en Nogales",
+    "codigo_estandar": "ANC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Mobiliario de Oficina",
+    "codigo_estandar": "ANC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Tractores y Otros",
+    "codigo_estandar": "ANC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Vehículos de Transporte",
+    "codigo_estandar": "ANC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Maquinarias de Transporte",
+    "codigo_estandar": "ANC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Depreciación Acumulada A. Fijo",
+    "codigo_estandar": "ANC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Impuesto al Valor Agregado",
+    "codigo_estandar": "PC.05",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Intereses Créditos Bancarios LP",
+    "codigo_estandar": "ER.09",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Proveedores Extranjeros US$",
+    "codigo_estandar": "PC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Anticipo de clientes",
+    "codigo_estandar": "PC.08",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Préstamo Banco LP",
+    "codigo_estandar": "PNC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Préstamo Agrícola Ruiz",
+    "codigo_estandar": "PNC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Deuda Largo Plazo",
+    "codigo_estandar": "PNC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Gastos de Administración",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Costo Venta",
+    "codigo_estandar": "ER.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Arriendo Propiedades",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Corrección Monetaria",
+    "codigo_estandar": "ER.14",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Diferencia de Cambio",
+    "codigo_estandar": "ER.09",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Contribuciones Bienes Raíces",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Costo de Venta Activos Fijos",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Ingresos por Expropiación",
+    "codigo_estandar": "ER.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Ingresos por Arriendos",
+    "codigo_estandar": "ER.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Otros Ingresos de la Explotación",
+    "codigo_estandar": "ER.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Insumos de Aseo y Ornamentación",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Serv. de Reparación por Terceros",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Gastos de Prevención y Seg Soc",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Gastos de RRHH",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Gastos RRPP y Repres Grcial",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Otros Imptos No Recuperables",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Patentes Comerciales",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Software Licencias",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Serv de Mantenc Afijo e Inst",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Intereses, Comisiones y Reajustes",
+    "codigo_estandar": "ER.09",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "Ingresos Financieros",
+    "codigo_estandar": "ER.12",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "FONDOS A RENDIR",
+    "codigo_estandar": "AC.07",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "FONDO FUC",
+    "codigo_estandar": "AC.07",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "INVERSIONES FONDOS MUTUOS",
+    "codigo_estandar": "AC.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "FACTURAS POR COBRAR",
+    "codigo_estandar": "AC.03",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "CUENTAS POR COBRAR",
+    "codigo_estandar": "AC.03",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "NOMINAS BANCARIAS (SUELDOS)",
+    "codigo_estandar": "PC.06",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "DESCUENTOS PROVEEDORES",
+    "codigo_estandar": "AC.07",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "EE.RR. SOC. SUPERMERCADOS CIGAT LIMITADA",
+    "codigo_estandar": "AC.06",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "EE.RR. SOC. MEGAMERCADOS MALL BAQUEDANO LI",
+    "codigo_estandar": "AC.06",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "EE.RR. SOC. IMPORTADORA Y EXPORTADORA AGP",
+    "codigo_estandar": "AC.06",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "EE.RR. ADMINISTRADORA E INVERSIONES CIGAT",
+    "codigo_estandar": "AC.06",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "EE.RR. GUSTAVO JUAN GONZALEZ CIGAT",
+    "codigo_estandar": "AC.06",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "MAQUINARIA",
+    "codigo_estandar": "ANC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "INSTALACIONES",
+    "codigo_estandar": "ANC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "EDIFICIOS",
+    "codigo_estandar": "ANC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "DEPRECIACION ACUMULADA MUEBLES Y UTILES",
+    "codigo_estandar": "ANC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "DEPRECIACION ACUMULADA MUEBLES",
+    "codigo_estandar": "ANC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "CREDITO BANCO CORPBANCA",
+    "codigo_estandar": "PC.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "DOC POR PAGAR CORPBANCA",
+    "codigo_estandar": "PC.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "SALDO CLIENTES",
+    "codigo_estandar": "AC.03",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "LINEA DE CRÉDITO BANCO INTERNACIONAL",
+    "codigo_estandar": "PC.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "INSTRUMENTO EN AP PASIVO",
+    "codigo_estandar": "PNC.03",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "OBLIGACIONES CON INST FINANCIERAS CP",
+    "codigo_estandar": "PC.02",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "PROVISION SS VARIAS",
+    "codigo_estandar": "PC.08",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "PROVISION DOCUMENTOS POR RECIBIR",
+    "codigo_estandar": "PC.08",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "IVA RETENIDO A TERCEROS",
+    "codigo_estandar": "PC.05",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "RECODNS POR DERIVADO FINANCIERO SWAP",
+    "codigo_estandar": "PNC.05",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "INGRESOS POR VENTAS",
+    "codigo_estandar": "ER.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "RESULTADO VENTA MONEDA EXTRANJERA",
+    "codigo_estandar": "ER.09",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "OTROS INGRESOS NO OPERACIONALE",
+    "codigo_estandar": "ER.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "INTERESES POR DIF. DE CAMBIO",
+    "codigo_estandar": "ER.09",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "INGRESOS POR REVALUACIÓN PROPIEDADES DE",
+    "codigo_estandar": "ER.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "GASTOS OPERACIONALES SECCIONES",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "GASTOS NOTARIALES Y LEGALES",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "GASTOS SOFTWARE Y CORREOS ELECTRONICOS",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "INCENTIVOS",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "OTROS NO IMPONIBLES",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "ASESORÍAS Y HONORARIOS EXTERNOS Y OPERACIÓN",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "OTROS GASTOS VARIOS DEL PERSONAL",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "VIATICOS",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "APORTE SEGURO INVALIDEZ",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "FINIQUITOS",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "SEGURO DESAHUCIO EMPLEADOS",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "ARRIENDO DE BIENES RAÍCES",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "ARRIENDOS VARIOS",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "MANTENCIÓN INSTALACIONES",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "MANTENCION MAQ Y EQUIPOS",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "PATENTES Y DERECHOS MUNICIPALE",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "MULTAS",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "CONTRIBUCIONES BIENES RAICES NO ARRENDAD",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "DEPRECIACÍON ACTIVOS EN LEASING",
+    "codigo_estandar": "ER.07",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "OTROS CASTIGOS Y AJUSTES",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "ENERGÍA ELÉCTRICA",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "AGUA POTABLE",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "GAS Y COMBUSTIBLE",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "GASTOS COMUNES INMUEBLES",
+    "codigo_estandar": "ER.04",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "COMISIÓN BANCARIA",
+    "codigo_estandar": "ER.09",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "INTERESES PRÉSTAMOS BANCARIOS",
+    "codigo_estandar": "ER.09",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "INTERESES Y GT. POR MORA",
+    "codigo_estandar": "ER.09",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "cta cte clientes",
+    "codigo_estandar": "AC.03",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "cta de clientes del giro",
+    "codigo_estandar": "AC.03",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "descuentos sobre clientes",
+    "codigo_estandar": "AC.03",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "provisiones incobrables",
+    "codigo_estandar": "AC.03",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "cheques",
+    "codigo_estandar": "AC.04",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "CxC leasing terceros CP",
+    "codigo_estandar": "AC.04",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "doc en cartera",
+    "codigo_estandar": "AC.04",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "documetos por depositar y protestados",
+    "codigo_estandar": "AC.04",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "documentos por depositar y protestados",
+    "codigo_estandar": "AC.04",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "facturas y letras por cobrar",
+    "codigo_estandar": "AC.04",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "letras en cartera",
+    "codigo_estandar": "AC.04",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "visas",
+    "codigo_estandar": "AC.01",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "moneda extrangera",
+    "codigo_estandar": "AC.01",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "moneda extranjera",
+    "codigo_estandar": "AC.01",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "acciones suscritas",
+    "codigo_estandar": "AC.02",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "int financieros",
+    "codigo_estandar": "AC.02",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "intereses financieros acumulados",
+    "codigo_estandar": "AC.02",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "inversiones CP del BC",
+    "codigo_estandar": "AC.02",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "pagares del BC",
+    "codigo_estandar": "AC.02",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "pagarés del Banco Central",
+    "codigo_estandar": "AC.02",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "act biologicos(CP)",
+    "codigo_estandar": "AC.05",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "activos biologicos corrientes",
+    "codigo_estandar": "AC.05",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "bnes para la empresa",
+    "codigo_estandar": "AC.05",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "bienes para la empresa",
+    "codigo_estandar": "AC.05",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "impt en transito",
+    "codigo_estandar": "AC.05",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "importaciones en transito",
+    "codigo_estandar": "AC.05",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "obras por facturar",
+    "codigo_estandar": "AC.05",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "provision obsolecencia",
+    "codigo_estandar": "AC.05",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "provisión obsolescencia",
+    "codigo_estandar": "AC.05",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "proyectos en ejecucion (realizable)",
+    "codigo_estandar": "AC.05",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "proyectos en ejecución realizables",
+    "codigo_estandar": "AC.05",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "imptos por recuperar",
+    "codigo_estandar": "AC.07",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "intereses por percibir",
+    "codigo_estandar": "AC.07",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "impto renta por recuperar",
+    "codigo_estandar": "AC.07",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "asignacion familiar",
+    "codigo_estandar": "AC.07",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "asignación familiar",
+    "codigo_estandar": "AC.07",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "targetas de creditos y otros",
+    "codigo_estandar": "AC.07",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "tarjetas de crédito y otros",
+    "codigo_estandar": "AC.07",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "responzabilidades factoring",
+    "codigo_estandar": "AC.07",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "responsabilidades factoring",
+    "codigo_estandar": "AC.07",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "seguros pagados por anticipado",
+    "codigo_estandar": "AC.07",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "derecho diferido de aduana",
+    "codigo_estandar": "AC.07",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "cartas de credito importacion",
+    "codigo_estandar": "AC.07",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "cartas de crédito importación",
+    "codigo_estandar": "AC.07",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "letras en garantia",
+    "codigo_estandar": "AC.07",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "letras en garantía",
+    "codigo_estandar": "AC.07",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "cta cte mercantil",
+    "codigo_estandar": "AC.07",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "Deudores trabajadores",
+    "codigo_estandar": "AC.07",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "impuesto diferido",
+    "codigo_estandar": "ANC.06",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "imp diferido",
+    "codigo_estandar": "ANC.06",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "impto diferido",
+    "codigo_estandar": "ANC.06",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "impto diferido LP",
+    "codigo_estandar": "ANC.06",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "gastos diferidos",
+    "codigo_estandar": "ANC.06",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "cred AF",
+    "codigo_estandar": "ANC.06",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "credito activo fijo",
+    "codigo_estandar": "ANC.06",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "intereses diferidos",
+    "codigo_estandar": "ANC.06",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "int pagado por anticipado",
+    "codigo_estandar": "ANC.06",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "intereses pagados por anticipado",
+    "codigo_estandar": "ANC.06",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "ingresos percibido por adelantado LP",
+    "codigo_estandar": "ANC.06",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "derechos de aduanas diferidos",
+    "codigo_estandar": "ANC.06",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "doc en garantia",
+    "codigo_estandar": "ANC.06",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "documentos en garantia LP",
+    "codigo_estandar": "ANC.06",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "estudio y proyectos",
+    "codigo_estandar": "ANC.06",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "estudios y proyectos",
+    "codigo_estandar": "ANC.06",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "garantia arriendo entregada",
+    "codigo_estandar": "ANC.06",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "gastos pagados por anticipado LP",
+    "codigo_estandar": "ANC.06",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "otras garantias",
+    "codigo_estandar": "ANC.06",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "mayor valor por retasacion",
+    "codigo_estandar": "ANC.01",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "mayor valor por retasación",
+    "codigo_estandar": "ANC.01",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "derechos de agua muebles e utiles",
+    "codigo_estandar": "ANC.01",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "derechos de agua",
+    "codigo_estandar": "ANC.01",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "activos en leasing",
+    "codigo_estandar": "ANC.01",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "bienes en leasing",
+    "codigo_estandar": "ANC.01",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "I+D",
+    "codigo_estandar": "ANC.03",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "investigacion y desarrollo",
+    "codigo_estandar": "ANC.03",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "> < valor de inversiones",
+    "codigo_estandar": "ANC.03",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "mayor menor valor de inversiones",
+    "codigo_estandar": "ANC.03",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "derechos dellave",
+    "codigo_estandar": "ANC.03",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "derecho de llave",
+    "codigo_estandar": "ANC.03",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "gastos de orbganizacion y puesta en marcha",
+    "codigo_estandar": "ANC.03",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "gastos de organizacion y puesta en marcha",
+    "codigo_estandar": "ANC.03",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "inversion diseños de negocios",
+    "codigo_estandar": "ANC.03",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "aporte en otras sociedades",
+    "codigo_estandar": "ANC.04",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "aportes en sociedades",
+    "codigo_estandar": "ANC.04",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "inv en subsidiarias",
+    "codigo_estandar": "ANC.04",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "inversión en subsidiarias",
+    "codigo_estandar": "ANC.04",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "participacion devengada",
+    "codigo_estandar": "ANC.04",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "participación devengada",
+    "codigo_estandar": "ANC.04",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "ctas por cobrar leasing 3° LP",
+    "codigo_estandar": "ANC.05",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "Dctos por cobrar emp realacionadas",
+    "codigo_estandar": "ANC.05",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "documentos por cobrar empresas relacionadas",
+    "codigo_estandar": "ANC.05",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "deudores de LP",
+    "codigo_estandar": "ANC.05",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "cta cte socio",
+    "codigo_estandar": "AC.06S",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "cta particular socio",
+    "codigo_estandar": "AC.06S",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "cta. cte. socios",
+    "codigo_estandar": "AC.06S",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "cuenta corriente socios",
+    "codigo_estandar": "AC.06S",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "retiros socios",
+    "codigo_estandar": "AC.06S",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "dividendos pagados por anticipado",
+    "codigo_estandar": "AC.06S",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "dividendos provisorios",
+    "codigo_estandar": "AC.06S",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "distribuciones a socios",
+    "codigo_estandar": "AC.06S",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "retiro utilidades",
+    "codigo_estandar": "AC.06S",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "dividendos distribuidos",
+    "codigo_estandar": "AC.06S",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "socios cuenta corriente",
+    "codigo_estandar": "AC.06S",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "anticipo dividendos",
+    "codigo_estandar": "AC.06S",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "cuenta particular",
+    "codigo_estandar": "AC.06S",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "retiros del ejercicio",
+    "codigo_estandar": "AC.06S",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "distribuciones",
+    "codigo_estandar": "AC.06S",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "accionistas cuenta corriente",
+    "codigo_estandar": "AC.06S",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "retenciones sobre facturas",
+    "codigo_estandar": "PC.01",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "letras facturas del giro",
+    "codigo_estandar": "PC.01",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "Cred hip CP",
+    "codigo_estandar": "PC.02",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "crédito hipotecario cuota corriente",
+    "codigo_estandar": "PC.02",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "creditos a importacion",
+    "codigo_estandar": "PC.02",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "créditos a importación",
+    "codigo_estandar": "PC.02",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "mutuos hipotecarios CP",
+    "codigo_estandar": "PC.02",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "obligaciones x leasing",
+    "codigo_estandar": "PC.03",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "acreedores por leasing CP",
+    "codigo_estandar": "PC.03",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "credito impto 2° categoria",
+    "codigo_estandar": "PC.05",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "crédito impuesto 2° categoría",
+    "codigo_estandar": "PC.05",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "obligaciones tributarias",
+    "codigo_estandar": "PC.05",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "PPM por pagar",
+    "codigo_estandar": "PC.05",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "impto unico trabajadores",
+    "codigo_estandar": "PC.05",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "tesoreria gral",
+    "codigo_estandar": "PC.05",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "tesorería general",
+    "codigo_estandar": "PC.05",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "impt a la renta por pagar",
+    "codigo_estandar": "PC.05",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "impto a la renta por pagar",
+    "codigo_estandar": "PC.05",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "impto por pagar",
+    "codigo_estandar": "PC.05",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "leyes sociales",
+    "codigo_estandar": "PC.06",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "inst prevision",
+    "codigo_estandar": "PC.06",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "instituciones de prevision",
+    "codigo_estandar": "PC.06",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "instituciones de previsión",
+    "codigo_estandar": "PC.06",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "retenciones(AFP por pagar, AFC x pagar, isapre,INP)",
+    "codigo_estandar": "PC.06",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "retenciones previsionales",
+    "codigo_estandar": "PC.06",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "provisiones y retenciones laborales",
+    "codigo_estandar": "PC.06",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "ctas ctes entidades relacionadas CP",
+    "codigo_estandar": "PC.07",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "cta cte socios (en pasivo)",
+    "codigo_estandar": "PC.07",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "cta cte socios pasivo",
+    "codigo_estandar": "PC.07",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "ing percibidos por adelantado",
+    "codigo_estandar": "PC.08",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "ingresos percibidos por adelantado",
+    "codigo_estandar": "PC.08",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "clientes negativos",
+    "codigo_estandar": "PC.08",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "prestamos por pagar a terceros (subsidios)",
+    "codigo_estandar": "PC.08",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "préstamos por pagar a terceros",
+    "codigo_estandar": "PC.08",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "provision gastos",
+    "codigo_estandar": "PC.08",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "provisión gastos",
+    "codigo_estandar": "PC.08",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "intereses percibidos no devengados",
+    "codigo_estandar": "PC.08",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "otras obligaciones de CP",
+    "codigo_estandar": "PC.08",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "Cta traspaso",
+    "codigo_estandar": "PC.08",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "propiedad en garantia",
+    "codigo_estandar": "PC.08",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "capital por enterar en pasivo",
+    "codigo_estandar": "PC.08",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "mutuos hipotecarios",
+    "codigo_estandar": "PNC.01",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "doc por pagar LP",
+    "codigo_estandar": "PNC.01",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "documentos por pagar LP",
+    "codigo_estandar": "PNC.01",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "acreedores por leasing LP",
+    "codigo_estandar": "PNC.02",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "doc x pagar empresas relacionadas",
+    "codigo_estandar": "PNC.04",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "documentos por pagar empresas relacionadas",
+    "codigo_estandar": "PNC.04",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "indemnizacion años de servicios",
+    "codigo_estandar": "PNC.05",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "indemnización años de servicios",
+    "codigo_estandar": "PNC.05",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "indemnizaciones por años",
+    "codigo_estandar": "PNC.05",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "acreedores varios LP",
+    "codigo_estandar": "PNC.05",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "garantias de arriendos recibidas",
+    "codigo_estandar": "PNC.05",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "garantías de arriendos recibidas",
+    "codigo_estandar": "PNC.05",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "impuestos diferidos LP",
+    "codigo_estandar": "PNC.05",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "participacion devengada (BONO)",
+    "codigo_estandar": "PNC.05",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "proveedores de LP",
+    "codigo_estandar": "PNC.05",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "aportes socios",
+    "codigo_estandar": "PAT.01",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "(-) capital por enterar",
+    "codigo_estandar": "PAT.01",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "aportes futuras capitalizaciones",
+    "codigo_estandar": "PAT.01",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "Interes minoritario",
+    "codigo_estandar": "PAT.02",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "interés minoritario",
+    "codigo_estandar": "PAT.02",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "participacion controlada",
+    "codigo_estandar": "PAT.02",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "reservas furturos dividendos",
+    "codigo_estandar": "PAT.02",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "reservas futuros dividendos",
+    "codigo_estandar": "PAT.02",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "resultados diferidos",
+    "codigo_estandar": "PAT.02",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "valor revalorizacion tecnica del activo fijo",
+    "codigo_estandar": "PAT.02",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "sobreprecio acciones propias",
+    "codigo_estandar": "PAT.02",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "reservas de capitalizacion",
+    "codigo_estandar": "PAT.02",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "fod util tributarios",
+    "codigo_estandar": "PAT.02",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "fondo utilidades tributarios",
+    "codigo_estandar": "PAT.02",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "ajustes IFRS",
+    "codigo_estandar": "PAT.02",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "fluctuaciones valores",
+    "codigo_estandar": "PAT.02",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "reserva de revalorizacion",
+    "codigo_estandar": "PAT.02",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "reserva de revalorización",
+    "codigo_estandar": "PAT.02",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "(-) perdidas acumuladas",
+    "codigo_estandar": "PAT.03",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "(-) pérdidas acumuladas",
+    "codigo_estandar": "PAT.03",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "ajustes ejercicios anteriores",
+    "codigo_estandar": "PAT.03",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "utilidades historicas",
+    "codigo_estandar": "PAT.03",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "utilidades históricas",
+    "codigo_estandar": "PAT.03",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "utilidades por retirar",
+    "codigo_estandar": "PAT.03",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "resultado no acumulado",
+    "codigo_estandar": "PAT.04",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "deficit en periodo de desarrollo",
+    "codigo_estandar": "PAT.03",
+    "fuente": "vaciador_crediticio"
+  },
+  {
+    "cuenta_original": "Activos biológicos",
+    "codigo_estandar": "AC.09",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Activos biológicos corrientes",
+    "codigo_estandar": "AC.09",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Activos Biológicos CP",
+    "codigo_estandar": "AC.09",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Activo Biológico Corriente",
+    "codigo_estandar": "AC.09",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Plantas y Animales CP",
+    "codigo_estandar": "AC.09",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Activos biológicos de corto plazo",
+    "codigo_estandar": "AC.09",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Activos biológicos no corrientes",
+    "codigo_estandar": "ANC.07",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Activos biológicos LP",
+    "codigo_estandar": "ANC.07",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Plantaciones",
+    "codigo_estandar": "ANC.07",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Viñedos",
+    "codigo_estandar": "ANC.07",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Bosques",
+    "codigo_estandar": "ANC.07",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Ganado reproductor",
+    "codigo_estandar": "ANC.07",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Act biologicos(LP)",
+    "codigo_estandar": "ANC.07",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Plusvalía",
+    "codigo_estandar": "ANC.08",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Plusvalia",
+    "codigo_estandar": "ANC.08",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Goodwill adquirido",
+    "codigo_estandar": "ANC.08",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Mayor valor consolidación",
+    "codigo_estandar": "ANC.08",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Goodwill consolidado",
+    "codigo_estandar": "ANC.08",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Participaciones no controladoras",
+    "codigo_estandar": "PAT.05",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Participaciones minoritarias",
+    "codigo_estandar": "PAT.05",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Participación no controladora",
+    "codigo_estandar": "PAT.05",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Intereses minoritarios",
+    "codigo_estandar": "PAT.05",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Patrimonio atribuible a no controladoras",
+    "codigo_estandar": "PAT.05",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Ingresos por intereses",
+    "codigo_estandar": "ER.12",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Intereses ganados",
+    "codigo_estandar": "ER.12",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Intereses percibidos",
+    "codigo_estandar": "ER.12",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Rentas financieras",
+    "codigo_estandar": "ER.12",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Intereses y reajustes ganados",
+    "codigo_estandar": "ER.12",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Ingresos financieros netos",
+    "codigo_estandar": "ER.12",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "C.M. Activos",
+    "codigo_estandar": "ER.12",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Otras ganancias (pérdidas)",
+    "codigo_estandar": "ER.13",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Otras ganancias perdidas",
+    "codigo_estandar": "ER.13",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Otras ganancias y perdidas",
+    "codigo_estandar": "ER.13",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Utilidad venta activo fijo",
+    "codigo_estandar": "ER.13",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Pérdida venta activo fijo",
+    "codigo_estandar": "ER.13",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Ganancia venta activos",
+    "codigo_estandar": "ER.13",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Resultado venta activos fijos",
+    "codigo_estandar": "ER.13",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Resultado no operacional",
+    "codigo_estandar": "ER.13",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Otros ingresos fuera de la explotación",
+    "codigo_estandar": "ER.13",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Otros egresos fuera de la explotación",
+    "codigo_estandar": "ER.13",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Otros ingresos no operacionales",
+    "codigo_estandar": "ER.13",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Otros gastos no operacionales",
+    "codigo_estandar": "ER.13",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Multas e intereses",
+    "codigo_estandar": "ER.13",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Gastos fuera de explotación",
+    "codigo_estandar": "ER.13",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Ingresos fuera de explotación",
+    "codigo_estandar": "ER.13",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Otros gastos",
+    "codigo_estandar": "ER.13",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Deudores incobrables",
+    "codigo_estandar": "ER.13",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Castigo deudores",
+    "codigo_estandar": "ER.13",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Pérdida deterioro",
+    "codigo_estandar": "ER.13",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Resultados por unidades de reajuste",
+    "codigo_estandar": "ER.14",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Resultados unidades de reajuste",
+    "codigo_estandar": "ER.14",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Correccion monetaria",
+    "codigo_estandar": "ER.14",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Reajuste UF",
+    "codigo_estandar": "ER.14",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Reajustes",
+    "codigo_estandar": "ER.14",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Resultado por reajuste",
+    "codigo_estandar": "ER.14",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Corrección monetaria activo fijo",
+    "codigo_estandar": "ER.14",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "CM Activos",
+    "codigo_estandar": "ER.14",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Correcciones monetarias",
+    "codigo_estandar": "ER.14",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Otras correcciones monetarias",
+    "codigo_estandar": "ER.14",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Diferencias de cambio",
+    "codigo_estandar": "ER.15",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Diferencias de cambio ganancia",
+    "codigo_estandar": "ER.15",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Diferencias de cambio pérdida",
+    "codigo_estandar": "ER.15",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Resultado diferencia de cambio",
+    "codigo_estandar": "ER.15",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Pérdida diferencia de cambio",
+    "codigo_estandar": "ER.15",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Ganancia diferencia de cambio",
+    "codigo_estandar": "ER.15",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Diferencia de cambio negativa",
+    "codigo_estandar": "ER.15",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Diferencia de cambio positiva",
+    "codigo_estandar": "ER.15",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Diferencia cambio MN",
+    "codigo_estandar": "ER.15",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Participación en ganancia de asociadas",
+    "codigo_estandar": "ER.16",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Participación en resultado de asociadas",
+    "codigo_estandar": "ER.16",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Método de la participación",
+    "codigo_estandar": "ER.16",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Resultado método participación",
+    "codigo_estandar": "ER.16",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Participación en empresas relacionadas",
+    "codigo_estandar": "ER.16",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Resultado inversiones método participación",
+    "codigo_estandar": "ER.16",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Ganancia inversiones método participación",
+    "codigo_estandar": "ER.16",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Participación en negocios conjuntos",
+    "codigo_estandar": "ER.16",
+    "fuente": "balances_auditados_ifrs"
+  },
+  {
+    "cuenta_original": "Intereses devengados",
+    "codigo_estandar": "ER.09",
+    "fuente": "correccion_manual"
+  },
+  {
+    "cuenta_original": "Intereses",
+    "codigo_estandar": "ER.09",
+    "fuente": "correccion_manual"
+  },
+  {
+    "cuenta_original": "Arriendos pagados",
+    "codigo_estandar": "ER.04",
+    "fuente": "correccion_manual"
+  },
+  {
+    "cuenta_original": "Arriendos recibidos",
+    "codigo_estandar": "ER.01",
+    "fuente": "correccion_manual"
+  },
+  {
+    "cuenta_original": "Arriendos de activo fijo",
+    "codigo_estandar": "ER.04",
+    "fuente": "correccion_manual"
+  },
+  {
+    "cuenta_original": "Corrección Monetaria Activos",
+    "codigo_estandar": "ER.14",
+    "fuente": "correccion_manual"
+  },
+  {
+    "cuenta_original": "Corrección Monetaria Pasivos",
+    "codigo_estandar": "ER.14",
+    "fuente": "correccion_manual"
+  },
+  {
+    "cuenta_original": "Arriendos",
+    "codigo_estandar": "ER.01",
+    "fuente": "correccion_v2"
+  },
+  {
+    "cuenta_original": "Costos financieros",
+    "codigo_estandar": "ER.09",
+    "fuente": "correccion_v2"
+  },
+  {
+    "cuenta_original": "Bco, BCI Dolares",
+    "codigo_estandar": "AC.01",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Anticiposdel Persona",
+    "codigo_estandar": "AC.08",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Prestamos al Personal",
+    "codigo_estandar": "AC.08",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Anticipo Honosaños",
+    "codigo_estandar": "AC.08",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Materiales Insumos Nogales",
+    "codigo_estandar": "AC.05",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Nogales en Proceso",
+    "codigo_estandar": "ANC.07",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Insumos Quimicos por Recibir",
+    "codigo_estandar": "AC.05",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "iva Crédito Fiscal",
+    "codigo_estandar": "AC.07",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Corpbanca / ITAU",
+    "codigo_estandar": "AC.01",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Construcc. y obras infraestruc",
+    "codigo_estandar": "ANC.01",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Impuestos Retenidos Tesoreria",
+    "codigo_estandar": "AC.07",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "1,2.04,02 Obras en Curso",
+    "codigo_estandar": "ANC.01",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "4,2.04,03 Equipo de Computación",
+    "codigo_estandar": "ANC.01",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "— 1,2.08,01 Nogales",
+    "codigo_estandar": "ANC.07",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "2,4,04,10 Facturas Ganado",
+    "codigo_estandar": "PC.01",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Cta, Cte. Empresa Relacionada",
+    "codigo_estandar": "AC.06",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Ejercicio Local 2022 Página:",
+    "codigo_estandar": "__EXCLUIR__",
+    "fuente": "excluido_analista"
+  },
+  {
+    "cuenta_original": "inp",
+    "codigo_estandar": "PC.08",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Impto. Unico",
+    "codigo_estandar": "AC.08",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Impuesto retención 2* Categ",
+    "codigo_estandar": "AC.08",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Reajuste Art. 72 Ley de Renta",
+    "codigo_estandar": "ER.14",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Gastos Huerto",
+    "codigo_estandar": "ER.02",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "4,1,01,05 Depredación del Ejercicio",
+    "codigo_estandar": "ER.07",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Intereses Créditos Bancarios 54,399,278 10] 54,399,278 0 : 0 o 54,399,278 [0]",
+    "codigo_estandar": "__EXCLUIR__",
+    "fuente": "excluido_analista"
+  },
+  {
+    "cuenta_original": "PERDIDA O GANANCIA",
+    "codigo_estandar": "ER.11",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Fondo Fijo",
+    "codigo_estandar": "AC.01",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "REPOSICIÓN DE FONDOS FIJOS",
+    "codigo_estandar": "AC.01",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Banco de Crédito e Inversiones",
+    "codigo_estandar": "AC.01",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Cheques por Regularizar",
+    "codigo_estandar": "AC.03",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "DEPOSITOS EN TRANSITO",
+    "codigo_estandar": "AC.03",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Dep. a Plazo Bancos",
+    "codigo_estandar": "AC.01",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Cuenta Corriente Paciente Serv x Facturar",
+    "codigo_estandar": "AC.03",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Convenios por Facturar",
+    "codigo_estandar": "AC.03",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "CONVENIO TRANSBANK",
+    "codigo_estandar": "AC.03",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Cheques en Cartera",
+    "codigo_estandar": "AC.04",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Documentos Protestados",
+    "codigo_estandar": "AC.04",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Cobranza Judicial",
+    "codigo_estandar": "AC.04",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Al 31 de diciembre del",
+    "codigo_estandar": "__EXCLUIR__",
+    "fuente": "excluido_analista"
+  },
+  {
+    "cuenta_original": "Materiales e Insumos Generales",
+    "codigo_estandar": "AC.05",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Material Impreso",
+    "codigo_estandar": "AC.05",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Otros Activos Circulantes",
+    "codigo_estandar": "AC.08",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Instrumental Medico",
+    "codigo_estandar": "AC.05",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Muebles, Maquinas y Equipos Clínica",
+    "codigo_estandar": "ANC.01",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Muebles y Maq. de Oficina",
+    "codigo_estandar": "ANC.01",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Instalaciones Clinicas",
+    "codigo_estandar": "ANC.01",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "BANCO CREDITO E INVERSIONES N°",
+    "codigo_estandar": "AC.01",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "SEGURO COMPLEMENTARIO DE SALUD",
+    "codigo_estandar": "PC.08",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "CUENTAS POR COBRAR EMPRESAS RELACIONADAS",
+    "codigo_estandar": "ANC.05",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "INTERESES DIFERIDOS CORTO PLAZO",
+    "codigo_estandar": "AC.08",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "D A MUEBLES Y UTILES",
+    "codigo_estandar": "ANC.01",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "D A EQUIPOS COMPUTACIONALES",
+    "codigo_estandar": "ANC.01",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "D A HERRAMIENTAS",
+    "codigo_estandar": "ANC.01",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "IMPUESTOS DIFERIDOS LARGO PLAZO",
+    "codigo_estandar": "ANC.06",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "CREDITOS BANCOS CORTO PLAZO",
+    "codigo_estandar": "PC.02",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "TARJETA VISA",
+    "codigo_estandar": "PC.02",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "OBLIG C/BCOS E INST FINANCIERAS A L/P PORCION C/P",
+    "codigo_estandar": "PC.02",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "CHEQUES POR PAGAR",
+    "codigo_estandar": "PC.01",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "RESPONSABILIDAD EN BOLETAS DE GARANTIA",
+    "codigo_estandar": "PC.08",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "CUENTAS POR PAGAR EMPRESAS RELACIONADAS",
+    "codigo_estandar": "PNC.04",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "IMPUESTO 2 CATEGORIA PROFESIONALES",
+    "codigo_estandar": "PC.05",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "IMPUESTO UNICO A LOS TRABAJADORES",
+    "codigo_estandar": "PC.05",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "IMPUESTO POR FAGAR (F29)",
+    "codigo_estandar": "PC.05",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "IMPUESTOS ADEUDADOS",
+    "codigo_estandar": "PC.05",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "INP POR PAGAR",
+    "codigo_estandar": "PC.06",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "AFC POR PAGAR",
+    "codigo_estandar": "PC.06",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "PRESTAMO CCAF",
+    "codigo_estandar": "PC.08",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "COMPRAS POR RECIBIR",
+    "codigo_estandar": "AC.05",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "SEGUROS PERSONALES DE TRABAJADORES",
+    "codigo_estandar": "PC.06",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "COSTO MANO DE OBRA",
+    "codigo_estandar": "ER.02",
+    "fuente": "validacion_humana"
+  }
+]

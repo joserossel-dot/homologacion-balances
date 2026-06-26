@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Entornos virtuales
+venv/
+env/
+.env
+.venv
+
+# Streamlit
+.streamlit/
+
+# Datos sensibles — NUNCA subir al repositorio
+*.pdf
+*.xlsx
+*.xls
+*.csv
+balances/
+archivos/
+uploads/
+
+# Base de datos local
+*.sql.bak
+*.dump
+pg_backup/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+
+# Logs y temporales
+*.log
+tmp/
+temp/
+test_ocr/
+
+# Tessdata (muy pesado, se instala con brew)
+tessdata/
