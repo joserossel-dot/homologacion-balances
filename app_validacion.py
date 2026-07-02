@@ -129,6 +129,36 @@ def normalizar_nombre(nombre: str) -> str:
     return n.strip()
 
 
+def propagar_clasificacion_resultados(nombre_original: str, codigo_final: str, metodo: str):
+    """
+    Propaga la clasificación de una cuenta a todos los demás balances cargados
+    que tengan cuentas con el mismo nombre y requieran revisión o estén sin clasificar.
+    """
+    nombre_norm = normalizar_nombre(nombre_original)
+    if 'resultados' in st.session_state and isinstance(st.session_state.resultados, dict):
+        propagaciones = 0
+        for fn in list(st.session_state.resultados.keys()):
+            df_res = st.session_state.resultados[fn].copy()
+            names = df_res['nombre_original'].fillna('').apply(normalizar_nombre)
+            mask = names == nombre_norm
+            # Propagar si requiere revisión, no tiene código clasificado o confianza < 1.0
+            mask_target = mask & (
+                df_res['requiere_revision'] | 
+                (df_res['codigo_clasificado'] == '') | 
+                (df_res['confianza'] < 1.0)
+            )
+            if mask_target.any():
+                df_res.loc[mask_target, 'codigo_clasificado'] = codigo_final
+                df_res.loc[mask_target, 'metodo'] = metodo
+                df_res.loc[mask_target, 'confianza'] = 1.0
+                df_res.loc[mask_target, 'requiere_revision'] = False
+                st.session_state.resultados[fn] = df_res
+                propagaciones += 1
+        
+        if propagaciones > 1:
+            st.toast(f"Homologación propagada a {propagaciones - 1} otro(s) balance(s) 🔄", icon="🔄")
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # MOTOR DE CLASIFICACIÓN HÍBRIDA (Etapas 0-2: código, diccionario, reglas)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -352,7 +382,7 @@ def parsear_excel(file) -> list[CuentaRaw]:
 def main():
     st.title("📊 Homologación de Balances Tributarios Chilenos")
     st.caption(
-        "Carga un balance (PDF o Excel) → clasificación híbrida automática "
+        "Carga uno o más balances (PDF o Excel) → clasificación híbrida automática "
         "(código → diccionario → reglas) → cola de revisión → balance normalizado."
     )
 
@@ -361,19 +391,19 @@ def main():
 
     if 'diccionario' not in st.session_state:
         st.session_state.diccionario = list(dic_base)
-    if 'resultados' not in st.session_state:
-        st.session_state.resultados = None
+    if 'resultados' not in st.session_state or not isinstance(st.session_state.resultados, dict):
+        st.session_state.resultados = {}
+    if 'metadata_files' not in st.session_state:
+        st.session_state.metadata_files = {}
     if 'correcciones' not in st.session_state:
         st.session_state.correcciones = []
 
     # ── Sidebar ───────────────────────────────────────────────────────────────
     with st.sidebar:
         st.header("⚙️ Configuración")
-        archivo = st.file_uploader(
-            "Balance tributario", type=['pdf', 'xlsx', 'xls']
+        archivos = st.file_uploader(
+            "Balances tributarios", type=['pdf', 'xlsx', 'xls'], accept_multiple_files=True
         )
-        if archivo:
-            st.caption(f"📄 **Archivo:** {archivo.name}")
         giro = st.selectbox(
             "Giro de la empresa (afecta regla D2-Terrenos)",
             ['Otro', 'Inmobiliaria', 'Construcción', 'Promotora'],
@@ -396,101 +426,179 @@ def main():
                 mime="application/json"
             )
 
-    if archivo is None:
-        st.info("⬆️ Carga un archivo en la barra lateral para comenzar.")
+    if not archivos:
+        st.info("⬆️ Carga uno o más archivos en la barra lateral para comenzar.")
+        st.session_state.resultados = {}
+        st.session_state.metadata_files = {}
+        st.session_state.metadata_confirmada = False
         _mostrar_resumen_catalogo(catalogo)
         return
 
     # ── Detección y confirmación de datos de empresa ──────────────────────────
-    if st.session_state.get('_archivo') != archivo.name:
-        st.session_state.resultados = None
-        st.session_state.metadata_confirmada = False
-        st.session_state.metadata = None
-
     if not st.session_state.get('metadata_confirmada', False):
-        with st.spinner("Leyendo encabezado del archivo..."):
-            lineas_encabezado = _extraer_lineas_encabezado(archivo)
+        first_file = archivos[0]
+        with st.spinner(f"Detectando metadata de la empresa en {first_file.name}..."):
+            lineas_encabezado = _extraer_lineas_encabezado(first_file)
             meta = extraer_metadata(lineas_encabezado)
-            st.session_state.metadata = meta
+            st.session_state.company_rut = meta.rut or ""
+            st.session_state.company_razon = meta.razon_social or ""
+            st.session_state.company_giro = meta.giro or "Otro"
 
         st.subheader("📋 Confirma los datos de la empresa")
-        st.caption("El sistema detectó los siguientes datos. Corrígelos si es necesario antes de continuar.")
+        st.caption("El sistema detectó los siguientes datos generales. Corrígelos si es necesario antes de continuar.")
 
         with st.form("form_empresa"):
             col1, col2 = st.columns(2)
             with col1:
-                rut = st.text_input("RUT", value=meta.rut or "")
-                razon = st.text_input("Razón Social", value=meta.razon_social or "")
+                rut = st.text_input("RUT", value=st.session_state.company_rut)
+                razon = st.text_input("Razón Social", value=st.session_state.company_razon)
             with col2:
-                periodo_desde = st.text_input("Período desde (DD/MM/YYYY)", value=meta.periodo_desde or "")
-                periodo_hasta = st.text_input("Período hasta (DD/MM/YYYY)", value=meta.periodo_hasta or "")
-            giro_detectado = meta.giro or ""
-            giro_form = st.text_input("Giro", value=giro_detectado)
+                giro_list = ['Otro', 'Inmobiliaria', 'Construcción', 'Promotora']
+                default_giro_idx = 0
+                if st.session_state.company_giro in giro_list:
+                    default_giro_idx = giro_list.index(st.session_state.company_giro)
+                giro_sel = st.selectbox(
+                    "Giro de la empresa (afecta regla D2-Terrenos)",
+                    giro_list,
+                    index=default_giro_idx
+                )
 
-            submitted = st.form_submit_button("✅ Confirmar y procesar balance")
+            submitted = st.form_submit_button("✅ Confirmar y procesar todos los balances")
             if submitted:
-                st.session_state.metadata.rut = rut
-                st.session_state.metadata.razon_social = razon
-                st.session_state.metadata.periodo_desde = periodo_desde
-                st.session_state.metadata.periodo_hasta = periodo_hasta
-                st.session_state.metadata.giro = giro_form
+                st.session_state.company_rut = rut
+                st.session_state.company_razon = razon
+                st.session_state.company_giro = giro_sel
                 st.session_state.metadata_confirmada = True
-                st.session_state._archivo = archivo.name
+                st.session_state.resultados = {}
+                st.session_state.metadata_files = {}
                 st.rerun()
         return
 
-    meta = st.session_state.metadata
-    giro_norm = meta.giro.lower() if meta.giro else None
+    company_giro_norm = None if st.session_state.company_giro == 'Otro' else st.session_state.company_giro.lower()
+
+    # Limpiar archivos viejos de resultados
+    nombres_subidos = [a.name for a in archivos]
+    for k in list(st.session_state.resultados.keys()):
+        if k not in nombres_subidos:
+            st.session_state.resultados.pop(k, None)
+            st.session_state.metadata_files.pop(k, None)
+
+    # Procesar archivos nuevos
+    for archivo in archivos:
+        if archivo.name not in st.session_state.resultados:
+            with st.spinner(f"Clasificando cuentas de {archivo.name}..."):
+                lineas_encabezado = _extraer_lineas_encabezado(archivo)
+                meta_indiv = extraer_metadata(lineas_encabezado)
+                st.session_state.metadata_files[archivo.name] = meta_indiv
+
+                cuentas = _extraer_cuentas(archivo)
+                motor = MotorHibridoLocal(st.session_state.diccionario)
+                filas = []
+                for c in cuentas:
+                    if c.monto is None and not c.codigo:
+                        continue
+                    if not c.codigo and PATRON_NO_CUENTA.match(c.nombre.strip()):
+                        continue
+                    r = motor.clasificar(c, company_giro_norm)
+                    filas.append({
+                        'linea': c.linea,
+                        'codigo_original': c.codigo or '',
+                        'nombre_original': c.nombre,
+                        'monto': c.monto,
+                        'origen_columna': c.origen_columna.value,
+                        'es_total': c.es_total,
+                        'codigo_clasificado': r['codigo_estandar'] or '',
+                        'metodo': r['metodo'],
+                        'confianza': r['confianza'],
+                        'requiere_revision': r['requiere_revision'],
+                        'nota': r.get('nota_regla_especial', ''),
+                        'confianza_extraccion': c.confianza_extraccion,
+                        'origen_columna_display': c.origen_columna.value,
+                    })
+                df_file = pd.DataFrame(filas)
+                st.session_state.resultados[archivo.name] = df_file
+# After processing all uploaded files, propagate classifications across all balances
+if 'propagation_done' not in st.session_state:
+    # Define helper to propagate classifications across balances
+    def propagar_entre_balances():
+        """Propaga códigos clasificados entre balances cargados."""
+        # Build mapping from normalized account name to list of (file, index)
+        name_map = {}
+        for fname, df in st.session_state.resultados.items():
+            for idx, row in df.iterrows():
+                nombre = row['nombre_original']
+                if not nombre:
+                    continue
+                norm = normalizar_nombre(nombre)
+                name_map.setdefault(norm, []).append((fname, idx, row['codigo_clasificado']))
+        # Propagar si existe alguna clasificación
+        for norm, entries in name_map.items():
+            classified_code = None
+            for fname, idx, cod in entries:
+                if cod and cod not in ('', '__EXCLUIR__'):
+                    classified_code = cod
+                    break
+            if classified_code:
+                for fname, idx, cod in entries:
+                    if not cod or cod == '':
+                        st.session_state.resultados[fname].at[idx, 'codigo_clasificado'] = classified_code
+                        st.session_state.resultados[fname].at[idx, 'metodo'] = 'propagado_automático'
+                        st.session_state.resultados[fname].at[idx, 'confianza'] = 1.0
+                        st.session_state.resultados[fname].at[idx, 'requiere_revision'] = False
+    propagar_entre_balances()
+    st.session_state['propagation_done'] = True
+
+    # ── Selección de archivo activo ───────────────────────────────────────────
+    with st.sidebar:
+        st.divider()
+        st.subheader("📁 Balances Cargados")
+        # Mostrar resumen de estado de cada archivo
+        for name in nombres_subidos:
+            df_f = st.session_state.resultados.get(name)
+            if df_f is not None and not df_f.empty:
+                pendientes_f = df_f[df_f['requiere_revision'] | (df_f['codigo_clasificado'] == '')]
+                pendientes_f = pendientes_f[~pendientes_f['es_total']]
+                n_pendientes = len(pendientes_f)
+                if n_pendientes > 0:
+                    st.caption(f"🔸 `{name}` ({n_pendientes} pendientes)")
+                else:
+                    st.caption(f"✅ `{name}` (completo)")
+            else:
+                st.caption(f"⏳ `{name}` (procesando)")
+
+        st.write("")
+        archivo_activo_name = st.selectbox(
+            "Ver y validar balance:",
+            options=nombres_subidos,
+            index=0 if nombres_subidos else None,
+            key="archivo_activo_select"
+        )
+
+    # Obtener el objeto de archivo y el DataFrame correspondiente
+    archivo_activo = next(a for a in archivos if a.name == archivo_activo_name)
+    df = st.session_state.resultados[archivo_activo_name]
+    meta_activo = st.session_state.metadata_files.get(archivo_activo_name)
+
+    if df.empty:
+        st.warning(f"No se extrajeron cuentas del archivo {archivo_activo_name}.")
+        return
 
     # ── Banner empresa ────────────────────────────────────────────────────────
     with st.container(border=True):
         c1, c2, c3, c4 = st.columns(4)
-        c1.markdown(f"**{meta.razon_social or '—'}**  \n`{meta.rut or '—'}`")
-        c2.markdown(f"**Período**  \n{meta.periodo_desde or '—'} → {meta.periodo_hasta or '—'}")
-        c3.markdown(f"**Giro**  \n{meta.giro or '—'}")
-        c4.markdown(f"**Archivo**  \n`{st.session_state.get('_archivo', '—')}`")
-
-    # ── Procesamiento ─────────────────────────────────────────────────────────
-    if st.session_state.resultados is None:
-        with st.spinner("Clasificando cuentas..."):
-            cuentas = _extraer_cuentas(archivo)
-            motor = MotorHibridoLocal(st.session_state.diccionario)
-            filas = []
-            for c in cuentas:
-                if c.monto is None and not c.codigo:
-                    continue
-                if not c.codigo and PATRON_NO_CUENTA.match(c.nombre.strip()):
-                    continue
-                r = motor.clasificar(c, giro_norm)
-                filas.append({
-                    'linea': c.linea,
-                    'codigo_original': c.codigo or '',
-                    'nombre_original': c.nombre,
-                    'monto': c.monto,
-                    'origen_columna': c.origen_columna.value,
-                    'es_total': c.es_total,
-                    'codigo_clasificado': r['codigo_estandar'] or '',
-                    'metodo': r['metodo'],
-                    'confianza': r['confianza'],
-                    'requiere_revision': r['requiere_revision'],
-                    'nota': r.get('nota_regla_especial', ''),
-                    'confianza_extraccion': c.confianza_extraccion,
-                    'origen_columna_display': c.origen_columna.value,
-                })
-            df = pd.DataFrame(filas)
-            st.session_state.resultados = df
-
-    df = st.session_state.resultados
-
-    if df.empty:
-        st.warning("No se extrajeron cuentas del archivo.")
-        return
+        c1.markdown(f"**{st.session_state.company_razon or '—'}**  \n`{st.session_state.company_rut or '—'}`")
+        periodo_str = "—"
+        if meta_activo:
+            periodo_str = f"{meta_activo.periodo_desde or '—'} → {meta_activo.periodo_hasta or '—'}"
+        c2.markdown(f"**Período del Balance**  \n{periodo_str}")
+        c3.markdown(f"**Giro**  \n{st.session_state.company_giro or '—'}")
+        c4.markdown(f"**Archivo Activo**  \n`{archivo_activo_name}`")
 
     # ── Layout: visor izquierda | clasificación derecha ──────────────────────
     col_visor, col_trabajo = st.columns([1, 1], gap="medium")
 
     with col_visor:
-        _visor_documento(archivo)
+        _visor_documento(archivo_activo)
 
     with col_trabajo:
         tab_resumen, tab_revision, tab_balance, tab_diccionario = st.tabs(
@@ -501,7 +609,12 @@ def main():
             _tab_resumen(df)
 
         with tab_revision:
-            _tab_revision(df, catalogo, motor=MotorHibridoLocal(st.session_state.diccionario))
+            _tab_revision(
+                df,
+                catalogo,
+                motor=MotorHibridoLocal(st.session_state.diccionario),
+                archivo_nombre=archivo_activo_name
+            )
 
         with tab_balance:
             _tab_balance(df, catalogo)
@@ -769,7 +882,7 @@ def _tab_resumen(df: pd.DataFrame):
         )
 
 
-def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal):
+def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, archivo_nombre: str):
     pendientes = df[df['requiere_revision'] | (df['codigo_clasificado'] == '')]
     pendientes = pendientes[~pendientes['es_total']]
 
@@ -821,12 +934,12 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal):
             if codigo_lote:
                 procesados = 0
                 for idx_lote in list(st.session_state.lote_seleccion):
-                    st.session_state.resultados.at[idx_lote, 'codigo_clasificado'] = codigo_lote
-                    st.session_state.resultados.at[idx_lote, 'metodo'] = 'validacion_humana_lote'
-                    st.session_state.resultados.at[idx_lote, 'confianza'] = 1.0
-                    st.session_state.resultados.at[idx_lote, 'requiere_revision'] = False
+                    nombre_orig = df.at[idx_lote, 'nombre_original']
+                    st.session_state.resultados[archivo_nombre].at[idx_lote, 'codigo_clasificado'] = codigo_lote
+                    st.session_state.resultados[archivo_nombre].at[idx_lote, 'metodo'] = 'validacion_humana_lote'
+                    st.session_state.resultados[archivo_nombre].at[idx_lote, 'confianza'] = 1.0
+                    st.session_state.resultados[archivo_nombre].at[idx_lote, 'requiere_revision'] = False
                     if "diccionario" in alcance_lote:
-                        nombre_orig = df.at[idx_lote, 'nombre_original']
                         entrada = {
                             'cuenta_original': nombre_orig,
                             'codigo_estandar': codigo_lote,
@@ -834,6 +947,8 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal):
                         }
                         st.session_state.diccionario.append(entrada)
                         st.session_state.correcciones.append(entrada)
+                    # PROPAGACIÓN:
+                    propagar_clasificacion_resultados(nombre_orig, codigo_lote, 'validacion_humana_lote_propagada')
                     procesados += 1
                 if "diccionario" in alcance_lote:
                     with open(BASE_DIR / 'diccionario.json', 'w', encoding='utf-8') as f:
@@ -982,10 +1097,10 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal):
                             st.error("Debes ingresar código y nombre.")
 
                     elif seleccion == '🚫 NO INCLUIR':
-                        st.session_state.resultados.at[idx, 'codigo_clasificado'] = '__EXCLUIR__'
-                        st.session_state.resultados.at[idx, 'metodo'] = 'excluido_analista'
-                        st.session_state.resultados.at[idx, 'confianza'] = 1.0
-                        st.session_state.resultados.at[idx, 'requiere_revision'] = False
+                        st.session_state.resultados[archivo_nombre].at[idx, 'codigo_clasificado'] = '__EXCLUIR__'
+                        st.session_state.resultados[archivo_nombre].at[idx, 'metodo'] = 'excluido_analista'
+                        st.session_state.resultados[archivo_nombre].at[idx, 'confianza'] = 1.0
+                        st.session_state.resultados[archivo_nombre].at[idx, 'requiere_revision'] = False
                         if "diccionario" in alcance:
                             st.session_state.diccionario.append({
                                 'cuenta_original': row['nombre_original'],
@@ -994,6 +1109,8 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal):
                             })
                             with open(BASE_DIR / 'diccionario.json', 'w', encoding='utf-8') as f:
                                 json.dump(st.session_state.diccionario, f, ensure_ascii=False, indent=2)
+                        # PROPAGACIÓN:
+                        propagar_clasificacion_resultados(row['nombre_original'], '__EXCLUIR__', 'excluido_analista_propagado')
                         st.session_state.lote_seleccion.discard(idx)
                         st.toast(f"'{row['nombre_original'][:35]}' excluida", icon="🚫")
                         st.rerun()
@@ -1002,10 +1119,10 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal):
                         codigo_final = seleccion
 
                     if codigo_final:
-                        st.session_state.resultados.at[idx, 'codigo_clasificado'] = codigo_final
-                        st.session_state.resultados.at[idx, 'metodo'] = 'validacion_humana'
-                        st.session_state.resultados.at[idx, 'confianza'] = 1.0
-                        st.session_state.resultados.at[idx, 'requiere_revision'] = False
+                        st.session_state.resultados[archivo_nombre].at[idx, 'codigo_clasificado'] = codigo_final
+                        st.session_state.resultados[archivo_nombre].at[idx, 'metodo'] = 'validacion_humana'
+                        st.session_state.resultados[archivo_nombre].at[idx, 'confianza'] = 1.0
+                        st.session_state.resultados[archivo_nombre].at[idx, 'requiere_revision'] = False
                         st.session_state.lote_seleccion.discard(idx)
                         if "diccionario" in alcance:
                             nuevo_dic = {
@@ -1020,6 +1137,8 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal):
                             st.toast(f"'{row['nombre_original'][:35]}' → {codigo_final} guardado 📚", icon="✅")
                         else:
                             st.toast(f"'{row['nombre_original'][:35]}' → {codigo_final} (solo este caso)", icon="✅")
+                        # PROPAGACIÓN:
+                        propagar_clasificacion_resultados(row['nombre_original'], codigo_final, 'validacion_humana_propagada')
                         st.rerun()
 
 

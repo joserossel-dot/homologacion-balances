@@ -4103,5 +4103,20 @@
     "cuenta_original": "INGRESO FUERA EXPLOTACION",
     "codigo_estandar": "ER.13",
     "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "BCÍ",
+    "codigo_estandar": "AC.01",
+    "fuente": "validacion_humana_lote"
+  },
+  {
+    "cuenta_original": "Corpbanca / IFAU",
+    "codigo_estandar": "AC.01",
+    "fuente": "validacion_humana_lote"
+  },
+  {
+    "cuenta_original": "Créditos Bancarios L/P",
+    "codigo_estandar": "PNC.01",
+    "fuente": "validacion_humana"
   }
 ]

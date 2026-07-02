@@ -1,108 +1,62 @@
-"""
-cargar_datos.py — Carga inicial de catalogo_maestro y diccionario_homologacion
-desde los JSON locales hacia PostgreSQL.
+"""Script de carga inicial de datos."""
 
-Uso:
-    python3 cargar_datos.py
-"""
-
+import os
 import json
-import re
-from pathlib import Path
-
+import logging
+from typing import List, Dict, Any
 import psycopg2
-import psycopg2.extras
+from psycopg2.extras import execute_values
+from dotenv import load_dotenv
 
-DB_CONFIG = dict(
-    host='localhost', port=5432, dbname='homologacion',
-    user='postgres', password='claude123'
-)
+load_dotenv()
 
-BASE_DIR = Path(__file__).parent
+DATABASE_URL = os.environ.get("DATABASE_URL")
+if not DATABASE_URL:
+    raise ValueError("DATABASE_URL no configurada.")
 
+def obtener_conexion() -> psycopg2.extensions.connection:
+    conn = psycopg2.connect(DATABASE_URL, connect_timeout=3)
+    conn.autocommit = True
+    return conn
 
-def normalizar_nombre(s: str) -> str:
-    n = s.lower().strip()
-    n = re.sub(r"[^\w\sñáéíóú]", " ", n)
-    n = re.sub(r"\s+", " ", n)
-    return n.strip()
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
+def cargar_json(nombre: str) -> List[Dict[str, Any]]:
+    ruta = os.path.join(BASE_DIR, nombre)
+    with open(ruta, "r", encoding="utf-8") as f:
+        return json.load(f)
 
-def main():
-    with open(BASE_DIR / 'catalogo_maestro.json', encoding='utf-8') as f:
-        catalogo = json.load(f)
-    with open(BASE_DIR / 'diccionario_optimizado.json', encoding='utf-8') as f:
-        diccionario = json.load(f)
+def upsert_catalogo(conn: psycopg2.extensions.connection, filas: List[Dict[str, Any]]) -> None:
+    if not filas: return
+    columnas = list(filas[0].keys())
+    set_clause = ", ".join([f"{col}=EXCLUDED.{col}" for col in columnas if col != "codigo_estandar"])
+    query = f"INSERT INTO catalogo_maestro ({', '.join(columnas)}) VALUES %s ON CONFLICT (codigo_estandar) DO UPDATE SET {set_clause};"
+    valores = [[fila[col] for col in columnas] for fila in filas]
+    with conn.cursor() as cur: execute_values(cur, query, valores)
 
-    conn = psycopg2.connect(**DB_CONFIG)
-    cur = conn.cursor()
+def upsert_diccionario(conn: psycopg2.extensions.connection, filas: List[Dict[str, Any]]) -> None:
+    if not filas: return
+    columnas = list(filas[0].keys())
+    set_clause = ", ".join([f"{col}=EXCLUDED.{col}" for col in columnas if col != "cuenta_original"])
+    query = f"INSERT INTO diccionario_homologacion ({', '.join(columnas)}) VALUES %s ON CONFLICT (cuenta_original) DO UPDATE SET {set_clause};"
+    valores = [[fila[col] for col in columnas] for fila in filas]
+    with conn.cursor() as cur: execute_values(cur, query, valores)
 
-    # ── Catálogo maestro ────────────────────────────────────────────────────
-    n_cat = 0
-    for cod, c in catalogo.items():
-        cur.execute("""
-            INSERT INTO catalogo_maestro
-                (codigo_estandar, nombre_estandar, categoria, tipo_estado,
-                 naturaleza, signo_normal, es_deuda_financiera,
-                 es_activo_liquido, afecta_ebitda)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
-            ON CONFLICT (codigo_estandar) DO UPDATE SET
-                nombre_estandar = EXCLUDED.nombre_estandar,
-                categoria = EXCLUDED.categoria,
-                tipo_estado = EXCLUDED.tipo_estado,
-                naturaleza = EXCLUDED.naturaleza,
-                signo_normal = EXCLUDED.signo_normal,
-                es_deuda_financiera = EXCLUDED.es_deuda_financiera,
-                es_activo_liquido = EXCLUDED.es_activo_liquido,
-                afecta_ebitda = EXCLUDED.afecta_ebitda
-        """, (
-            c['codigo_estandar'], c['nombre_estandar'], c['categoria'],
-            c['tipo_estado'], c['naturaleza'], c['signo_normal'],
-            c['es_deuda_financiera'], c['es_activo_liquido'], c['afecta_ebitda']
-        ))
-        n_cat += 1
+def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    conn = None
+    try:
+        conn = obtener_conexion()
+        catalogo = cargar_json("catalogo_maestro.json")
+        diccionario = cargar_json("diccionario_optimizado.json")
+        upsert_catalogo(conn, catalogo)
+        upsert_diccionario(conn, diccionario)
+        logging.info("¡Carga inicial ejecutada con éxito!")
+    except Exception as e:
+        logging.error("Fallo: %s", e)
+        raise
+    finally:
+        if conn: conn.close()
 
-    # ── Diccionario de homologación ─────────────────────────────────────────
-    n_dic = 0
-    n_skip = 0
-    for d in diccionario:
-        cuenta_original = d['cuenta_original']
-        cuenta_norm = normalizar_nombre(cuenta_original)
-        codigo = d['codigo_estandar']
-        fuente = d['fuente']
-        validado = 'validacion_humana' in fuente or 'validado' in fuente
-
-        try:
-            cur.execute("""
-                INSERT INTO diccionario_homologacion
-                    (cuenta_original, cuenta_normalizada, codigo_estandar,
-                     fuente, validado_humano)
-                VALUES (%s,%s,%s,%s,%s)
-                ON CONFLICT (cuenta_normalizada) DO UPDATE SET
-                    codigo_estandar = EXCLUDED.codigo_estandar,
-                    fuente = EXCLUDED.fuente,
-                    actualizado_en = NOW()
-            """, (cuenta_original, cuenta_norm, codigo, fuente, validado))
-            n_dic += 1
-        except psycopg2.errors.ForeignKeyViolation:
-            conn.rollback()
-            print(f"  SKIP (código no existe en catálogo): {cuenta_original!r} -> {codigo}")
-            n_skip += 1
-            continue
-
-    conn.commit()
-
-    cur.execute("SELECT COUNT(*) FROM catalogo_maestro")
-    total_cat = cur.fetchone()[0]
-    cur.execute("SELECT COUNT(*) FROM diccionario_homologacion")
-    total_dic = cur.fetchone()[0]
-
-    print(f"\nCatálogo maestro:      {n_cat} procesados -> {total_cat} en BD")
-    print(f"Diccionario:           {n_dic} procesados, {n_skip} omitidos -> {total_dic} en BD")
-
-    cur.close()
-    conn.close()
-
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
