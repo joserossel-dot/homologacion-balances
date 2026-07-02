@@ -1,3 +1,14 @@
+import sys
+from pathlib import Path
+
+# Estabiliza el PYTHONPATH para resolver rutas en Render
+root_path = Path(__file__).resolve().parent.parent.parent
+if str(root_path) not in sys.path:
+    sys.path.insert(0, str(root_path))
+
+src_path = root_path / "src"
+if src_path.exists() and str(src_path) not in sys.path:
+    sys.path.insert(0, str(src_path))
 import os
 import tempfile
 from contextlib import asynccontextmanager
