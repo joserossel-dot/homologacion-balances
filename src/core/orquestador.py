@@ -10,3 +10,4 @@ RIESGO_GIRO_MAP: dict[str, list[str]] = {
     "inmobiliaria": [
         "Participación significativa en una sola obra",
         "Alta rotación de propiedades sin plusvalía real",
+# Force cache bust
