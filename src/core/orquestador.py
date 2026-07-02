@@ -1,10 +1,12 @@
 from decimal import Decimal
 from pathlib import Path
 
-from src.core.tax_folder_engine import TaxFolderEngine
-from src.db_repository import RepositorioDiccionario
-from src.extractors.pdf_extractor import PDFExtractor
-from src.models.tax_folder import TaxFolder
+from .tax_folder_engine import TaxFolderEngine
+from ..db_repository import RepositorioDiccionario
+from ..extractors.pdf_extractor import PDFExtractor
+from ..models.tax_folder import TaxFolder
+
+UMBRAL_DESVIACION_VENTAS = Decimal("2.0")
 
 UMBRAL_DESVIACION_VENTAS = Decimal("2.0")
 RIESGO_GIRO_MAP: dict[str, list[str]] = {
