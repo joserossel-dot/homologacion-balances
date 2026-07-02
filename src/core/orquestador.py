@@ -1,7 +1,6 @@
 from decimal import Decimal
 from pathlib import Path
 
-from .tax_folder_engine import TaxFolderEngine
 from ..db_repository import RepositorioDiccionario
 from ..extractors.pdf_extractor import PDFExtractor
 from ..models.tax_folder import TaxFolder
