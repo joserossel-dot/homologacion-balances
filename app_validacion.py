@@ -554,6 +554,8 @@ if 'propagation_done' not in st.session_state:
         st.divider()
         st.subheader("📁 Balances Cargados")
         # Mostrar resumen de estado de cada archivo
+        if 'nombres_subidos' not in locals() and 'nombres_subidos' not in globals():
+            nombres_subidos = []
         for name in nombres_subidos:
             df_f = st.session_state.resultados.get(name)
             if df_f is not None and not df_f.empty:
