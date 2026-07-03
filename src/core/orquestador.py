@@ -2,7 +2,6 @@ from decimal import Decimal
 from pathlib import Path
 
 from src.db_repository import RepositorioDiccionario
-from extractor_metadata import PDFExtractor
 from app_validacion import TaxFolder
 
 UMBRAL_DESVIACION_VENTAS = Decimal("2.0")
