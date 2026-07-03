@@ -1,23 +1,28 @@
 # Usamos una imagen oficial de Python
 FROM python:3.10-slim
 
-# Instalar las librerías del sistema que te faltan (Poppler y Tesseract con idioma español)
+# Instalar las librerías del sistema (Poppler, Tesseract y herramientas básicas)
 RUN apt-get update && apt-get install -y \
     poppler-utils \
     tesseract-ocr \
     tesseract-ocr-spa \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Establecer el directorio de trabajo
+# Instalar Poetry dentro del contenedor
+RUN pip install poetry
+
+# Configurar el directorio de trabajo
 WORKDIR /app
 
-# Copiar e instalar las dependencias de Python
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Copiar los archivos de configuración de Poetry
+COPY pyproject.toml poetry.lock* ./
 
-# Copiar todo el código del proyecto
+# Configurar Poetry para que instale los paquetes globalmente en el contenedor
+RUN poetry config virtualenvs.create false && poetry install --no-interaction --no-ansi
+
+# Copiar el resto del código del proyecto
 COPY . .
 
-# Comando de inicio (Copia aquí exactamente el "Start Command" que tienes configurado en Render)
-# Por ejemplo, si usas Gunicorn, Uvicorn o directamente Python:
-CMD [poetry run streamlit run app_validacion.py --server.port $PORT --server.address 0.0.0.0]
+# Comando de inicio con la sintaxis JSON correcta (revisa si tu archivo principal es app.py o main.py)
+CMD ["poetry", "run", "python", "src/app.py"]
