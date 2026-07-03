@@ -603,7 +603,8 @@ if 'propagation_done' not in st.session_state:
         if meta_activo:
             periodo_str = f"{meta_activo.periodo_desde or '—'} → {meta_activo.periodo_hasta or '—'}"
         c2.markdown(f"**Período del Balance**  \n{periodo_str}")
-        c3.markdown(f"**Giro**  \n{st.session_state.company_giro or '—'}")
+       giro_empresa = getattr(st.session_state, "company_giro", "—")
+        c3.markdown(f"**Giro** \n{giro_empresa or '—'}")
         c4.markdown(f"**Archivo Activo**  \n`{archivo_activo_name}`")
 
     # ── Layout: visor izquierda | clasificación derecha ──────────────────────
