@@ -998,5 +998,9 @@ def _mostrar_resumen_catalogo(catalogo: dict):
 # INVOCACIÓN RESTRINGIDA (ESCUDO DE EJECUCIÓN GLOBAL)
 # ─────────────────────────────────────────────────────────────────────────────
 
+class TaxFolder:
+    """Clase de marcador de posición para evitar que el orquestador falle al importar"""
+    pass
+    
 if __name__ == '__main__':
     main()
