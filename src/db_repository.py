@@ -121,3 +121,8 @@ class RepositorioDiccionario:
                 if row:
                     return dict(row)
         return None
+
+def normalizar_nombre(texto):
+    if not texto:
+        return ""
+    return str(texto).strip()
