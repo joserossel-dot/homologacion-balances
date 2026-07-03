@@ -26,5 +26,5 @@ RUN poetry config virtualenvs.create false && poetry install --no-interaction --
 # Forzamos a Python a mirar tanto en la raíz como en la carpeta src
 ENV PYTHONPATH="/app:/app/src"
 
-# CAMBIO CLAVE: Ejecutamos directamente con python (sin 'poetry run') para asegurar las rutas
-CMD ["python", "app_validacion.py"]
+# CAMBIO CRUCIAL: Arrancamos con 'streamlit run', asignando el puerto 10000 de Render
+CMD ["streamlit", "run", "app_validacion.py", "--server.port=10000", "--server.address=0.0.0.0"]
