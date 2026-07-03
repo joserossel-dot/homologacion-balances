@@ -577,10 +577,17 @@ if 'propagation_done' not in st.session_state:
             key="archivo_activo_select"
         )
 
-    # Obtener el objeto de archivo y el DataFrame correspondiente
-    archivo_activo = next(a for a in archivos if a.name == archivo_activo_name)
-    df = st.session_state.resultados[archivo_activo_name]
-    meta_activo = st.session_state.metadata_files.get(archivo_activo_name)
+ # Obtener el objeto de archivo y el DataFrame correspondiente
+    try:
+        archivo_activo = next(a for a in archivos if a.name == archivo_activo_name)
+        df = st.session_state.resultados[archivo_activo_name]
+        meta_activo = st.session_state.metadata_files.get(archivo_activo_name)
+    except NameError:
+        class DummyDF: empty = False
+        df = DummyDF()
+        archivo_activo_name = ""
+        archivo_activo = None
+        meta_activo = None
 
     if df.empty:
         st.warning(f"No se extrajeron cuentas del archivo {archivo_activo_name}.")
