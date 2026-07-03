@@ -20,11 +20,11 @@ WORKDIR /app
 # Copiar todo el proyecto
 COPY . .
 
-# Desactivar el entorno virtual e instalar las dependencias
+# Desactivar el entorno virtual e instalar las dependencias de forma global
 RUN poetry config virtualenvs.create false && poetry install --no-interaction --no-ansi
 
-# SOLUCIÓN: Le enseñamos a Python dónde encontrar 'db_repository' y el resto de tus módulos
-ENV PYTHONPATH=/app:/app/src
+# Forzamos a Python a mirar tanto en la raíz como en la carpeta src
+ENV PYTHONPATH="/app:/app/src"
 
-# Comando de inicio
-CMD ["poetry", "run", "python", "app_validacion.py"]
+# CAMBIO CLAVE: Ejecutamos directamente con python (sin 'poetry run') para asegurar las rutas
+CMD ["python", "app_validacion.py"]
