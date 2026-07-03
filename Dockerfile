@@ -1,12 +1,13 @@
 # Usamos una imagen oficial de Python
 FROM python:3.10-slim
 
-# Instalar las librerías del sistema (Poppler, Tesseract y herramientas básicas)
+# Instalar las librerías del sistema (Añadimos build-essential por seguridad)
 RUN apt-get update && apt-get install -y \
     poppler-utils \
     tesseract-ocr \
     tesseract-ocr-spa \
     curl \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 # Instalar Poetry dentro del contenedor
@@ -18,11 +19,11 @@ WORKDIR /app
 # Copiar los archivos de configuración de Poetry
 COPY pyproject.toml poetry.lock* ./
 
-# Configurar Poetry para que instale los paquetes globalmente en el contenedor
-RUN poetry config virtualenvs.create false && poetry install --no-interaction --no-ansi
+# CAMBIO CLAVE: Añadimos --no-root para que no falle al no encontrar el código aún
+RUN poetry config virtualenvs.create false && poetry install --no-interaction --no-ansi --no-root
 
-# Copiar el resto del código del proyecto
+# Ahora sí, copiamos todo el código del proyecto
 COPY . .
 
-# Comando de inicio con la sintaxis JSON correcta (revisa si tu archivo principal es app.py o main.py)
+# Comando de inicio
 CMD ["poetry", "run", "python", "src/app.py"]
