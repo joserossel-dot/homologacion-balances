@@ -509,8 +509,9 @@ def main():
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _visor_documento(archivo):
-    import tempfile, base64, io
+    import tempfile, base64, io, platform, shutil, subprocess, glob
     from PIL import Image
+    from pathlib import Path
 
     suffix = Path(archivo.name).suffix.lower()
     archivo.seek(0)
@@ -524,17 +525,26 @@ def _visor_documento(archivo):
                     tmp.write(archivo.read())
                     tmp_path = Path(tmp.name)
                 archivo.seek(0)
+                
                 try:
                     from pdf2image import convert_from_path
-                    import shutil
-                    pdftoppm_path = shutil.which('pdftoppm')
-                    poppler_dir = str(Path(pdftoppm_path).parent) if pdftoppm_path else '/usr/local/bin'
-                    imgs = convert_from_path(str(tmp_path), dpi=180, poppler_path=poppler_dir)
+                    
+                    # CORRECCIÓN 1: Configuración inteligente según el sistema operativo
+                    if platform.system() == "Darwin":
+                        # Entorno local (Mac)
+                        pdftoppm_path = shutil.which('pdftoppm')
+                        poppler_dir = str(Path(pdftoppm_path).parent) if pdftoppm_path else '/opt/homebrew/bin'
+                        imgs = convert_from_path(str(tmp_path), dpi=180, poppler_path=poppler_dir)
+                    else:
+                        # Entorno Render (Linux) - No necesita poppler_path, lo detecta global
+                        imgs = convert_from_path(str(tmp_path), dpi=180)
+                        
                     st.session_state[clave_imgs] = imgs
                 except Exception:
-                    import subprocess, glob
+                    # CORRECCIÓN 2: Fallback dinámico (busca pdftoppm de forma segura en cualquier Linux)
+                    pdftoppm_bin = shutil.which('pdftoppm') or 'pdftoppm'
                     tmpdir = tempfile.mkdtemp()
-                    subprocess.run(['/usr/local/bin/pdftoppm', '-png', '-r', '180', str(tmp_path), f'{tmpdir}/page'], capture_output=True)
+                    subprocess.run([pdftoppm_bin, '-png', '-r', '180', str(tmp_path), f'{tmpdir}/page'], capture_output=True)
                     img_files = sorted(glob.glob(f'{tmpdir}/page*.png'))
                     imgs = [Image.open(f) for f in img_files]
                     st.session_state[clave_imgs] = imgs
