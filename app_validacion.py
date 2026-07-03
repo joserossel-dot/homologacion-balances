@@ -581,7 +581,7 @@ if 'propagation_done' not in st.session_state:
 
     if df.empty:
         st.warning(f"No se extrajeron cuentas del archivo {archivo_activo_name}.")
-        return
+        st.stop()
 
     # ── Banner empresa ────────────────────────────────────────────────────────
     with st.container(border=True):
