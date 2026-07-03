@@ -1,4 +1,4 @@
-# Cambiamos a Python 3.12 para cumplir con el requisito de tu pyproject.toml (^3.12)
+# Usamos Python 3.12 como requiere tu pyproject.toml
 FROM python:3.12-slim
 
 # Instalar librerías del sistema (Poppler, Tesseract y herramientas esenciales)
@@ -17,11 +17,11 @@ RUN pip install --no-cache-dir poetry
 # Configurar el directorio de trabajo
 WORKDIR /app
 
-# Copiamos todo el proyecto primero
+# Copiar todo el proyecto
 COPY . .
 
-# Desactivamos el entorno virtual e instalamos las dependencias con la versión de Python correcta
+# Desactivar el entorno virtual e instalar las dependencias
 RUN poetry config virtualenvs.create false && poetry install --no-interaction --no-ansi
 
-# Comando de inicio
-CMD ["poetry", "run", "python", "src/app.py"]
+# CORRECCIÓN AQUÍ: Apuntamos al archivo correcto en la raíz
+CMD ["poetry", "run", "python", "app_validacion.py"]
