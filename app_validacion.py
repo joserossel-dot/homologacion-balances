@@ -596,7 +596,9 @@ if 'propagation_done' not in st.session_state:
     # ── Banner empresa ────────────────────────────────────────────────────────
     with st.container(border=True):
         c1, c2, c3, c4 = st.columns(4)
-        c1.markdown(f"**{st.session_state.company_razon or '—'}** \n`{st.session_state.company_rut or '—'}`")
+        razon_social = getattr(st.session_state, "company_razon", "—")
+        rut_empresa = getattr(st.session_state, "company_rut", "—")
+        c1.markdown(f"**{razon_social or '—'}** \n`{rut_empresa or '—'}`")
         periodo_str = "—"
         if meta_activo:
             periodo_str = f"{meta_activo.periodo_desde or '—'} → {meta_activo.periodo_hasta or '—'}"
