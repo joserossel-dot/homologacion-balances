@@ -23,5 +23,8 @@ COPY . .
 # Desactivar el entorno virtual e instalar las dependencias
 RUN poetry config virtualenvs.create false && poetry install --no-interaction --no-ansi
 
-# CORRECCIÓN AQUÍ: Apuntamos al archivo correcto en la raíz
+# SOLUCIÓN: Le enseñamos a Python dónde encontrar 'db_repository' y el resto de tus módulos
+ENV PYTHONPATH=/app:/app/src
+
+# Comando de inicio
 CMD ["poetry", "run", "python", "app_validacion.py"]
