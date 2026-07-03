@@ -524,7 +524,8 @@ if 'propagation_done' not in st.session_state:
         """Propaga códigos clasificados entre balances cargados."""
         # Build mapping from normalized account name to list of (file, index)
         name_map = {}
-        for fname, df in st.session_state.resultados.items():
+        resultados = getattr(st.session_state, "resultados", {})
+        for fname, df in resultados.items():
             for idx, row in df.iterrows():
                 nombre = row['nombre_original']
                 if not nombre:
