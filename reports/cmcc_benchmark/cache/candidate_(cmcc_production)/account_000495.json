@@ -1,0 +1,1 @@
+{"source_file": "", "account_code": "4121003", "account_name": "Intereses Ganados", "nature": "profit", "standard_code": "ER.12", "final_code": "ER.12", "confidence": 0.98, "method": "learning_exact", "reason": "Gold Standard (exact) → ER.12 (matched: Intereses Ganados)", "cmcc_score": 0.0, "cmcc_code": null, "cmcc_concept": null, "is_unknown": false}

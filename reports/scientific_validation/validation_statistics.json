@@ -1,0 +1,22 @@
+{
+  "dataset": {
+    "total": 0,
+    "pending": 0,
+    "reviewed": 0
+  },
+  "metrics": {
+    "total": 0,
+    "correct": 0,
+    "incorrect": 0,
+    "accuracy": 0.0,
+    "accuracy_pct": 0.0,
+    "macro_f1": 0.0,
+    "micro_f1": 0.0,
+    "unknown_rate": 0.0,
+    "per_type_precision": [],
+    "per_decision_code": [],
+    "top_errors": []
+  },
+  "agreement": null,
+  "generated_at": "2026-07-09T20:20:36.263270+00:00"
+}

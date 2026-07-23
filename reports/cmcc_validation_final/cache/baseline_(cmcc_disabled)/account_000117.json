@@ -1,0 +1,1 @@
+{"source_file": "", "account_code": "", "account_name": "o. OTROS ACTIVOS", "nature": "asset", "standard_code": "ANC.06", "final_code": "ANC.06", "confidence": 0.8286, "method": "learning_fuzzy", "reason": "Gold Standard (fuzzy) → ANC.06 (matched: OTROS ACTIVOS)", "cmcc_score": 0.0, "cmcc_code": null, "cmcc_concept": null, "is_unknown": false}

@@ -1,0 +1,191 @@
+{
+  "total_accounts": 11690,
+  "phase1_unknown": 10537,
+  "phase1_unknown_pct": 90.14,
+  "de_v2_unknown": 5392,
+  "de_v2_unknown_pct": 46.12,
+  "unknown_reduction": 5145,
+  "unknown_reduction_pct": 48.83,
+  "estimated_precision_phase1": 50.91,
+  "estimated_precision_de_v2": 58.11,
+  "estimated_recall_phase1": 5.02,
+  "estimated_recall_de_v2": 31.31,
+  "avg_consensus": 0.72,
+  "auto_decision_rate": 26.9,
+  "human_review_rate": 73.1,
+  "scores": {
+    "mean": 0.7058,
+    "min": 0.216,
+    "max": 1.0
+  },
+  "score_distribution": {
+    "0.00": 5392,
+    "1.0": 1698,
+    "0.9": 1184,
+    "0.7": 1450,
+    "0.2": 757,
+    "0.4": 520,
+    "0.3": 479,
+    "0.8": 166,
+    "0.5": 44
+  },
+  "confidence_distribution": {
+    "UNKNOWN": 7192,
+    "VERY_HIGH": 1966,
+    "HIGH": 926,
+    "LOW": 1353,
+    "MEDIUM": 253
+  },
+  "conflict_distribution": {
+    "ninguno": 10842,
+    "bajo": 845,
+    "medio": 3
+  },
+  "quantitative": {
+    "total_accounts": 11690,
+    "improved": 3204,
+    "worsened": 131,
+    "unchanged": 6242,
+    "improved_pct": 27.41,
+    "worsened_pct": 1.12,
+    "unchanged_pct": 53.4,
+    "both_wrong": 411,
+    "need_human_review": 2113,
+    "need_human_review_pct": 18.08,
+    "least_contributing": [
+      [
+        "gs_exact",
+        613
+      ],
+      [
+        "dict_fuzzy",
+        317
+      ],
+      [
+        "sm_tier_5",
+        273
+      ],
+      [
+        "code",
+        179
+      ],
+      [
+        "gs_fuzzy",
+        124
+      ]
+    ],
+    "optimal_threshold": 0.5
+  },
+  "category_counts": {
+    "ambos_correctos": 456,
+    "pipeline_correcto": 131,
+    "de_v2_correcto": 3204,
+    "ambos_incorrectos": 411,
+    "necesita_revision": 2113,
+    "parser": 0,
+    "ocr": 0,
+    "catalogo": 0,
+    "regex": 0,
+    "semantic": 0,
+    "codigo": 0,
+    "ambos_unknown": 5375
+  },
+  "classifier_matrix": {
+    "code": {
+      "consulted": 313,
+      "winner": 182,
+      "discarded": 11377,
+      "contradicted": 131,
+      "avg_score": 0.9385,
+      "win_rate": 58.15
+    },
+    "dict_exact": {
+      "consulted": 1354,
+      "winner": 1084,
+      "discarded": 10336,
+      "contradicted": 270,
+      "avg_score": 0.98,
+      "win_rate": 80.06
+    },
+    "dict_fuzzy": {
+      "consulted": 393,
+      "winner": 328,
+      "discarded": 11297,
+      "contradicted": 65,
+      "avg_score": 0.8403,
+      "win_rate": 83.46
+    },
+    "sm_tier_1": {
+      "consulted": 754,
+      "winner": 754,
+      "discarded": 10936,
+      "contradicted": 0,
+      "avg_score": 1.0,
+      "win_rate": 100.0
+    },
+    "sm_tier_2": {
+      "consulted": 268,
+      "winner": 268,
+      "discarded": 11422,
+      "contradicted": 0,
+      "avg_score": 0.95,
+      "win_rate": 100.0
+    },
+    "sm_tier_4": {
+      "consulted": 1131,
+      "winner": 959,
+      "discarded": 10559,
+      "contradicted": 172,
+      "avg_score": 0.6579,
+      "win_rate": 84.79
+    },
+    "sm_tier_5": {
+      "consulted": 350,
+      "winner": 273,
+      "discarded": 11340,
+      "contradicted": 77,
+      "avg_score": 0.649,
+      "win_rate": 78.0
+    },
+    "sm_tier_6": {
+      "consulted": 1621,
+      "winner": 1310,
+      "discarded": 10069,
+      "contradicted": 311,
+      "avg_score": 0.6,
+      "win_rate": 80.81
+    },
+    "regex": {
+      "consulted": 3375,
+      "winner": 3121,
+      "discarded": 8315,
+      "contradicted": 254,
+      "avg_score": 0.8928,
+      "win_rate": 92.47
+    },
+    "gs_exact": {
+      "consulted": 1130,
+      "winner": 842,
+      "discarded": 10560,
+      "contradicted": 288,
+      "avg_score": 0.98,
+      "win_rate": 74.51
+    },
+    "gs_fuzzy": {
+      "consulted": 176,
+      "winner": 125,
+      "discarded": 11514,
+      "contradicted": 51,
+      "avg_score": 0.8308,
+      "win_rate": 71.02
+    }
+  },
+  "metadata": {
+    "total_accounts": 11690,
+    "processing_time_seconds": 190.81,
+    "errors": 6,
+    "pipeline_label": "Phase 1 (code -> dict -> regex) [default flags]",
+    "de_v2_label": "DecisionEngineV2 (GS + code + dict + SM + regex, weighted ensemble)",
+    "source_file": "/Users/josealfonsorossel/AI-Projects/homologacion-balances/reports/semantic_matcher_v1.json"
+  }
+}

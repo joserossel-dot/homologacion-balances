@@ -1,0 +1,1 @@
+{"source_file": "", "account_code": "", "account_name": "¡ Ventas", "nature": "profit", "standard_code": "PAT.01", "final_code": "PAT.01", "confidence": 0.98, "method": "learning_exact", "reason": "Gold Standard (exact) → PAT.01 (matched: Ventas)", "cmcc_score": 0.0, "cmcc_code": null, "cmcc_concept": null, "is_unknown": false}

@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Catálogo Maestro de Conceptos Contables",
+  "description": "Esquema oficial de un Concepto en el CMCC",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Identificador único del concepto"
+    },
+    "codigo": {
+      "type": "string",
+      "description": "Código estándar (ej: AC.01, PC.03, ER.04)"
+    },
+    "nombre": {
+      "type": "string",
+      "description": "Nombre estándar del concepto"
+    },
+    "categoria": {
+      "type": "string",
+      "enum": ["activo_corriente", "activo_no_corriente", "pasivo_corriente",
+               "pasivo_no_corriente", "patrimonio", "ingreso", "costo", "gasto",
+               "cuenta_orden", "otros"],
+      "description": "Categoría contable del concepto"
+    },
+    "tipo_estado_financiero": {
+      "type": "string",
+      "enum": ["balance", "resultado", "orden"],
+      "description": "Estado financiero al que pertenece"
+    },
+    "sinonimos": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Nombres alternativos equivalentes"
+    },
+    "abreviaturas": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Abreviaturas comunes para este concepto"
+    },
+    "variantes": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Variantes observadas en datos reales"
+    },
+    "palabras_clave": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Palabras clave para matching"
+    },
+    "patrones": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Patrones regex para detectar este concepto"
+    },
+    "ejemplos": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Ejemplos de nombres de cuentas reales"
+    },
+    "empresas": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Empresas que han usado este concepto"
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Nivel de confianza (0-1)"
+    },
+    "version": {
+      "type": "string",
+      "description": "Versión del concepto (ej: 1.0.0)"
+    },
+    "ultima_revision": {
+      "type": "string",
+      "format": "date",
+      "description": "Fecha de última revisión (ISO 8601)"
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Metadatos adicionales extensibles"
+    }
+  },
+  "required": ["id", "codigo", "nombre", "categoria", "tipo_estado_financiero",
+               "sinonimos", "abreviaturas", "variantes", "palabras_clave",
+               "confidence", "version", "ultima_revision"],
+  "additionalProperties": true
+}

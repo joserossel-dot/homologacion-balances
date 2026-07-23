@@ -1,0 +1,1 @@
+{"source_file": "", "account_code": "", "account_name": "UTILIDADES ACUMULADAS", "nature": "profit", "standard_code": "PAT.03", "final_code": "PAT.03", "confidence": 0.98, "method": "learning_exact", "reason": "Gold Standard (exact) → PAT.03 (matched: Utilidades Acumuladas)", "cmcc_score": 0.0, "cmcc_code": null, "cmcc_concept": null, "is_unknown": false}

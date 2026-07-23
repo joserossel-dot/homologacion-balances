@@ -1,0 +1,48 @@
+{
+  "snapshot_id": "snap_20260709_202821",
+  "timestamp": "2026-07-09T20:28:21.672355+00:00",
+  "git_commit": "2f572e7 Fix: Remover import fantasma de ",
+  "cmcc_version": "1.0",
+  "dictionary_hash": "3350547d0ddb268d",
+  "parser_version": "3.0",
+  "documents": 185,
+  "accounts": 10672,
+  "classified": 1892,
+  "unknown": 8780,
+  "coverage": 17.7,
+  "unknown_rate": 82.3,
+  "accuracy": 17.7,
+  "precision": 17.7,
+  "recall": 17.7,
+  "macro_f1": 0.0,
+  "micro_f1": 0.0,
+  "shadow_precision": 0.0,
+  "parser_precision": 0.0,
+  "ocr_precision": 0.0,
+  "layout_precision": 0.0,
+  "average_parser_confidence": 0.9419,
+  "average_document_confidence": 0.9419,
+  "layout_distribution": {
+    "validacion": 5369,
+    "edge_cases": 5303
+  },
+  "ocr_distribution": {
+    "pdf": 162,
+    "excel": 23,
+    "unknown": 0
+  },
+  "decision_distribution": {
+    "unclassified": 8780,
+    "learning_exact": 1049,
+    "dictionary_fuzzy": 293,
+    "dictionary_exact": 228,
+    "code": 167,
+    "learning_fuzzy": 155
+  },
+  "unknown_distribution": {
+    "Sin coincidencia en código ni diccionario": 8780
+  },
+  "shadow_count": 140,
+  "concept_count": 52,
+  "variant_count": 3064
+}

@@ -1,0 +1,42 @@
+{
+  "documents": 20,
+  "total_time_v1_seconds": 173.8,
+  "total_time_v2_seconds": 176.5,
+  "avg_time_v1_seconds": 8.688,
+  "avg_time_v2_seconds": 8.825,
+  "speedup_avg": 0.98,
+  "total_accounts_v1": 2692,
+  "total_accounts_v2": 2692,
+  "shared_accounts": 2692,
+  "v1_only_accounts": 0,
+  "v2_only_accounts": 0,
+  "account_overlap_pct": 100.0,
+  "documents_matching_exact": 20,
+  "doc_match_rate_pct": 100.0,
+  "avg_layout_confidence": 0.79,
+  "layout_sources": {
+    "activo, perdida": 2,
+    "activo, pasivo, codigo, ganancia": 2,
+    "activo, pasivo, perdida, ganancia": 2,
+    "perdida, activo": 2,
+    "resultado, activo, pasivo, perdida, ganancia, codigo, nombre": 1,
+    "activo, pasivo, codigo, ganancia, perdida, patrimonio": 1,
+    "activo, pasivo, codigo, nombre, ganancia, patrimonio, perdida": 1,
+    "activo, pasivo, ganancia": 1,
+    "activo, pasivo, codigo, patrimonio, resultado, ganancia, perdida": 1,
+    "resultado, nombre, codigo, activo, pasivo, perdida, ganancia": 1,
+    "resultado, perdida, patrimonio": 1,
+    "nombre, activo, pasivo, ganancia, patrimonio, resultado, perdida": 1,
+    "activo, pasivo, perdida, ganancia, codigo, nombre, saldo, resultado": 1,
+    "activo, pasivo, perdida, ganancia, patrimonio, resultado": 1,
+    "activo, perdida, pasivo": 1,
+    "activo, pasivo, perdida, ganancia, codigo, nombre, saldo": 1
+  },
+  "v2_column_distribution": {
+    "desconocido": 1399,
+    "ganancia": 693,
+    "activo": 219,
+    "perdida": 204,
+    "pasivo": 177
+  }
+}

@@ -1,6 +1,6 @@
 import logging
 from src.core.orquestador import PipelineOrquestador
-from db_repository import RepositorioDiccionario
+from src.db_repository import RepositorioDiccionario
 
 def simular_pipeline():
     logging.basicConfig(level=logging.INFO)

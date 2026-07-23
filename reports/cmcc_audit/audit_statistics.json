@@ -1,0 +1,210 @@
+{
+  "total_concepts": 52,
+  "total_variants": 3064,
+  "total_synonyms": 18,
+  "total_examples": 3082,
+  "total_classified_frequency": 1886,
+  "total_potential_recovery": 6124,
+  "total_shadow": 140,
+  "total_clusters": 4395,
+  "total_cluster_members": 5984,
+  "total_unknown_in_audit": 8780,
+  "avg_coverage_score": 14.3,
+  "avg_knowledge_density": 5.4,
+  "avg_recovery_score": 1.3,
+  "avg_ambiguity_score": 36.7,
+  "avg_business_impact": 38.6,
+  "avg_roi_score": 4.2,
+  "max_roi": 38.4,
+  "min_roi": 0.1,
+  "generated_at": "2026-07-09T16:03:58.020572+00:00",
+  "answers": {
+    "q1_most_profitable": [
+      {
+        "Código": "ER.10",
+        "Nombre": "Impuesto a la Renta",
+        "ROI Score": 38.4
+      },
+      {
+        "Código": "PNC.02",
+        "Nombre": "Leasing LP",
+        "ROI Score": 17.8
+      },
+      {
+        "Código": "ER.07",
+        "Nombre": "Depreciación y Amortización",
+        "ROI Score": 11.2
+      },
+      {
+        "Código": "PAT.04",
+        "Nombre": "Resultado del Ejercicio",
+        "ROI Score": 9.6
+      },
+      {
+        "Código": "PC.03",
+        "Nombre": "Leasing CP",
+        "ROI Score": 9.4
+      },
+      {
+        "Código": "PAT.05",
+        "Nombre": "Participaciones No Controladoras",
+        "ROI Score": 9.2
+      },
+      {
+        "Código": "PNC.04",
+        "Nombre": "Relacionadas LP",
+        "ROI Score": 9.1
+      },
+      {
+        "Código": "AC.09",
+        "Nombre": "Activos Biológicos CP",
+        "ROI Score": 9.1
+      },
+      {
+        "Código": "ER.05",
+        "Nombre": "Gastos de Venta",
+        "ROI Score": 7.8
+      },
+      {
+        "Código": "ANC.04",
+        "Nombre": "Inversiones Permanentes",
+        "ROI Score": 6.0
+      }
+    ],
+    "q2_top5_pct": 5.0,
+    "q3_top10_pct": 7.8,
+    "q4_top20_pct": 18.4,
+    "q5_unknown_disappear_no_parser": 5984,
+    "q6_double_variants_gain": {
+      "current_variants": 39,
+      "estimated_new_recovery": 288,
+      "note": "Estimando 60% de recuperación si duplicamos variantes de Top 10"
+    },
+    "q7_overrepresented": [],
+    "q8_underrepresented": [
+      {
+        "Código": "AC.06",
+        "Nombre": "Relacionadas CP",
+        "N° Variantes": 15,
+        "N° Clusters": 115
+      },
+      {
+        "Código": "ER.07",
+        "Nombre": "Depreciación y Amortización",
+        "N° Variantes": 4,
+        "N° Clusters": 105
+      },
+      {
+        "Código": "ER.13",
+        "Nombre": "Otras Ganancias y Pérdidas",
+        "N° Variantes": 18,
+        "N° Clusters": 105
+      },
+      {
+        "Código": "AC.03",
+        "Nombre": "Clientes",
+        "N° Variantes": 24,
+        "N° Clusters": 97
+      },
+      {
+        "Código": "ANC.07",
+        "Nombre": "Activos Biológicos LP",
+        "N° Variantes": 8,
+        "N° Clusters": 96
+      },
+      {
+        "Código": "ER.09",
+        "Nombre": "Gastos Financieros",
+        "N° Variantes": 24,
+        "N° Clusters": 95
+      },
+      {
+        "Código": "AC.06S",
+        "Nombre": "Cta. Cte. Socios / Retiros (Activo)",
+        "N° Variantes": 15,
+        "N° Clusters": 83
+      },
+      {
+        "Código": "ER.14",
+        "Nombre": "Corrección Monetaria y Reajustes",
+        "N° Variantes": 14,
+        "N° Clusters": 81
+      },
+      {
+        "Código": "ANC.06",
+        "Nombre": "Otros Activos No Corrientes",
+        "N° Variantes": 24,
+        "N° Clusters": 72
+      },
+      {
+        "Código": "PC.02",
+        "Nombre": "Obligaciones Bancarias CP",
+        "N° Variantes": 28,
+        "N° Clusters": 72
+      }
+    ],
+    "q9_split_candidates": [
+      {
+        "Código": "PC.01",
+        "Nombre": "Proveedores",
+        "N° Clusters": 592,
+        "Variantes": 74
+      },
+      {
+        "Código": "PAT.01",
+        "Nombre": "Capital",
+        "N° Clusters": 574,
+        "Variantes": 45
+      },
+      {
+        "Código": "ER.04",
+        "Nombre": "Gastos de Administración",
+        "N° Clusters": 308,
+        "Variantes": 89
+      },
+      {
+        "Código": "ANC.01",
+        "Nombre": "Activo Fijo",
+        "N° Clusters": 173,
+        "Variantes": 62
+      },
+      {
+        "Código": "ER.02",
+        "Nombre": "Costo de Ventas",
+        "N° Clusters": 153,
+        "Variantes": 501
+      },
+      {
+        "Código": "AC.05",
+        "Nombre": "Inventarios",
+        "N° Clusters": 118,
+        "Variantes": 33
+      },
+      {
+        "Código": "PC.06",
+        "Nombre": "Remuneraciones por Pagar",
+        "N° Clusters": 118,
+        "Variantes": 37
+      },
+      {
+        "Código": "AC.07",
+        "Nombre": "Otras Cuentas por Cobrar CP",
+        "N° Clusters": 117,
+        "Variantes": 53
+      },
+      {
+        "Código": "AC.06",
+        "Nombre": "Relacionadas CP",
+        "N° Clusters": 115,
+        "Variantes": 15
+      },
+      {
+        "Código": "PC.08",
+        "Nombre": "Otros Pasivos Corrientes",
+        "N° Clusters": 105,
+        "Variantes": 35
+      }
+    ],
+    "q10_complete": []
+  }
+}

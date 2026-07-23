@@ -1,0 +1,199 @@
+{
+  "timestamp": "2026-07-10T19:25:13.882043+00:00",
+  "configuration": {
+    "ENABLE_CMCC": true,
+    "ENABLE_CMCC_SHADOW": true,
+    "ENABLE_CMCC_PRODUCTION": false,
+    "ENABLE_CMCC_ROLLBACK": false,
+    "CMCC_THRESHOLD": 0.95,
+    "CMCC_REVIEW_THRESHOLD": 0.85,
+    "ENABLE_CMCC_REVIEW_PIPELINE": true
+  },
+  "summary": {
+    "label": "REVIEW_CMCC",
+    "files": 10,
+    "total_accounts": 1626,
+    "total_classified": 556,
+    "total_unknown": 445,
+    "total_review": 259,
+    "coverage_pct": 34.19,
+    "unknown_pct": 27.37,
+    "review_pct_of_unknown": 58.2,
+    "elapsed_seconds": 100.291,
+    "method_distribution": {
+      "unclassified": 445,
+      "learning_exact": 46,
+      "code": 28,
+      "dictionary_exact": 14,
+      "dictionary_fuzzy": 13,
+      "learning_fuzzy": 10
+    }
+  },
+  "statistics": {
+    "total_review": 259,
+    "total_unknown": 445,
+    "unknown_after_review": 186,
+    "review_pct": 58.2,
+    "num_companies": 7,
+    "num_concepts": 9,
+    "num_layouts": 1,
+    "num_documents": 9,
+    "top_companies": [
+      [
+        "BALANCE ORIGINAL",
+        118
+      ],
+      [
+        "Balance",
+        69
+      ],
+      [
+        "Balance Agricola El Comino dic",
+        19
+      ],
+      [
+        "balance general guayacan",
+        19
+      ],
+      [
+        "EEFF -",
+        14
+      ],
+      [
+        "BALANCE CLASIFICADO AICSA",
+        11
+      ],
+      [
+        "Balance Clasificado y Estado resultado",
+        9
+      ]
+    ],
+    "top_concepts": [
+      [
+        "AC.01",
+        152
+      ],
+      [
+        "ER.01",
+        51
+      ],
+      [
+        "PC.01",
+        23
+      ],
+      [
+        "ER.02",
+        18
+      ],
+      [
+        "PAT.01",
+        10
+      ],
+      [
+        "ER.04",
+        2
+      ],
+      [
+        "ER.13",
+        1
+      ],
+      [
+        "ER.11",
+        1
+      ],
+      [
+        "PC.05",
+        1
+      ]
+    ],
+    "top_concept_names": [
+      [
+        "Caja y Bancos",
+        152
+      ],
+      [
+        "Ventas",
+        51
+      ],
+      [
+        "Proveedores",
+        23
+      ],
+      [
+        "Costo de Ventas",
+        18
+      ],
+      [
+        "Capital",
+        10
+      ],
+      [
+        "Gastos de Administración",
+        2
+      ],
+      [
+        "Otras Ganancias y Pérdidas",
+        1
+      ],
+      [
+        "Utilidad Neta",
+        1
+      ],
+      [
+        "Impuestos por Pagar",
+        1
+      ]
+    ],
+    "top_layouts": [
+      [
+        "pdf_estandar",
+        259
+      ]
+    ],
+    "top_documents": [
+      [
+        "BALANCE ORIGINAL 2014.pdf",
+        118
+      ],
+      [
+        "Balance 2015 - Soc Com e Inv Campoamor SA.pdf",
+        32
+      ],
+      [
+        "Balance Agricola El Comino dic 2018.pdf",
+        19
+      ],
+      [
+        "Balance 2016 Campomanes S A .pdf",
+        19
+      ],
+      [
+        "balance general guayacan 2020.pdf",
+        19
+      ],
+      [
+        "Balance 2015 - Transp Libardon Ltda.pdf",
+        18
+      ],
+      [
+        "EEFF - 2018 Los Nogales.pdf",
+        14
+      ],
+      [
+        "BALANCE CLASIFICADO AICSA 2019.pdf",
+        11
+      ],
+      [
+        "Balance Clasificado y Estado resultado 2017 Inversiones San Marcelo Ltda.pdf",
+        9
+      ]
+    ],
+    "top_methods": [
+      [
+        "cmcc_variante",
+        259
+      ]
+    ]
+  },
+  "elapsed_seconds": 100.628
+}

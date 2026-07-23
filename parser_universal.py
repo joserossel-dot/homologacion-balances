@@ -27,6 +27,16 @@ import pdfplumber
 from PIL import Image
 
 
+# Feature flag: cuando está en False, se usa la heurística fija ULTIMAS_COLS.
+# Cuando está en True, LayoutDetector analiza los encabezados del documento
+# para determinar el orden real de columnas.
+ENABLE_DYNAMIC_LAYOUT = False
+
+# Feature flag: cuando está en False, no se ejecuta AccountTypeResolver.
+# Cuando está en True, cada cuenta se resuelve a AccountType después del parseo.
+ENABLE_ACCOUNT_TYPE_RESOLVER = False
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # MODELOS DE DATOS
 # ─────────────────────────────────────────────────────────────────────────────
@@ -49,6 +59,20 @@ class OrigenColumna(str, Enum):
     DESCONOCIDO = 'desconocido'
 
 
+# Mapeo de strings de LayoutDetector a enum OrigenColumna.
+# Solo se incluyen columnas informativas para asignación de monto.
+_LAYOUT_COLUMN_MAP: dict[str, OrigenColumna] = {
+    "activo": OrigenColumna.ACTIVO,
+    "pasivo": OrigenColumna.PASIVO,
+    "perdida": OrigenColumna.PERDIDA,
+    "ganancia": OrigenColumna.GANANCIA,
+    "patrimonio": OrigenColumna.PASIVO,
+    "deudor": OrigenColumna.DEUDOR,
+    "acreedor": OrigenColumna.ACREEDOR,
+    "saldo": OrigenColumna.DESCONOCIDO,
+}
+
+
 @dataclass
 class CuentaRaw:
     linea: int
@@ -58,6 +82,7 @@ class CuentaRaw:
     origen_columna: OrigenColumna = OrigenColumna.DESCONOCIDO
     es_total: bool = False
     confianza_extraccion: float = 1.0  # baja si viene de OCR
+    tipo_cuenta: Optional[str] = None  # AccountType resuelto (ACTIVO|PASIVO|...)
 
 
 @dataclass
@@ -349,6 +374,58 @@ PATRON_TOTAL = re.compile(
     re.IGNORECASE
 )
 
+<<<<<<< HEAD
+=======
+# ── Filtro de líneas basura (FASE 24B.2) ─────────────────────────────────
+# Cada patrón matchea la línea COMPLETA para no filtrar substrings dentro
+# de nombres de cuentas contables.
+
+GARBAGE_PATTERNS: list[re.Pattern] = [
+    # URLs
+    re.compile(r'^https?://\S+$', re.I),
+    re.compile(r'^www\.\S+\.\S+$', re.I),
+    # Emails
+    re.compile(r'^\S+@\S+\.\S+$'),
+    # Teléfonos chilenos (+56 9 XXXX XXXX / (2) XXXX XXXX)
+    re.compile(r'^\+56[\s-]?\d[\s\d-]{7,}\d$'),
+    re.compile(r'^\(\d{1,4}\)[\s-]?\d[\s\d-]{6,}\d$'),
+    # RUTs sueltos
+    re.compile(r'^\s*\d{1,2}\.\d{3}\.\d{3}[-][0-9kK]\s*$', re.I),
+    # Indicadores de página / folio
+    re.compile(r'^\s*(?:P[aá]gina|P[aá]g|Pag|Folio|Hoja|N°|No\.?)\s*\d+(?:\s*(?:de|/)\s*\d+)?\s*$', re.I),
+    # Etiquetas administrativas de encabezado (RUT, Domicilio, Teléfono, etc.)
+    re.compile(r'^\s*(?:RUT|Domicilio|Comuna|Ciudad|Direcci[oó]n|Tel[eé]fono|Email?|Fax)\s*:.*$', re.I),
+    re.compile(r'^\s*Fecha\s*(?:de\s*)?(?:emi[só]i[oó]n|creaci[oó]n)\s*:.*$', re.I),
+    # Notas al pie
+    re.compile(r'^\s*(?:Notas?\s+\d+(?:\s*(?:a|l|y|al)\s*\d+)?|Ver\s+Notas?\s+\d+(?:\s*(?:a|l|y|al)\s*\d+)?)\s*$', re.I),
+    # Firmas / cargos
+    re.compile(r'^\s*(?:Firma|Representante|Contador|Auditor|Revisor|Preparado)\b.*$', re.I),
+    # Firmas de auditoría / consultoría
+    re.compile(r'^\s*(?:Deloitte|Ernst\s*Young|PwC|Pricewaterhouse(?:Coopers)?|KPMG|BDO|Grant\s*Thornton|Baker\s*Tilly|Mazars)\b.*$', re.I),
+    # Líneas decorativas / separadores
+    re.compile(r'^[-=*_]{4,}$'),
+    re.compile(r'^\s*-\s*\d+\s*-\s*$'),
+    # Fechas sueltas (dd de mes de aaaa o dd/mm/aaaa)
+    re.compile(r'^\s*\d{1,2}\s*de\s+\w+\s+de\s+\d{4}\s*$', re.I),
+    re.compile(r'^\s*\d{1,2}/\d{1,2}/\d{2,4}\s*$'),
+]
+
+
+def _es_linea_basura(linea: str) -> bool:
+    """Retorna True si la línea completa es basura (URL, teléfono, encabezado,
+    pie de página, dirección, etc.). No filtra cuentas contables porque los
+    patrones matchean la totalidad de la línea, no substrings.
+    """
+    for patron in GARBAGE_PATTERNS:
+        if patron.match(linea):
+            return True
+    return False
+
+# OCR confunde '.' y ',' dentro de códigos de cuenta tipo X.XX.XX.XX,
+# produciendo cosas como "1.1.01,01" o "1,1,08,05". Se detecta un prefijo
+# de 3-5 grupos cortos de dígitos separados por '.' o ',' al inicio de la
+# línea y se normaliza a '.' antes de cualquier otro procesamiento.
+>>>>>>> 6f7d24a (Recovery: save all work through Sprint 28.5)
 PATRON_CODIGO_OCR = re.compile(r'^(\d{1,2}[.,]){2,4}\d{1,2}(?=\s)')
 
 
@@ -366,9 +443,13 @@ def parsear_linea(
     formato_codigo: FormatoCodigo,
     separador_miles: str,
     confianza_base: float = 1.0,
+    column_order: Optional[list[OrigenColumna]] = None,
 ) -> Optional[CuentaRaw]:
     linea = linea.strip()
     if len(linea) < 4:
+        return None
+
+    if _es_linea_basura(linea):
         return None
 
     codigo = None
@@ -416,14 +497,26 @@ def parsear_linea(
 
     es_total = bool(PATRON_TOTAL.match(nombre))
 
+<<<<<<< HEAD
     ULTIMAS_COLS = [OrigenColumna.ACTIVO, OrigenColumna.PASIVO,
+=======
+    # Determinar orden de columnas: si ENABLE_DYNAMIC_LAYOUT está activo
+    # y se proporcionó un column_order con confianza suficiente, usarlo.
+    # Fallback: heurística actual (últimas 4 columnas = Activo/Pasivo/Pérdida/Ganancia).
+    if column_order and ENABLE_DYNAMIC_LAYOUT:
+        columnas = column_order
+    else:
+        columnas = [OrigenColumna.ACTIVO, OrigenColumna.PASIVO,
+>>>>>>> 6f7d24a (Recovery: save all work through Sprint 28.5)
                     OrigenColumna.PERDIDA, OrigenColumna.GANANCIA]
 
+    n_col = len(columnas)
     monto_principal = None
     origen = OrigenColumna.DESCONOCIDO
 
     if montos_tokens:
         n = len(montos_tokens)
+<<<<<<< HEAD
         
         if n >= 4:
             cola = montos_tokens[-4:]
@@ -469,6 +562,22 @@ def parsear_linea(
                     origen = OrigenColumna.PERDIDA
                 elif any(x in nom_lower for x in ['venta', 'ingreso', 'ganancia', 'utilidad', 'percibido']):
                     origen = OrigenColumna.GANANCIA
+=======
+        k = min(n_col, n)
+        cola = montos_tokens[-k:]
+        etiquetas = columnas[-k:]
+
+        for tok, et in zip(cola, etiquetas):
+            val = parsear_monto(tok, separador_miles)
+            if val is not None and val != 0:
+                monto_principal = val
+                origen = et
+                break
+
+        if monto_principal is None:
+            monto_principal = parsear_monto(cola[0], separador_miles)
+            origen = etiquetas[0]
+>>>>>>> 6f7d24a (Recovery: save all work through Sprint 28.5)
 
     return CuentaRaw(
         linea=numero_linea,
@@ -516,16 +625,74 @@ class ParserPDF:
             muestra_montos.extend(PATRON_MONTOS.findall(l))
         separador = detectar_separador_miles(muestra_montos)
 
+<<<<<<< HEAD
+=======
+        # 3b. Detectar layout de columnas (solo si ENABLE_DYNAMIC_LAYOUT está activo)
+        advertencias = []
+        column_order: Optional[list[OrigenColumna]] = None
+        layout_columns: Optional[list[str]] = None
+        if ENABLE_DYNAMIC_LAYOUT:
+            from parsers.layout_detector import LayoutDetector
+            detector = LayoutDetector()
+            layout = detector.detect(lineas)
+            if layout.confidence >= 0.5:
+                layout_columns = list(layout.columns)
+                cols = []
+                for c in layout.columns:
+                    oc = _LAYOUT_COLUMN_MAP.get(c)
+                    if oc is not None:
+                        cols.append(oc)
+                if len(cols) >= 2:
+                    column_order = cols
+                    advertencias.append(
+                        f"LayoutDetector: {len(cols)} columnas "
+                        f"({', '.join(c.value for c in cols)}), "
+                        f"confianza={layout.confidence:.2f}"
+                    )
+                else:
+                    advertencias.append(
+                        "LayoutDetector detectó columnas pero ninguna "
+                        "fue reconocida — usando heurística estándar."
+                    )
+            else:
+                advertencias.append(
+                    f"LayoutDetector: confianza insuficiente "
+                    f"({layout.confidence:.2f}) — usando heurística estándar."
+                )
+
+        # 4. Parsear todas las líneas
+>>>>>>> 6f7d24a (Recovery: save all work through Sprint 28.5)
         confianza = 0.75 if requirio_ocr else 1.0
         cuentas = []
-        advertencias = []
         for i, l in enumerate(lineas):
-            c = parsear_linea(l, i, formato_codigo, separador, confianza)
+            c = parsear_linea(l, i, formato_codigo, separador, confianza,
+                              column_order=column_order)
             if c:
                 cuentas.append(c)
 
+<<<<<<< HEAD
         cuadra_ok, totales, alertas_cuadre = verificar_cuadre_balance(cuentas)
         advertencias.extend(alertas_cuadre)
+=======
+        # 4b. Resolver tipo de cuenta (solo si ENABLE_ACCOUNT_TYPE_RESOLVER está activo)
+        if ENABLE_ACCOUNT_TYPE_RESOLVER and cuentas:
+            from parsers.account_type_resolver import AccountTypeResolver
+            resolver = AccountTypeResolver()
+            suma_conf = 0.0
+            for c in cuentas:
+                result = resolver.resolve(
+                    origen_columna=c.origen_columna,
+                    codigo=c.codigo,
+                    layout_columns=layout_columns,
+                )
+                c.tipo_cuenta = result.account_type.value
+                suma_conf += result.confidence
+            prom_conf = suma_conf / len(cuentas)
+            advertencias.append(
+                f"AccountTypeResolver: {len(cuentas)} cuentas resueltas, "
+                f"confianza promedio={prom_conf:.2f}"
+            )
+>>>>>>> 6f7d24a (Recovery: save all work through Sprint 28.5)
 
         if requirio_ocr:
             advertencias.append(

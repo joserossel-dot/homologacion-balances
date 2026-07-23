@@ -1,0 +1,1 @@
+{"source_file": "", "account_code": "2136099", "account_name": "Otras Reservas", "nature": "liability", "standard_code": "PAT.02", "final_code": "PAT.02", "confidence": 0.98, "method": "learning_exact", "reason": "Gold Standard (exact) → PAT.02 (matched: Otras Reservas)", "cmcc_score": 0.0, "cmcc_code": null, "cmcc_concept": null, "is_unknown": false}

@@ -1,0 +1,1 @@
+{"source_file": "", "account_code": "", "account_name": ": Seguros", "nature": "profit", "standard_code": "ER.04", "final_code": "ER.04", "confidence": 0.98, "method": "learning_exact", "reason": "Gold Standard (exact) → ER.04 (matched: Seguros)", "cmcc_score": 0.0, "cmcc_code": null, "cmcc_concept": null, "is_unknown": false}

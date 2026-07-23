@@ -1,0 +1,267 @@
+{
+  "total_entries": 416,
+  "total_high_confidence": 416,
+  "impact_distribution": {
+    "100+": 6,
+    "50-99": 14,
+    "20-49": 26,
+    "10-19": 52,
+    "0-9": 318
+  },
+  "confidence_distribution": {
+    "0.95-1.0": 124,
+    "0.80-0.89": 114,
+    "0.90-0.94": 9,
+    "<0.80": 169
+  },
+  "top_codes": [
+    [
+      "ANC.01",
+      27
+    ],
+    [
+      "ER.04",
+      22
+    ],
+    [
+      "PAT.01",
+      19
+    ],
+    [
+      "ER.02",
+      18
+    ],
+    [
+      "ER.09",
+      16
+    ],
+    [
+      "ER.01",
+      16
+    ],
+    [
+      "AC.06S",
+      16
+    ],
+    [
+      "PC.06",
+      16
+    ],
+    [
+      "PC.01",
+      16
+    ],
+    [
+      "AC.06",
+      15
+    ],
+    [
+      "AC.05",
+      15
+    ],
+    [
+      "ER.13",
+      14
+    ],
+    [
+      "AC.07",
+      14
+    ],
+    [
+      "ANC.06",
+      13
+    ],
+    [
+      "ER.07",
+      12
+    ],
+    [
+      "PNC.05",
+      11
+    ],
+    [
+      "PC.08",
+      11
+    ],
+    [
+      "PC.02",
+      11
+    ],
+    [
+      "ER.05",
+      10
+    ],
+    [
+      "AC.01",
+      10
+    ],
+    [
+      "PC.05",
+      10
+    ],
+    [
+      "ER.14",
+      9
+    ],
+    [
+      "PNC.01",
+      9
+    ],
+    [
+      "AC.08",
+      7
+    ],
+    [
+      "AC.03",
+      7
+    ],
+    [
+      "AC.02",
+      7
+    ],
+    [
+      "AC.04",
+      6
+    ],
+    [
+      "PAT.02",
+      6
+    ],
+    [
+      "PC.03",
+      6
+    ],
+    [
+      "PAT.04",
+      5
+    ]
+  ],
+  "top_concepts": [
+    [
+      "ANC.01 — Activo Fijo",
+      27
+    ],
+    [
+      "ER.04 — Gastos de Administración",
+      22
+    ],
+    [
+      "PAT.01 — Capital",
+      19
+    ],
+    [
+      "ER.02 — Costo de Ventas",
+      18
+    ],
+    [
+      "ER.09 — Gastos Financieros",
+      16
+    ],
+    [
+      "ER.01 — Ventas",
+      16
+    ],
+    [
+      "AC.06S — Cta. Cte. Socios / Retiros (Activo)",
+      16
+    ],
+    [
+      "PC.06 — Remuneraciones por Pagar",
+      16
+    ],
+    [
+      "PC.01 — Proveedores",
+      16
+    ],
+    [
+      "AC.06 — Relacionadas CP",
+      15
+    ],
+    [
+      "AC.05 — Inventarios",
+      15
+    ],
+    [
+      "ER.13 — Otras Ganancias y Pérdidas",
+      14
+    ],
+    [
+      "AC.07 — Otras Cuentas por Cobrar CP",
+      14
+    ],
+    [
+      "ANC.06 — Otros Activos No Corrientes",
+      13
+    ],
+    [
+      "ER.07 — Depreciación y Amortización",
+      12
+    ],
+    [
+      "PNC.05 — Otros Pasivos LP",
+      11
+    ],
+    [
+      "PC.08 — Otros Pasivos Corrientes",
+      11
+    ],
+    [
+      "PC.02 — Obligaciones Bancarias CP",
+      11
+    ],
+    [
+      "ER.05 — Gastos de Venta",
+      10
+    ],
+    [
+      "AC.01 — Caja y Bancos",
+      10
+    ],
+    [
+      "PC.05 — Impuestos por Pagar",
+      10
+    ],
+    [
+      "ER.14 — Corrección Monetaria y Reajustes",
+      9
+    ],
+    [
+      "PNC.01 — Obligaciones Bancarias LP",
+      9
+    ],
+    [
+      "AC.08 — Otros Activos Corrientes",
+      7
+    ],
+    [
+      "AC.03 — Clientes",
+      7
+    ],
+    [
+      "AC.02 — Inversiones Corto Plazo",
+      7
+    ],
+    [
+      "AC.04 — Documentos por Cobrar",
+      6
+    ],
+    [
+      "PAT.02 — Reservas",
+      6
+    ],
+    [
+      "PC.03 — Leasing CP",
+      6
+    ],
+    [
+      "PAT.04 — Resultado del Ejercicio",
+      5
+    ]
+  ],
+  "max_impact": 234.0,
+  "min_impact": 1.41,
+  "avg_impact": 11.1,
+  "total_variants": 1579,
+  "total_frequency": 3080,
+  "generated_at": "2026-07-09T15:56:54.374623+00:00"
+}

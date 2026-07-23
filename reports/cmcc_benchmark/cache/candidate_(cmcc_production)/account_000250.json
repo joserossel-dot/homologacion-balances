@@ -1,0 +1,1 @@
+{"source_file": "", "account_code": "", "account_name": ": APORTE PATRONAL", "nature": "liability", "standard_code": "ER.04", "final_code": "ER.04", "confidence": 0.8091, "method": "dictionary_fuzzy", "reason": "Coincidencia fuzzy (90.9090909090909%) con 'APORTES PATRONALES' → ER.04", "cmcc_score": 0.0, "cmcc_code": null, "cmcc_concept": null, "is_unknown": false}

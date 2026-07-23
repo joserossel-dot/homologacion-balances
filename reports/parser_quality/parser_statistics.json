@@ -1,0 +1,275 @@
+{
+  "total_candidates": 30022,
+  "total_documents": 186,
+  "accepted": 3641,
+  "accepted_pct": 12.13,
+  "review": 22456,
+  "review_pct": 74.8,
+  "rejected": 3925,
+  "rejected_pct": 13.07,
+  "avg_confidence": 0.6078,
+  "top_rejection_reasons": [
+    [
+      "ocr_low_confidence",
+      1548
+    ],
+    [
+      "name_too_many_digits",
+      827
+    ],
+    [
+      "name_too_short",
+      769
+    ],
+    [
+      "name_too_many_symbols",
+      598
+    ],
+    [
+      "contains_date",
+      486
+    ],
+    [
+      "name_only_symbols",
+      351
+    ],
+    [
+      "contains_header",
+      322
+    ],
+    [
+      "contains_address",
+      304
+    ],
+    [
+      "name_too_long",
+      191
+    ],
+    [
+      "contains_balance_general",
+      188
+    ],
+    [
+      "contains_rut",
+      159
+    ],
+    [
+      "contains_page",
+      144
+    ],
+    [
+      "contains_firma",
+      114
+    ],
+    [
+      "contains_ciudad",
+      109
+    ],
+    [
+      "contains_moneda",
+      104
+    ],
+    [
+      "contains_comuna",
+      68
+    ],
+    [
+      "html_artifact",
+      63
+    ],
+    [
+      "contains_periodo",
+      48
+    ],
+    [
+      "contains_phone",
+      46
+    ],
+    [
+      "contains_region",
+      5
+    ]
+  ],
+  "top_docs_by_rejections": [
+    [
+      "ECDS Balance 10-2020 (1).pdf",
+      334
+    ],
+    [
+      "Balance Xpovin.pdf",
+      176
+    ],
+    [
+      "balance tributario dic 2020 agr tuqui.xlsx",
+      159
+    ],
+    [
+      "EEFF 16 - RENTAS 17 - GRUPO CASA GARCIA.pdf",
+      145
+    ],
+    [
+      "BALANCE CLASIFICADO CENTRAL 2019.pdf",
+      104
+    ],
+    [
+      "BALANCE ORIGINAL 2014.pdf",
+      93
+    ],
+    [
+      "Pre-Balance al 31-12-2020_TRANSPORTES JG_76350177-9 .xlsx",
+      85
+    ],
+    [
+      "balance cm 2017.pdf",
+      70
+    ],
+    [
+      "Balance Capiro 2017-2018.pdf",
+      64
+    ],
+    [
+      "Balance Exportadora Gonzagri.pdf",
+      64
+    ],
+    [
+      "Balance Exportadora Gonzagri_155.pdf",
+      64
+    ],
+    [
+      "Balance Exportadora Gonzagri_157.pdf",
+      64
+    ],
+    [
+      "balance cm 2015.pdf",
+      62
+    ],
+    [
+      "Balance Agrícola Gonzagri Ltda.pdf",
+      58
+    ],
+    [
+      "Balance Agrícola Gonzagri Ltda_147.pdf",
+      58
+    ],
+    [
+      "Balance Agrícola Gonzagri Ltda_149.pdf",
+      58
+    ],
+    [
+      "Balance Agrícola González Ltda.pdf",
+      55
+    ],
+    [
+      "Balance Agrícola González Ltda_150.pdf",
+      55
+    ],
+    [
+      "Balance Agrícola González Ltda_153.pdf",
+      55
+    ],
+    [
+      "Balance 2018 con firma.pdf",
+      54
+    ]
+  ],
+  "lowest_confidence_docs": [
+    [
+      "BALANCE CLASIFICADO CENTRAL 2019.pdf",
+      0.224
+    ],
+    [
+      "Balance Inmob 2015.pdf",
+      0.3731
+    ],
+    [
+      "Balance Asipac 2015.pdf",
+      0.3969
+    ],
+    [
+      "Balance Sup Central 2015.pdf",
+      0.4083
+    ],
+    [
+      "Balance Mega 2015.pdf",
+      0.4111
+    ],
+    [
+      "balance tributario dic 2020 agr tuqui.xlsx",
+      0.4506
+    ],
+    [
+      "Pre-Balance al 31-12-2020_TRANSPORTES JG_76350177-9 .xlsx",
+      0.4511
+    ],
+    [
+      "Balance Xpovin.pdf",
+      0.458
+    ],
+    [
+      "Balance Capiro 2017-2018.pdf",
+      0.4778
+    ],
+    [
+      "Balance 2018 con firma.pdf",
+      0.4834
+    ],
+    [
+      "BALANCE SAN FELIX 2014-2015.pdf",
+      0.4846
+    ],
+    [
+      "BALANCE DAIN 2015 hoja 1.pdf",
+      0.4887
+    ],
+    [
+      "BALANCE DAIN 2015 hoja 2 (2).pdf",
+      0.4887
+    ],
+    [
+      "balance cm 2017.pdf",
+      0.4892
+    ],
+    [
+      "balance cm 2015.pdf",
+      0.4922
+    ],
+    [
+      "BALANCE CORREGIDO SAN FELIX 2015 hoja 1.pdf",
+      0.5
+    ],
+    [
+      "Pre-Balance Comercializadora 2018.pdf",
+      0.5025
+    ],
+    [
+      "Balance Clasificado 2016.pdf",
+      0.504
+    ],
+    [
+      "PRE BALANCE AGRICOLA SAN SEBASTIAN.pdf",
+      0.5052
+    ],
+    [
+      "BALANCE EL DAIN 2014-2015.pdf",
+      0.5069
+    ]
+  ],
+  "confidence_distribution": {
+    "0.00-0.25": 949,
+    "0.25-0.50": 2976,
+    "0.50-0.70": 16376,
+    "0.70-0.85": 6080,
+    "0.85-1.00": 3641,
+    "1.00": 0
+  },
+  "ocr": {
+    "count": 72,
+    "results": 9165,
+    "avg_confidence": 0.5693
+  },
+  "native": {
+    "count": 138,
+    "results": 20857,
+    "avg_confidence": 0.6247
+  }
+}

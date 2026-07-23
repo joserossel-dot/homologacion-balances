@@ -1,0 +1,1350 @@
+{
+  "total_decisions": 251,
+  "pending": 245,
+  "approved": 4,
+  "rejected": 1,
+  "reassigned": 1,
+  "approval_rate": 1.59,
+  "rejection_rate": 0.4,
+  "reassignment_rate": 0.4,
+  "unique_variants_reviewed": 204,
+  "unique_concepts_impacted": 9,
+  "unique_reviewers": 2,
+  "unique_companies": 7,
+  "top_concepts": [
+    [
+      "AC.01",
+      146
+    ],
+    [
+      "ER.01",
+      49
+    ],
+    [
+      "PC.01",
+      23
+    ],
+    [
+      "ER.02",
+      18
+    ],
+    [
+      "PAT.01",
+      10
+    ],
+    [
+      "ER.04",
+      2
+    ],
+    [
+      "ER.13",
+      1
+    ],
+    [
+      "ER.11",
+      1
+    ],
+    [
+      "PC.05",
+      1
+    ]
+  ],
+  "top_reviewers": [
+    [
+      "",
+      244
+    ],
+    [
+      "system_test",
+      7
+    ]
+  ],
+  "top_companies": [
+    [
+      "BALANCE ORIGINAL",
+      115
+    ],
+    [
+      "Balance",
+      69
+    ],
+    [
+      "Balance Agricola El Comino dic",
+      19
+    ],
+    [
+      "EEFF -",
+      14
+    ],
+    [
+      "balance general guayacan",
+      14
+    ],
+    [
+      "BALANCE CLASIFICADO AICSA",
+      11
+    ],
+    [
+      "Balance Clasificado y Estado resultado",
+      9
+    ]
+  ],
+  "avg_confidence": 1.0,
+  "decisions": [
+    {
+      "review_id": "84564be31a86dff2",
+      "variant": "rengo",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "2527999184ce1cf1",
+      "variant": "1 Desde Enero Hasta Diciembre de",
+      "status": "APPROVED"
+    },
+    {
+      "review_id": "790acb4218898477",
+      "variant": "CAJA 5.519,080 PROVEEDORES",
+      "status": "APPROVED"
+    },
+    {
+      "review_id": "a3d354fb54086292",
+      "variant": "CAJA CHICA 100.000 CUENTAS POR PAGAR EMPRESA RELACION",
+      "status": "APPROVED"
+    },
+    {
+      "review_id": "cf0874a324fdd7b6",
+      "variant": "BANCO CORPBANCA CTA. 2 . 1,495,155 CTA CTE CONSIGNADOR",
+      "status": "APPROVED"
+    },
+    {
+      "review_id": "b021ca197e4e2d39",
+      "variant": "BANCO CORPBANCA 5.079.420 CUENTAS POR PAGAR",
+      "status": "REASSIGNED"
+    },
+    {
+      "review_id": "7d96929215237e58",
+      "variant": "SCOTIABANK 223.810 ACREEDORES VARIOS",
+      "status": "REJECTED"
+    },
+    {
+      "review_id": "541e8f00140971e5",
+      "variant": "mk TARJETA DIN-ABC 1,197,005 HONORARIOS POR PAGAR",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "ab8f02ee986abf01",
+      "variant": "TARJETA DE CREDITO 756.630 IVA DEBITO FISCAL,",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "ef8601399c351195",
+      "variant": "TARJETA CREDITO 3 CUOTAS 33.358.152 RETENCION 2* CAT, PROFESIONALES",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "b9a79baac6cbac30",
+      "variant": "ANTICIPO REMUNERACIONES 1.025.745 Total Pasivo Largo Plazo",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "ace071d201bbae12",
+      "variant": "Enero a Diciembre",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "c3c22c6088d12bc5",
+      "variant": "(=) MARGEN DE LA EXPLOTACION",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "f74e2f0b2a1bcc0d",
+      "variant": "Materiales de Oficina",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "320c1b8c7fb12622",
+      "variant": "imprenta",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "64d005441cc13bae",
+      "variant": "Gastos de Viaje y Representación",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "8dab243fceb51ec0",
+      "variant": "electricidad",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "a4c4d08c5638e598",
+      "variant": "agua",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "6d4c2cc2bfaab8b3",
+      "variant": "Servicio de Correo",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "8761de6e5dbeb21a",
+      "variant": "Materiales de Aseo",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "c73648e5e7e0c16b",
+      "variant": "Patente Comercial y Vehículos",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "a12aefd52dfa6cae",
+      "variant": "Varios Dificil Clasificación",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "3d35dea32dd54cc6",
+      "variant": "Materiales de Taller",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "9177af35b0d55fb4",
+      "variant": "Mat. Prepar. Vitrinas (Visual)",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "cd5282ceede56338",
+      "variant": "Reajuste PPM-IVA",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "519a7739523bb06d",
+      "variant": "REPUBLICA DE CHILE AÑO TRIBUTARIO 07 N*",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "9fad6eaf7dc097f8",
+      "variant": "form",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "67ab2f5c1eb71cc6",
+      "variant": "Folio N*",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "7d535a7e09971d30",
+      "variant": "65 SALDO A FAVOR 85 17504249 + 68 Impuesto Adeudado",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "0993a2f574d43a87",
+      "variant": "66 Menos: Saldo puesto a 86 - 69 Reajuste Art. 72 línea 68: 0.6%",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "1cc957277d123cdd",
+      "variant": "disposición . 70 TOTAL A PAGAR (Lineas 68+69)",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "b69f0214aff802c7",
+      "variant": "72 MAS: Intereses y Multas",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "a50a6591f992b835",
+      "variant": "GM ———omeccion AVDA. LOSCONQUISTADORES 1700 FOLIO UNICO NACIONAL : —",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "ff727bff9923bd4e",
+      "variant": "anivel",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "efed742a12aaed13",
+      "variant": "Desde 01/01/2014 — Al 3112014 NW” Folio",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "ffa12ba90716ff5a",
+      "variant": "documentos",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "39bb13d4a73be27e",
+      "variant": "documentos",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "b3510705b62bedc9",
+      "variant": "BANCO DE CHILE",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "de7c07013f6d2be0",
+      "variant": "o BANCO CHILEDOLAR —",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "4b6dbe453b0e3d60",
+      "variant": "GTA. CTE CLIENTES “RO18.047.831 —",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "f85c6105e968a264",
+      "variant": "e ANTICIPO PROVEEDORES 1.348.569.258 —1077.117.567",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "3e6bc564d1a47d70",
+      "variant": "l ANTICIFO PERSONAL:",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "272c997dccad7031",
+      "variant": "PRESTAMO PERSONAL",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "a7b9a45b2aa330b0",
+      "variant": "IVA CREDITO FISCAL 693.484.738 676833294 N",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "002f22df99f7b0b0",
+      "variant": "ppm",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "5dafcbe72f5e1ab4",
+      "variant": ": GASTOSOPERACIONALES —",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "a1796813f0c71763",
+      "variant": "materiales",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "82e2f24d96837ba8",
+      "variant": "ARTICULOS DE ASEO",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "20b532cc4fe75c42",
+      "variant": "OBRAS B. MUEBLES 108.963.751 4A80D00 —",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "97a50b63839bba00",
+      "variant": "fletespruta",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "df70e393a0172ee0",
+      "variant": "Otros gastos",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "2e456b4cfd94b3eb",
+      "variant": "MAQUINARIA 211376247 43.379.018 227.497:225",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "2fdc5cb2d269ac30",
+      "variant": "vehiculos",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "61cb3c0ecbe98e2b",
+      "variant": "l Total Párina",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "01877455a865c490",
+      "variant": "o DIRECCION AVDA, LOS CONQUISTADORES 1700 FOLIO UNICO NACIONAL :",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "9e4782d210cdd4d7",
+      "variant": "Desde 01/01/2014 Al 31/12/2014 N' Folio",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "56797e1dd5153bb4",
+      "variant": "Dela Página Anterior",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "5bcdf1856814d93f",
+      "variant": "comunicaciones",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "42d6a3cb461f1a2d",
+      "variant": "computacion",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "8a14a72c8b27d949",
+      "variant": "l MOBILIARIO",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "6abaeb910e444ef8",
+      "variant": ": VARIOS DEUDORESLP. '",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "519e43afc68229b1",
+      "variant": "o: BANCO CHILE US1",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "18bf1ed219459488",
+      "variant": ": PROVEEDORES 3776402807 —",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "ce1766faed213a10",
+      "variant": "eo HONORARIOS POR",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "f2bf1c9a7414637f",
+      "variant": "documentos",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "fc2600b9123bde4f",
+      "variant": "| REMUNERACIONESPOR — 856.159.690 970.6050%4",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "295d071967867695",
+      "variant": "a CAJA DECOMPENSACION —",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "59ffcc9e7e1ac3f1",
+      "variant": "o IVA DEBITO FISCAL 1094475.077 —",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "e27fec7775b502ff",
+      "variant": "O Cs omecaioN AVDA. LOSCONQUISTADORES 1700 FOLIO UNICO NACIONAL :",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "c1a5528ef10eec92",
+      "variant": "Oo. ANIVEL",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "eafc28689add66c3",
+      "variant": "Desde 01/01/2014 Aa 31/12/2014 N\" Folio",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "25b5d5c90a11c9c8",
+      "variant": ": De la Página Anterior",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "a4770374e66d6183",
+      "variant": "e PROVISION INTERESES",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "026b89da88aabdf2",
+      "variant": "PROVISIÓN SEGURO",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "9bb0273948c0fe0c",
+      "variant": "BANCO DE CHILE",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "c089cc556f4e8f46",
+      "variant": "fondos",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "cf0435448f37c2e9",
+      "variant": "PERDIDA O GANANCIA",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "426d17e71861c7b5",
+      "variant": "GRATIFICACIONES",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "cf42bcc43600a155",
+      "variant": "BONOS",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "e4c18f843451fb05",
+      "variant": ": SEGURO CESANTÍA",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "e340fe784ee2d120",
+      "variant": "So: AGUINALDOS Y",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "f36342d65e8108e7",
+      "variant": "E CASINO",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "3fb3e911282dbd07",
+      "variant": "TRANSPORTE PERSONAL —",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "1e696c119310bf5a",
+      "variant": "OTROS GASTOS DEL 997 682 ? 997.582 :",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "33abb5f77206cdef",
+      "variant": "electricidad",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "240576ace7bf52c2",
+      "variant": "COMBUSTIBLE",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "d88d5450e8926645",
+      "variant": "anivel",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "16b5bfe398d0bae6",
+      "variant": "Desde 01/01/3014 — Al 31/12£0014 WN\" Folio",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "1ff3e0d43f81e106",
+      "variant": "Dela Página Anterior",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "9020af79e4965b98",
+      "variant": "ISPEGCIONES",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "fd8a7317808f218a",
+      "variant": "aseo",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "b76930233a8dfc2a",
+      "variant": "o ANALISISLABORATORIO-——",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "63bc72f5fd2ef62f",
+      "variant": ": MAQUINARIA 579.394.650 1.698.296 —",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "4a491d3450ea7101",
+      "variant": "equipos",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "1be693684517a307",
+      "variant": "] TELEFONO RED FIA",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "8fe7ad869e46fd71",
+      "variant": "O: TELEFONO CELULAR",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "a88be8952e47e8d0",
+      "variant": "correspondencia",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "5dca302328cf53ee",
+      "variant": "GASTOS IMPRENTA",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "8bf08c3abdb8cfb6",
+      "variant": "PATENTES “2301974",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "82fefbe7e8ebf7eb",
+      "variant": "had SEGUROS",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "3645d599b155cfcc",
+      "variant": "movilizacion",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "4fddeed70a9d08da",
+      "variant": "EQUIPOS DE SEGURIDAD",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "e25a83fef25e82db",
+      "variant": "CERTIFICACION",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "36c45f8a34b6bf76",
+      "variant": "soporte",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "525e876e80aa87c2",
+      "variant": "o Total Pázina",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "d99cafc818b8d539",
+      "variant": "0 DIRECCION — AYDA. LOS CONQUISTADORES 1700 FOLIO UNICO NACIONAL : —",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "e0b7e00350c2ff92",
+      "variant": "anivel",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "5078ee7f861dd6a4",
+      "variant": "Desde 01/01/0014 Al 31/12/2014 W Folio",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "2f227036136842ae",
+      "variant": ": De la Página Anterior",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "4339fd2b5448ce28",
+      "variant": "licencias",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "e015ded92c6ad959",
+      "variant": ": EMBALAJE",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "ffe7821508884a6a",
+      "variant": "INSPECCIONES 3*",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "3c7bdfcef44fac88",
+      "variant": "i ARMADO DE CAJAS",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "29a9737f844976f0",
+      "variant": "E IDENTIFICACION PALLET",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "32e09c607594cfed",
+      "variant": "indemnizacion",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "d74f927242741a53",
+      "variant": ", REMUNERACIONES 122.629.043 122.529.043 i",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "9d4c4b6e05e4a01a",
+      "variant": "hd : GRATIFICACION",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "5a5f60e11b1e2954",
+      "variant": "BONOS",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "5914b7701ec40dfa",
+      "variant": ": SEGURO CESANTÍA",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "cbb8137ec63d11e7",
+      "variant": "o AGUINALDOS Y",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "e614f09980eefbc7",
+      "variant": "E CASINO",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "cacdea5f28a1b99a",
+      "variant": "] TELEFONO RED FIA",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "eeceac433cdcfdfd",
+      "variant": "O: TELEFONO CELULAR",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "424ec08ebbc7985d",
+      "variant": "correspondencia",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "ffb7d4feadba5569",
+      "variant": "o. ARTICULOS LIBRERIA",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "98cfbe7e795671fa",
+      "variant": "GASTOS IMPRENTA",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "e000f6358c3304d4",
+      "variant": "l PATENTES",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "283f5ddafdc430ab",
+      "variant": "o Total Página",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "4760c06aa9166f33",
+      "variant": "o DIRECCION AVDA, LOS CONQUISTADORES 1700 FOLIO UNICO NACIONAL :",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "49cc33a96898fd74",
+      "variant": "l De la Página Anterior",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "282849bffeb24833",
+      "variant": "peajes",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "268eb636e7075119",
+      "variant": "ARTICULOS DE ASEO",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "ba35c796120e8ddf",
+      "variant": "movilizacion",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "8174e60e93947876",
+      "variant": ": IVA FUERA DE PLAZO",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "0b6fdc42ef9fe92b",
+      "variant": "O DIFERENCIA DECAMBIO >",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "51150ddf21428010",
+      "variant": "impuestos",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "cc9a7c1cc6d57b15",
+      "variant": ": EMBALAJE",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "fe78781f88eb0062",
+      "variant": "ARRIENDO CAMARA 16.677.603 —",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "d95fcb1387e81285",
+      "variant": "ARRIENDO BINS 1487359 —",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "1eca35b2a7b18d82",
+      "variant": "o ARRIENDO BINS MADERA",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "42e80938467a50d6",
+      "variant": "ARRIENDO BINS",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "decd11c525d9a393",
+      "variant": "ARMADO CAJAS PLANTA",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "cf4e70d08e12a057",
+      "variant": "E IDENTIFICACION PALLET",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "29cd71cb2aa03d01",
+      "variant": "comisiones",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "37877744e7fc075b",
+      "variant": "Ó ——oimeccioN — AWDA.LOSCONQUISTADORES 1700 FOLIO UNICO NACIONAL : —",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "05f97958d556fee6",
+      "variant": "anivel",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "3f12aa4bb0e040c8",
+      "variant": "fletes",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "2f8e5c6f999cbc08",
+      "variant": "Efectivo y equivalentes al efectivo",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "e376c6e208fc3b33",
+      "variant": "Otros activos no financieros, corrientes",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "632f523f18eac322",
+      "variant": "Deudores comerciales y otras cuentas por cobrar",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "fef280fe865f0a85",
+      "variant": "Activos por impuestos corrientes",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "b0e7f4e5982f2c4c",
+      "variant": "Propiedades, plantas y equipos, neto",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "eff2ef0e0f933756",
+      "variant": "Otros pasivos financieros, corrientes",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "29fa7a6814d16728",
+      "variant": "Cuentas comerciales y otras cuentas por pagar",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "e9eaf2f631f4f859",
+      "variant": "Cuentas por pagar a entidades relacionadas, corrientes",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "157f2a3a792d60fe",
+      "variant": "Capital emitido",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "0d788ee7cf5edee9",
+      "variant": "Ganancias acumuladas",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "198e0d6b6116d2b9",
+      "variant": "Ingresos de actividades ordinarias",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "a31041ae2ba74d7e",
+      "variant": "Ganancia bruta",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "74bb414f1c9711cc",
+      "variant": "Ganancia por actividad de operación",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "c57065a5e5fb43a4",
+      "variant": "Ganancia antes de impuesto",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "f2f287f87118a874",
+      "variant": "disponible",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "a55781aba62f02b9",
+      "variant": "Deudores por venta USD O]",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "81d2f71e8d24f90e",
+      "variant": "Documentos y cuentas por cobrar a empresas",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "8cee251617bbfd6c",
+      "variant": "Construcciones y obras de infraestructura",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "5265ae8c9a2ca80a",
+      "variant": "Documentos y cuentas por cobrar a empresas",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "8d2b71ca49984dec",
+      "variant": "Obligaciones con bancos e instituciones financieras a corto",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "b3c59ca673b7af2a",
+      "variant": "Documentos y cuentas por pagar empresas relacionadas",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "03e27fe1c18aefc0",
+      "variant": "Obligaciones con bancos e instituciones financieras a largo",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "55770d66347f1ff6",
+      "variant": "Documentos y cuentas por pagar empresas relacionadas largo",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "dbc4f58778f74ac3",
+      "variant": "Obligaciones por leasing largo plazo",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "e95473ab545029b3",
+      "variant": "Reservas revalorización capital",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "68fb90ecec6b0e90",
+      "variant": "INGRESOS DE EXPLOTACIÓN",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "7c7aaf4fe8e3beb5",
+      "variant": "MARGEN DE EXPLOTACION (BRUTO)",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "c53fcb8d1dbe6fec",
+      "variant": "Margen Explotación / Ingresos Explotac. (%) 22.45 %",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "68a06e4b68e82538",
+      "variant": "Costo de Explotación / Ingresos Explotac. (%) 77.55 %",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "ad880392f1b9d12c",
+      "variant": "Gastos de Adm. y Vtas / Ingresos Explot. (%) 10.05 %",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "92eb356c7649596e",
+      "variant": "Utilidad (Pérdida) / Ingresos Explotac..(Y%)",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "fc847b7681f34a33",
+      "variant": "ebitda",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "6c4d1e11cf8fd427",
+      "variant": "Costo (Depreciación y Amortización)",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "8c7b4bee23389294",
+      "variant": "Anticipo Proveedores 53,414 Retenciones",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "cd71638f1598bf3e",
+      "variant": "inversiones",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "55c5dc86bcb49e40",
+      "variant": "Bono",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "9bc140e92b7ec601",
+      "variant": "acciones",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "dd1f46c5127b2a9f",
+      "variant": "Cuanta por pagar Inversiones Santa Marina Ltde",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "e8776f607f814062",
+      "variant": "Cuanta por pagar Inversiones la Urraca Saleros:",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "66fec9fd5ec69943",
+      "variant": "Activo Fijo 295,765,566 Cuanta por pagar inversiones Imperator",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "be3e3b5a3c180fb4",
+      "variant": "INGRESOS DE EXPLOTACIÓN",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "5600a0f2805c87c1",
+      "variant": "(=) MARGEN DE LA EXPLOTACION",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "475372defdbbd44e",
+      "variant": "rengo",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "e8553a085f886cda",
+      "variant": "AL 31 DE DICIEMBRE",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "2e794f38b3271751",
+      "variant": "CAJA 189.933 PROVEEDORES",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "fa38431c6b40bbad",
+      "variant": "BANCO BICE 706.171 DOCUMENTOS POR PAGAR",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "b7d877af26bef1a1",
+      "variant": "CLIENTES CAMPOMANES 71.271.257 CUENTAS POR PAGAR",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "b58df9cba53621d3",
+      "variant": "CLIENTES ASTURIAS 119.042.734 SUELDOS POR PAGAR",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "b630933b90a5f352",
+      "variant": "CLIENTES LA SANTINA 16.868.570 HONORARIOS POR PAGAR",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "87ea07fbd0761317",
+      "variant": "TARJETA DE DEBITO Y CREDITO 5.157.452 IMPTO UNICO 2? CATEG",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "e2572014d2ee4889",
+      "variant": "CUENTAS POR COBRAR 435.225.144 RETENCION 2? CATEGORIA",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "f11d915139a76209",
+      "variant": "ANTICIPO REMUNERACIONES 963.378 Pasivo Circulante",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "f861210a9ab1791f",
+      "variant": "CREDITO GASTOS CAPACITACION",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "713cc052446d9a42",
+      "variant": "SOBREPRECIO CANC. ACCIONES SOCIALES",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "e6d02c15811416d7",
+      "variant": "RESERVA REVALORIZ. CAPITAL PROPIO",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "6a8be284c0a2f6b7",
+      "variant": "rengo",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "7e0ca0a5420744a8",
+      "variant": "Enero a Diciembre",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "5ae28225625368dc",
+      "variant": "(=) MARGEN DE LA EXPLOTACION",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "c055840bc7644be6",
+      "variant": "Gastos de Viaje y Representación",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "37f0869aea112bad",
+      "variant": "comisiones",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "9c6eda21f2229a5a",
+      "variant": "Reajuste PPM-IVA",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "9ba16102c6a4466c",
+      "variant": "INVERSIONES Y ASESORIAS GUAYACAN S.A. Página",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "fda76c5852f6c856",
+      "variant": "Cheques Girados y No Cobrados por Paga",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "5c6bbe9e4ed52acf",
+      "variant": "Otras Retenciones al Personal",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "27b18cc3d4a14e43",
+      "variant": "impto unico trabajadores",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "bd8e5033fbeb95c9",
+      "variant": "indemnizacion",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "1a15f4d416fcce62",
+      "variant": "Otros Gastos del Personal",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "44e6ba819c9ff967",
+      "variant": "Honorarios y Asesorias Profesionales",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "40a95505ea73f814",
+      "variant": "Materiales e Insumos de Oficina",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "46721d250fe423b8",
+      "variant": "comunicaciones",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "cae3450cfd2b1846",
+      "variant": "Gastos Menores",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "fa80884f7a4915c5",
+      "variant": "Mantención y Reparación",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "faa3480b4f8033b7",
+      "variant": "Depreciación Activo Inmovilizado",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "4a5a564095f15b59",
+      "variant": "Ganancia (Perdida) Cia. de Inversiones La C",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "94c7d9c0057db2e4",
+      "variant": "Perdidas por Impuestos Diferidos",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "c2d14ea4357bdb2a",
+      "variant": "rengo",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "3a788193dab7f16a",
+      "variant": "Desde Enero Hasta Diclembre de",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "f280b77805e4cb55",
+      "variant": "¡ CAJA CHICA 101,020 PROVEEDORES",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "53d039bb88e59c21",
+      "variant": "| CORP BANCA LOS ANGELES 2.355,58 CUENTAS POR PAGAR",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "1149493009240d74",
+      "variant": ": ANTICIPO REMUNERACIONES 544,288 IVA DEBITO FISCAL",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "95dce7de6cbd1160",
+      "variant": "Enero a Diciembre",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "8b2ce23d9eebffa3",
+      "variant": "j Ingresos por Fletes",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "b3a8aa32e4374e6e",
+      "variant": "imprenta",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "af83ff69bfa157ba",
+      "variant": "i Mantención Vehiculos",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "ad523eef9c128438",
+      "variant": "nm Patente Comercial y Vehículos",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "99c382d8ada6abda",
+      "variant": "Varios Dificil Clasificación",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "815c7dfecc55aca1",
+      "variant": "Reajuste PPM-IVA",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "5047ae163a0fd193",
+      "variant": "REPUBLICA DE CHILE AÑO TRIBUTARIO 07 N*",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "800999ba23b3d57b",
+      "variant": "form",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "45780424f5bdd33f",
+      "variant": "o 65 SALDO A FAVOR 85 1531842 + 68 Impuesto Adeudado",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "60b025ae7324d95d",
+      "variant": "66 Menos: Saldo puesto a 86 - 69 Reajuste Art. 72 línea 68: 0.6%",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "6529fb4bc7d5d1e2",
+      "variant": "disposición . 70 TOTAL A PAGAR (Lineas 68+69)",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "2393878aecce6367",
+      "variant": "72 MAS: Intereses y Multas",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "bbcf8c689c96f9eb",
+      "variant": "nivel",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "c0e72e1a5a06d555",
+      "variant": "Desde Enero a Diciembre",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "7b68c7d32558f3ce",
+      "variant": "disponible",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "0eaa9566e72ed7db",
+      "variant": "inversiones",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "346fdc87bb72d411",
+      "variant": "Documentos por cobrar (neto)",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "1abf3c74438f77c8",
+      "variant": "Deudores varios (neto)",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "a408e90b11b65b48",
+      "variant": "Documentos y cuentas por cobrar empresas relacionadas",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "c23ad8cb7382dec4",
+      "variant": "Construcciones y obras de infraestructura",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "0ac55540cc70aed8",
+      "variant": "Inversiones en otras sociedades",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "3e5a2636b5e74dca",
+      "variant": "Documentos y cuentas por pagar empresas relacionadas",
+      "status": "PENDING"
+    },
+    {
+      "review_id": "1b15800992bf66a5",
+      "variant": "Reserva revalorización capital",
+      "status": "PENDING"
+    }
+  ]
+}

@@ -1,0 +1,1 @@
+{"source_file": "", "account_code": "", "account_name": "Cuentas por Cobrar Empresas Relacionadas", "nature": "profit", "standard_code": "ANC.05", "final_code": "ANC.05", "confidence": 0.98, "method": "dictionary_exact", "reason": "Coincidencia exacta con diccionario → ANC.05", "cmcc_score": 0.0, "cmcc_code": null, "cmcc_concept": null, "is_unknown": false}

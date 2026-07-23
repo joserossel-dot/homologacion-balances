@@ -1,0 +1,1 @@
+{"source_file": "", "account_code": "", "account_name": "i ARMADO DE CAJAS", "nature": "asset", "standard_code": "AC.01", "final_code": "AC.01", "confidence": 1.0, "method": "cmcc_variante", "reason": "CMCC (cmcc_variante) → AC.01 (Caja y Bancos) score=1.0", "cmcc_score": 0.0, "cmcc_code": null, "cmcc_concept": null, "is_unknown": false}

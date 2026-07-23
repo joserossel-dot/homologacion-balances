@@ -1,0 +1,1 @@
+{"source_file": "", "account_code": "", "account_name": "(=) RESULTADO OPERACIONAL", "nature": "profit", "standard_code": "ER.08", "final_code": "ER.08", "confidence": 1.0, "method": "cmcc_nombre", "reason": "CMCC (cmcc_nombre) → ER.08 (Resultado Operacional) score=1.0", "cmcc_score": 0.0, "cmcc_code": null, "cmcc_concept": null, "is_unknown": false}

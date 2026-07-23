@@ -1,0 +1,26 @@
+{
+  "total_accounts_parsed": 2692,
+  "total_accounts_classified": 1083,
+  "total_certified": 103,
+  "correct": 103,
+  "incorrect": 0,
+  "accuracy": 1.0,
+  "accuracy_pct": 100.0,
+  "macro_f1": 1.0,
+  "micro_f1": 1.0,
+  "cohen_kappa": 1.0,
+  "kappa_interpretation": "Almost perfect",
+  "certified_via_direct_match": 89,
+  "certified_via_fuzzy_reason": 14,
+  "error_distribution": {},
+  "documents": 20,
+  "classifier_method_distribution": {
+    "unclassified": 872,
+    "learning_exact": 89,
+    "code": 59,
+    "dictionary_exact": 30,
+    "dictionary_fuzzy": 19,
+    "learning_fuzzy": 14
+  },
+  "elapsed_seconds": 210.9
+}

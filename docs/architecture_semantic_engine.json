@@ -1,0 +1,80 @@
+{
+  "version": "1.0",
+  "title": "Semantic Engine Architecture",
+  "flow": [
+    {
+      "stage": "PDF",
+      "phase": "input",
+      "responsibility": "Raw PDF file input (182 formats)"
+    },
+    {
+      "stage": "ParserPDF",
+      "phase": 1,
+      "responsibility": "Extract text, tables, metadata from PDF"
+    },
+    {
+      "stage": "LayoutDetector",
+      "phase": 1,
+      "responsibility": "Identify layout type and column structure"
+    },
+    {
+      "stage": "AccountTypeResolver",
+      "phase": 1,
+      "responsibility": "Determine account type (ACTIVO/PASIVO/PERDIDA/PATRIMONIO) from column context"
+    },
+    {
+      "stage": "AccountTypeFilter",
+      "phase": 1,
+      "responsibility": "Filter non-account rows (totals, headers, noise)"
+    },
+    {
+      "stage": "SemanticNormalizer",
+      "phase": 3,
+      "responsibility": "Normalize, clean OCR errors, expand abbreviations, tokenize"
+    },
+    {
+      "stage": "SemanticMatcher",
+      "phase": 3,
+      "responsibility": "Match normalized name to Concept Catalog via RapidFuzz"
+    },
+    {
+      "stage": "CMCCClassifier",
+      "phase": 3,
+      "responsibility": "Assign final CMCC code with confidence level"
+    },
+    {
+      "stage": "RegexFallback",
+      "phase": 2,
+      "responsibility": "Catch remaining accounts with legacy regex patterns"
+    },
+    {
+      "stage": "Human Review",
+      "phase": 4,
+      "responsibility": "Manual resolution of UNKNOWN accounts"
+    }
+  ],
+  "side_components": [
+    {
+      "name": "Concept Catalog",
+      "phase": 3,
+      "description": "78 concepts, versioned JSON, single source of truth",
+      "feeds_into": "SemanticMatcher"
+    },
+    {
+      "name": "Feature Flags",
+      "phase": 2,
+      "description": "CMCCFeatureFlags — runtime control of all stages",
+      "controls": "all stages"
+    }
+  ],
+  "phase_colors": {
+    "phase1": "#D4E6F1",
+    "phase2": "#F9E79F",
+    "phase3": "#D5F5E3",
+    "phase4": "#FADBD8"
+  },
+  "references": {
+    "adr": "docs/ADR-001-Semantic-Architecture.md",
+    "catalog": "knowledge/concept_catalog.json"
+  }
+}

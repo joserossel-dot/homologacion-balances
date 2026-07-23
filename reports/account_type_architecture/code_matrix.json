@@ -1,0 +1,135 @@
+{
+  "metadata": {
+    "title": "CMCC Code Matrix by Account Type",
+    "generated": "2026-07-16",
+    "source": "catalogo_maestro.json",
+    "total_codes": 52
+  },
+  "account_types": {
+    "ACTIVO": {
+      "prefixes": ["AC", "ANC"],
+      "nature": "deudora",
+      "signo_normal": 1,
+      "origen_columna": "activo",
+      "codes": {
+        "AC.01": "Caja y Bancos",
+        "AC.02": "Inversiones Corto Plazo",
+        "AC.03": "Clientes",
+        "AC.04": "Documentos por Cobrar",
+        "AC.05": "Inventarios",
+        "AC.06": "Relacionadas CP",
+        "AC.06S": "Cta. Cte. Socios / Retiros (Activo)",
+        "AC.07": "Otras Cuentas por Cobrar CP",
+        "AC.08": "Otros Activos Corrientes",
+        "AC.09": "Activos Biológicos CP",
+        "ANC.01": "Activo Fijo",
+        "ANC.02": "Propiedades de Inversión",
+        "ANC.03": "Intangibles",
+        "ANC.04": "Inversiones Permanentes",
+        "ANC.05": "Relacionadas LP",
+        "ANC.06": "Otros Activos No Corrientes",
+        "ANC.07": "Activos Biológicos LP",
+        "ANC.08": "Plusvalía (Goodwill)"
+      }
+    },
+    "PASIVO": {
+      "prefixes": ["PC", "PNC"],
+      "nature": "acreedora",
+      "signo_normal": -1,
+      "origen_columna": "pasivo",
+      "codes": {
+        "PC.01": "Proveedores",
+        "PC.02": "Obligaciones Bancarias CP",
+        "PC.03": "Leasing CP",
+        "PC.04": "Factoring",
+        "PC.05": "Impuestos por Pagar",
+        "PC.06": "Remuneraciones por Pagar",
+        "PC.07": "Relacionadas CP",
+        "PC.08": "Otros Pasivos Corrientes",
+        "PNC.01": "Obligaciones Bancarias LP",
+        "PNC.02": "Leasing LP",
+        "PNC.03": "Bonos",
+        "PNC.04": "Relacionadas LP",
+        "PNC.05": "Otros Pasivos LP"
+      }
+    },
+    "PATRIMONIO": {
+      "prefixes": ["PAT"],
+      "nature": "acreedora",
+      "signo_normal": -1,
+      "origen_columna": "pasivo",
+      "codes": {
+        "PAT.01": "Capital",
+        "PAT.02": "Reservas",
+        "PAT.03": "Utilidades Retenidas",
+        "PAT.04": "Resultado del Ejercicio",
+        "PAT.05": "Participaciones No Controladoras"
+      }
+    },
+    "PERDIDA": {
+      "prefix": "ER (deudora)",
+      "nature": "deudora",
+      "signo_normal": -1,
+      "origen_columna": "perdida",
+      "codes": {
+        "ER.02": "Costo de Ventas",
+        "ER.04": "Gastos de Administración",
+        "ER.05": "Gastos de Venta",
+        "ER.07": "Depreciación y Amortización",
+        "ER.09": "Gastos Financieros",
+        "ER.10": "Impuesto a la Renta"
+      }
+    },
+    "GANANCIA": {
+      "prefix": "ER (acreedora)",
+      "nature": "acreedora",
+      "signo_normal": 1,
+      "origen_columna": "ganancia",
+      "codes": {
+        "ER.01": "Ventas",
+        "ER.03": "Margen Bruto",
+        "ER.06": "EBITDA",
+        "ER.08": "Resultado Operacional",
+        "ER.11": "Utilidad Neta",
+        "ER.12": "Ingresos Financieros",
+        "ER.13": "Otras Ganancias y Pérdidas",
+        "ER.14": "Corrección Monetaria y Reajustes",
+        "ER.15": "Diferencias de Cambio",
+        "ER.16": "Resultado Método Participación"
+      }
+    }
+  },
+  "ambiguous_code_pairs": [
+    {"name": "Relacionadas CP", "codes": ["AC.06", "PC.07"], "resolver": "origen_columna"},
+    {"name": "Relacionadas LP", "codes": ["ANC.05", "PNC.04"], "resolver": "origen_columna"},
+    {"name": "Arriendos", "codes": ["ER.01", "ER.04"], "resolver": "origen_columna (Etapa 0.5)"},
+    {"name": "Intereses", "codes": ["ER.12", "ER.09"], "resolver": "origen_columna (Etapa 0.5)"},
+    {"name": "Honorarios", "codes": ["ER.01", "ER.04"], "resolver": "origen_columna (Etapa 0.5)"},
+    {"name": "Comisiones", "codes": ["ER.01", "ER.05"], "resolver": "origen_columna (Etapa 0.5)"},
+    {"name": "Servicios", "codes": ["ER.01", "ER.04"], "resolver": "origen_columna (Etapa 0.5)"}
+  ],
+  "derived_rules": {
+    "activo__naturaleza_deudora": {"type": "validation", "description": "If origen_columna=activo, expected code must be AC.* or ANC.*"},
+    "pasivo__naturaleza_acreedora": {"type": "validation", "description": "If origen_columna=pasivo, expected code must be PC.*, PNC.*, or PAT.*"},
+    "perdida__signo_normal_negativo": {"type": "validation", "description": "If origen_columna=perdida, expected signo_normal is -1 (deudora)"},
+    "ganancia__signo_normal_positivo": {"type": "validation", "description": "If origen_columna=ganancia, expected signo_normal is +1 (acreedora)"}
+  },
+  "columna_rules": {
+    "origen_columna_activo": {
+      "valid_codes": ["AC.*", "ANC.*"],
+      "invalid_codes": ["PC.*", "PNC.*", "PAT.*"]
+    },
+    "origen_columna_pasivo": {
+      "valid_codes": ["PC.*", "PNC.*", "PAT.*"],
+      "invalid_codes": ["AC.*", "ANC.*"]
+    },
+    "origen_columna_perdida": {
+      "valid_codes": ["ER.*_(deudora)"],
+      "hint": "signo_normal=-1 expected"
+    },
+    "origen_columna_ganancia": {
+      "valid_codes": ["ER.*_(acreedora)"],
+      "hint": "signo_normal=+1 expected"
+    }
+  }
+}

@@ -1,0 +1,209 @@
+{
+  "timestamp": "2026-07-10T14:14:42.637962+00:00",
+  "total_checks": 40,
+  "passed": 40,
+  "failed": 0,
+  "compatible": true,
+  "checks": [
+    {
+      "component": "Feature Flags",
+      "check": "ENABLE_CMCC exists",
+      "status": "PASS"
+    },
+    {
+      "component": "Feature Flags",
+      "check": "ENABLE_CMCC_SHADOW exists",
+      "status": "PASS"
+    },
+    {
+      "component": "Feature Flags",
+      "check": "ENABLE_CMCC_PRODUCTION exists",
+      "status": "PASS"
+    },
+    {
+      "component": "Feature Flags",
+      "check": "ENABLE_CMCC_ROLLBACK exists",
+      "status": "PASS"
+    },
+    {
+      "component": "Feature Flags",
+      "check": "ENABLE_CMCC defaults to False",
+      "status": "PASS"
+    },
+    {
+      "component": "Feature Flags",
+      "check": "ENABLE_CMCC_ROLLBACK forces all flags off",
+      "status": "PASS"
+    },
+    {
+      "component": "Feature Flags",
+      "check": "from_env() parses env vars correctly",
+      "status": "PASS"
+    },
+    {
+      "component": "Feature Flags",
+      "check": "to_dict() serializes all fields",
+      "status": "PASS"
+    },
+    {
+      "component": "Decision Trace",
+      "check": "DecisionTrace.cmcc_match exists",
+      "status": "PASS"
+    },
+    {
+      "component": "Decision Trace",
+      "check": "DecisionTrace.cmcc_match_type exists",
+      "status": "PASS"
+    },
+    {
+      "component": "Decision Trace",
+      "check": "DecisionTrace.cmcc_variant exists",
+      "status": "PASS"
+    },
+    {
+      "component": "Decision Trace",
+      "check": "DecisionTrace.cmcc_score exists",
+      "status": "PASS"
+    },
+    {
+      "component": "Decision Trace",
+      "check": "DecisionTrace.shadow_classification exists",
+      "status": "PASS"
+    },
+    {
+      "component": "Decision Trace",
+      "check": "DecisionTrace.shadow_confidence exists",
+      "status": "PASS"
+    },
+    {
+      "component": "Decision Trace",
+      "check": "DecisionCode.D007 exists (Shadow CMCC)",
+      "status": "PASS"
+    },
+    {
+      "component": "Decision Trace",
+      "check": "TraceStage.CMCC exists",
+      "status": "PASS"
+    },
+    {
+      "component": "Decision Trace",
+      "check": "TraceBuilder maps cmcc_nombre",
+      "status": "PASS"
+    },
+    {
+      "component": "Decision Trace",
+      "check": "TraceBuilder maps cmcc_variante",
+      "status": "PASS"
+    },
+    {
+      "component": "Decision Trace",
+      "check": "TraceBuilder maps cmcc_sinonimo",
+      "status": "PASS"
+    },
+    {
+      "component": "Decision Trace",
+      "check": "TraceBuilder maps cmcc_abreviatura",
+      "status": "PASS"
+    },
+    {
+      "component": "Decision Trace",
+      "check": "TraceBuilder maps cmcc_none",
+      "status": "PASS"
+    },
+    {
+      "component": "Decision Trace",
+      "check": "TraceBuilder builds traces for CMCC accounts",
+      "status": "PASS"
+    },
+    {
+      "component": "Release Pipeline",
+      "check": "GateEngine imports",
+      "status": "PASS"
+    },
+    {
+      "component": "Release Pipeline",
+      "check": "PipelineRunner imports",
+      "status": "PASS"
+    },
+    {
+      "component": "Release Pipeline",
+      "check": "ReleaseContext imports",
+      "status": "PASS"
+    },
+    {
+      "component": "Release Pipeline",
+      "check": "GateEngine.cmcc_gate exists",
+      "status": "PASS"
+    },
+    {
+      "component": "Release Pipeline",
+      "check": "ReleaseContext.dictionary_hash (CMCC hash)",
+      "status": "PASS"
+    },
+    {
+      "component": "Module Imports",
+      "check": "pipeline.features imports",
+      "status": "PASS"
+    },
+    {
+      "component": "Module Imports",
+      "check": "pipeline.cmcc_classifier imports",
+      "status": "PASS"
+    },
+    {
+      "component": "Module Imports",
+      "check": "pipeline.homologation_pipeline imports",
+      "status": "PASS"
+    },
+    {
+      "component": "Module Imports",
+      "check": "explainability imports",
+      "status": "PASS"
+    },
+    {
+      "component": "Module Imports",
+      "check": "explainability.decision_trace imports",
+      "status": "PASS"
+    },
+    {
+      "component": "Module Imports",
+      "check": "explainability.trace_builder imports",
+      "status": "PASS"
+    },
+    {
+      "component": "Module Imports",
+      "check": "explainability.trace_report imports",
+      "status": "PASS"
+    },
+    {
+      "component": "Module Imports",
+      "check": "explainability.trace_exporter imports",
+      "status": "PASS"
+    },
+    {
+      "component": "Module Imports",
+      "check": "explainability.enums imports",
+      "status": "PASS"
+    },
+    {
+      "component": "Module Imports",
+      "check": "shadow.shadow_logger imports",
+      "status": "PASS"
+    },
+    {
+      "component": "Pipeline Integration",
+      "check": "HomologationPipeline instantiates CMCCClassifier",
+      "status": "PASS"
+    },
+    {
+      "component": "Pipeline Integration",
+      "check": "HomologationPipeline accepts CMCCFeatureFlags",
+      "status": "PASS"
+    },
+    {
+      "component": "Pipeline Integration",
+      "check": "CMCCFeatureFlags.default() used when none provided",
+      "status": "PASS"
+    }
+  ]
+}

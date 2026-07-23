@@ -1,0 +1,1 @@
+{"source_file": "", "account_code": "", "account_name": "| ISAPRES", "nature": "asset", "standard_code": "PC.06", "final_code": "PC.06", "confidence": 0.98, "method": "learning_exact", "reason": "Gold Standard (exact) → PC.06 (matched: Isapres)", "cmcc_score": 0.0, "cmcc_code": null, "cmcc_concept": null, "is_unknown": false}

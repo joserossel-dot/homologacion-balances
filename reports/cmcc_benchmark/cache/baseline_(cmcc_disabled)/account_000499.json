@@ -1,0 +1,1 @@
+{"source_file": "", "account_code": "5110001", "account_name": "Ingreso por Utilidad Absorbida", "nature": "profit", "standard_code": "ER.02", "final_code": "ER.02", "confidence": 0.97, "method": "code", "reason": "Código 5110001 coincide con patrón → ER.02", "cmcc_score": 0.0, "cmcc_code": null, "cmcc_concept": null, "is_unknown": false}

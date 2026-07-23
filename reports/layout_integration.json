@@ -1,0 +1,117 @@
+{
+  "metadata": {
+    "sprint": "28.2",
+    "title": "LayoutDetector Integration Report",
+    "date": "2026-07-16",
+    "modified_file": "parser_universal.py",
+    "modified_other_files": []
+  },
+  "integration_points": [
+    {
+      "location": "parser_universal.py:38",
+      "description": "Feature flag ENABLE_DYNAMIC_LAYOUT = False",
+      "type": "module_constant"
+    },
+    {
+      "location": "parser_universal.py:63-74",
+      "description": "_LAYOUT_COLUMN_MAP mapping LayoutDetector strings to OrigenColumna",
+      "type": "data"
+    },
+    {
+      "location": "parser_universal.py:456",
+      "description": "parsear_linea() accepts optional column_order parameter",
+      "type": "parameter"
+    },
+    {
+      "location": "parser_universal.py:525-553",
+      "description": "Column order selection: dynamic vs classic ULTIMAS_COLS",
+      "type": "logic"
+    },
+    {
+      "location": "parser_universal.py:605-634",
+      "description": "LayoutDetector integration in ParserPDF.parsear() with lazy import",
+      "type": "integration"
+    },
+    {
+      "location": "parser_universal.py:639-641",
+      "description": "column_order passed to parsear_linea()",
+      "type": "data_flow"
+    }
+  ],
+  "tests": {
+    "pytest_total": 883,
+    "pytest_passed": 869,
+    "pytest_failed_pre_existing": 14,
+    "pytest_failed_new": 0,
+    "pre_existing_failures": [
+      "test_split_ac01.py::TestBancosRules::test_cheque_pattern",
+      "test_split_ac01.py::TestEquivalentesRules::test_corto_plazo_pattern",
+      "test_split_ac01.py::TestEquivalentesRules::test_deposito_plazo_pattern",
+      "test_split_ac01.py::TestEquivalentesRules::test_acciones_pattern",
+      "test_split_ac01.py::TestStatistics::test_mixed_results",
+      "test_split_ac01.py::TestReports::test_all_files_created",
+      "test_split_ac01.py::TestReports::test_variant_mapping_content",
+      "test_split_ac01.py::TestReports::test_split_statistics_sheets",
+      "test_split_ac01.py::TestReports::test_review_needed_content",
+      "test_split_ac01.py::TestReports::test_coverage_before_after_content",
+      "test_split_ac01.py::TestReports::test_split_report_md_content",
+      "test_split_ac01.py::TestReports::test_empty_queue_creates_empty_files",
+      "test_split_ac01.py::TestReports::test_review_needed_reason",
+      "test_split_ac01.py::TestFullPipeline::test_report_all_dept"
+    ]
+  },
+  "validation": {
+    "total_pdfs": 182,
+    "successfully_processed": 182,
+    "documents_with_column_changes": 104,
+    "total_column_reassignments": 5978,
+    "unmatched_accounts_classic": 0,
+    "unmatched_accounts_dynamic": 0,
+    "parse_errors": 2,
+    "parse_error_details": [
+      "edge_cases/Balance 2019 FIRMADO.pdf - No text",
+      "edge_cases/Balance General Año 2016 firmado.pdf - No text"
+    ],
+    "top_column_change_patterns": {
+      "ganancia->perdida": 1877,
+      "ganancia->pasivo": 1560,
+      "perdida->pasivo": 736,
+      "pasivo->activo": 419,
+      "activo->pasivo": 416,
+      "pasivo->perdida": 267,
+      "perdida->activo": 235,
+      "perdida->ganancia": 235,
+      "ganancia->activo": 92,
+      "ganancia->desconocido": 78,
+      "activo->perdida": 42,
+      "other": 21
+    }
+  },
+  "layout_detector": {
+    "active_on_documents": 180,
+    "active_percentage": 98.9,
+    "average_confidence": 0.7848,
+    "min_confidence": 0.3,
+    "max_confidence": 1.0,
+    "fallback_documents": 6
+  },
+  "diff": {
+    "file": "reports/layout_integration.diff",
+    "lines_added": 112,
+    "lines_deleted": 12,
+    "files_changed": 1
+  },
+  "rollback": {
+    "option_a": "git checkout -- parser_universal.py",
+    "option_b": "bash reports/account_type_architecture/rollback_layout_integration.sh",
+    "impact": "Zero - no other files modified, no data persisted"
+  },
+  "regression_check": {
+    "account_count_unchanged": true,
+    "no_new_errors": true,
+    "coverage_not_decreased": true,
+    "classic_behavior_preserved": true,
+    "only_one_file_modified": true
+  },
+  "verdict": "GO"
+}

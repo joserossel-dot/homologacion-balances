@@ -1,0 +1,838 @@
+{
+  "section1_coverage": {
+    "total_cuentas": 10672,
+    "semantic_interpretadas": 163,
+    "semantic_desconocidas": 10509,
+    "porcentaje_cobertura": 1.5
+  },
+  "section2_valor_agregado": {
+    "pipeline_sin_clasificar_semantic_si": 98,
+    "porcentaje": 0.9,
+    "top_cuentas": [
+      {
+        "account_name": "o IVA DEBITO FISCAL 1094475.077 —",
+        "semantic_type": "liability",
+        "matched_rule": "iva_debito_fiscal",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Provisione de Vacaciones",
+        "semantic_type": "liability",
+        "matched_rule": "provision_vacaciones",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "11301-0000 ANTICIPO PROVEEDORES",
+        "semantic_type": "asset",
+        "matched_rule": "anticipo_proveedores",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "11451-0000 IVA CREDITO FISCAL",
+        "semantic_type": "asset",
+        "matched_rule": "iva_credito_fiscal",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "12501-0000 DEPREC.ACUMULADA CONST.Y OBRAS",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "12505-0000 DEPREC.ACUM.OFICINA A.CORDOVA",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Provisione de Vacaciones",
+        "semantic_type": "liability",
+        "matched_rule": "provision_vacaciones",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Amortización Acumulada",
+        "semantic_type": "contra_asset",
+        "matched_rule": "amortizacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Amortización Acumulada No Operacional",
+        "semantic_type": "contra_asset",
+        "matched_rule": "amortizacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Parronales",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Oficinas",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Colectivos",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "1.2.94,241 Deprec. Acum. Galpones",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Taller",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "1.2,94.244 Deprec. Acum. Pozos Profundos",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "1.2,94,245 Deprec. Acum. Bocatomas,Piscil",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Salas de Bomba:",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Packing",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "1.2.94,252 Deprec. Acum. Casino",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Tractores",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Azufradoras",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Pulverizadoras",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Rastras",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Arados",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Carros Cosecher",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Otros Equ. y Mac",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Grua Horquilla",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Camiones",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Camionetas",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Motocicletas",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Muebles de Oficir",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Eq. Procesamien",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Equipos de Radic",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Equipos de Riegí",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Equipo Electróge",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Equipo Telefónict",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Herramientas Pe",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Instrum. de Cocir",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Instrum. de Medi",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Mobiliario de Col",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Sist. de Segurida",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "DEPRECIACION ACUMULADA DE PLANTACION DE PALTOS",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "DEPRECIACION ACUMULADA ACTIVOS EN LEASING",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Reajuste IVA Credito",
+        "semantic_type": "asset",
+        "matched_rule": "iva_credito_fiscal",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Reajuste IVA Credito",
+        "semantic_type": "asset",
+        "matched_rule": "iva_credito_fiscal",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "DEPREC ACUM SOFTWARE Y TIM DIG",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "10610ANTICIPO A PROVEEDORES",
+        "semantic_type": "asset",
+        "matched_rule": "anticipo_proveedores",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "11750DEPREC.ACUM.HERRAMIENTAS",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "11760DEPREC.ACUM.INSTALACIONES",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "11770DEPREC.ACUM.MAYOR VAL.RETAZ.TC",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "20210ANTICIPOS DE CLIENTES",
+        "semantic_type": "liability",
+        "matched_rule": "anticipos_de_clientes",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Amortización Acumulada",
+        "semantic_type": "contra_asset",
+        "matched_rule": "amortizacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "11750DEPREC.ACUM.HERRAMIENTAS",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "11760DEPREC.ACUM.INSTALACIONES",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "20210ANTICIPOS DE CLIENTES",
+        "semantic_type": "liability",
+        "matched_rule": "anticipos_de_clientes",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Parronales",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Oficinas",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Colectivos",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Galpones",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Taller",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Pozos Profundos",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Bocatomas,Piscinas y Canal",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Salas de Bombas",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Bodegas",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Packing",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Casino",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Tractores",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Azufradoras",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Pulverizadoras",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Rastras",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Arados",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Carros Cosecheros",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Otros Equ. y Maq",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Grua Horquilla",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Camiones",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Camionetas",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Motocicletas",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Eq. Procesamiento de Datos",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Equipos de Radio",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Equipos de Riego",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Equipo Electrógeno",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Equipo Telefónico",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Herramientas Pesadas",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Instrum. de Cocina",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Instrum. de Medición",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Mobiliario de Colectivo",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Sist. de Seguridad",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Iva Credito no Incluido",
+        "semantic_type": "asset",
+        "matched_rule": "iva_credito_fiscal",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Amortización Acumulada",
+        "semantic_type": "contra_asset",
+        "matched_rule": "amortizacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acumulada Instalacione",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acumulada Maquinarias",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acumulada Vehiculos",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acum. Equipos Oficina",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acumulada Herramientas",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acumulada M. y Utiles",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Deprec. Acumulada Activ.Leasin",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "DEPREC ACUM SOFTWARE Y TIM DIG",
+        "semantic_type": "contra_asset",
+        "matched_rule": "depreciacion_acumulada",
+        "confidence": 0.95
+      },
+      {
+        "account_name": "Iva Credito no Incluido",
+        "semantic_type": "asset",
+        "matched_rule": "iva_credito_fiscal",
+        "confidence": 0.95
+      }
+    ]
+  },
+  "section3_coincidencias": {
+    "learning_vs_semantic": {
+      "total": 1204,
+      "with_semantic": 45,
+      "agree": 45,
+      "disagree": 0,
+      "rate": 100.0
+    },
+    "codigo_vs_semantic": {
+      "total": 167,
+      "with_semantic": 3,
+      "agree": 3,
+      "disagree": 0,
+      "rate": 100.0
+    },
+    "diccionario_vs_semantic": {
+      "total": 539,
+      "with_semantic": 17,
+      "agree": 17,
+      "disagree": 0,
+      "rate": 100.0
+    }
+  },
+  "section4_discrepancias": {
+    "total": 0,
+    "por_tipo": [],
+    "detalle": []
+  },
+  "section5_reglas_semanticas": {
+    "top_reglas": [
+      {
+        "regla": "depreciacion_acumulada",
+        "veces": 102
+      },
+      {
+        "regla": "anticipo_proveedores",
+        "veces": 19
+      },
+      {
+        "regla": "iva_credito_fiscal",
+        "veces": 17
+      },
+      {
+        "regla": "anticipos_de_clientes",
+        "veces": 9
+      },
+      {
+        "regla": "provision_vacaciones",
+        "veces": 5
+      },
+      {
+        "regla": "depreciacion_del_ejercicio",
+        "veces": 4
+      },
+      {
+        "regla": "amortizacion_acumulada",
+        "veces": 4
+      },
+      {
+        "regla": "iva_debito_fiscal",
+        "veces": 3
+      }
+    ],
+    "top_semantic_type": [
+      {
+        "tipo": "contra_asset",
+        "veces": 106
+      },
+      {
+        "tipo": "asset",
+        "veces": 36
+      },
+      {
+        "tipo": "liability",
+        "veces": 17
+      },
+      {
+        "tipo": "expense",
+        "veces": 4
+      }
+    ],
+    "top_financial_statement": [
+      {
+        "tipo": "balance_sheet",
+        "veces": 159
+      },
+      {
+        "tipo": "income_statement",
+        "veces": 4
+      }
+    ],
+    "top_economic_nature": [
+      {
+        "tipo": "credit",
+        "veces": 123
+      },
+      {
+        "tipo": "debit",
+        "veces": 40
+      }
+    ]
+  },
+  "section6_recomendaciones": {
+    "reglas_nunca_utilizadas": [
+      "amortizacion_del_ejercicio",
+      "gasto_por_vacaciones"
+    ],
+    "reglas_baja_precision": {},
+    "candidatos_nuevas_reglas": [
+      {
+        "word": "gastos",
+        "count": 501
+      },
+      {
+        "word": "pagar",
+        "count": 327
+      },
+      {
+        "word": "administración",
+        "count": 325
+      },
+      {
+        "word": "ltda",
+        "count": 298
+      },
+      {
+        "word": "cuentas",
+        "count": 264
+      },
+      {
+        "word": "plantación",
+        "count": 255
+      },
+      {
+        "word": "banco",
+        "count": 231
+      },
+      {
+        "word": "otros",
+        "count": 219
+      },
+      {
+        "word": "sueldos",
+        "count": 199
+      },
+      {
+        "word": "suelo",
+        "count": 194
+      },
+      {
+        "word": "preparación",
+        "count": 190
+      },
+      {
+        "word": "corrientes",
+        "count": 181
+      },
+      {
+        "word": "generales",
+        "count": 170
+      },
+      {
+        "word": "cobrar",
+        "count": 169
+      },
+      {
+        "word": "diciembre",
+        "count": 147
+      },
+      {
+        "word": "proyecto",
+        "count": 143
+      },
+      {
+        "word": "equipos",
+        "count": 136
+      },
+      {
+        "word": "capital",
+        "count": 136
+      },
+      {
+        "word": "venta",
+        "count": 134
+      },
+      {
+        "word": "habilitación",
+        "count": 132
+      },
+      {
+        "word": "obras",
+        "count": 125
+      },
+      {
+        "word": "riego",
+        "count": 121
+      },
+      {
+        "word": "página",
+        "count": 116
+      },
+      {
+        "word": "varios",
+        "count": 115
+      },
+      {
+        "word": "equipo",
+        "count": 113
+      },
+      {
+        "word": "serv",
+        "count": 112
+      },
+      {
+        "word": "oficina",
+        "count": 110
+      },
+      {
+        "word": "otras",
+        "count": 102
+      },
+      {
+        "word": "ingresos",
+        "count": 101
+      },
+      {
+        "word": "financieros",
+        "count": 98
+      }
+    ],
+    "total_reglas_definidas": 10,
+    "total_reglas_utilizadas": 8
+  },
+  "accounts_count": 10672,
+  "generated_at": "2026-07-07T03:45:46.023339+00:00",
+  "total_elapsed": 1259.179
+}

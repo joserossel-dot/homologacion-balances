@@ -1,0 +1,35 @@
+{
+  "timestamp": "2026-07-10T14:33:12.554385+00:00",
+  "total_files": 206,
+  "files_processed": 205,
+  "total_accounts": 32444,
+  "total_classified": 11696,
+  "total_unknown": 6160,
+  "total_shadow_hits": 0,
+  "total_recoveries": 0,
+  "total_coincide": 3844,
+  "total_discrepa": 0,
+  "total_sin_evidencia": 1313,
+  "total_ambiguo": 6539,
+  "coverage_pct": 88.8,
+  "recovery_pct": 0.0,
+  "avg_cmcc_score": 0.6602,
+  "total_processing_time_seconds": 2064.98,
+  "total_wall_time_seconds": 2065.11,
+  "method_distribution_baseline": {
+    "unclassified": 6160,
+    "cmcc_variante": 3780,
+    "learning_exact": 1138,
+    "dictionary_fuzzy": 193,
+    "code": 189,
+    "learning_fuzzy": 169,
+    "cmcc_nombre": 64,
+    "dictionary_exact": 3
+  },
+  "method_distribution_cmcc": {},
+  "conflict_distribution": {
+    "ambiguo": 6539,
+    "coincide": 3844,
+    "sin_evidencia": 1313
+  }
+}

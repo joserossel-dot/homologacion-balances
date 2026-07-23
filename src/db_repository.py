@@ -67,7 +67,7 @@ class RepositorioDiccionario:
     def _inicializar_json(self) -> None:
         base = Path(__file__).resolve().parent.parent
         catalogo_path = base / "catalogo_maestro.json"
-        diccionario_path = base / "diccionario_optimizado.json"
+        diccionario_path = base / "diccionario.json"
 
         if catalogo_path.exists():
             with open(catalogo_path, encoding="utf-8") as f:

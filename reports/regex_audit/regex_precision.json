@@ -1,0 +1,1623 @@
+{
+  "summary": {
+    "total_patterns": 37,
+    "total_matches": 375,
+    "total_false_positives": 91,
+    "pdfs_analyzed": 19,
+    "patterns_with_data": 25,
+    "patterns_no_data": 12
+  },
+  "patterns": [
+    {
+      "pattern_idx": 0,
+      "pattern_raw": "\\b(caja\\s*chica|caja\\s*y\\s*banco|efectivo\\s*y\\s*equiv|disponible|caja|banco|cuenta\\s*corriente\\s*banco|cuenta\\s*vista)\\b",
+      "code": "AC.01",
+      "confidence": 0.9,
+      "total_matches": 43,
+      "true_positives": 1,
+      "false_positives": 6,
+      "uncertain": 36,
+      "precision": 86.0,
+      "recall_estimate": 89.6,
+      "gold_matches": 1,
+      "gold_correct": 1,
+      "risk": "Bajo",
+      "true_examples": [
+        "Disponible → AC.01",
+        "BANCO CHILE → AC.01",
+        "BANCO SANTANDER → AC.01 (gold)",
+        "o BANCO CHILEDOLAR — → AC.01",
+        "o: BANCO CHILE US1 → AC.01"
+      ],
+      "false_examples": [
+        {
+          "name": "BANCO SANTANDER US1",
+          "col": "perdida",
+          "code": "AC.01",
+          "reason": "columna 'perdida' incompatible con AC.01 (advertencia)",
+          "new_code": "AC.01",
+          "gold_code": null
+        },
+        {
+          "name": "Disponible",
+          "col": "perdida",
+          "code": "AC.01",
+          "reason": "columna 'perdida' incompatible con AC.01 (advertencia)",
+          "new_code": null,
+          "gold_code": null
+        },
+        {
+          "name": "INTERES BANCO 17065433 a 17065433 g",
+          "col": "perdida",
+          "code": "AC.01",
+          "reason": "columna 'perdida' incompatible con AC.01 (advertencia)",
+          "new_code": null,
+          "gold_code": null
+        },
+        {
+          "name": "INTERESES BANCO",
+          "col": "perdida",
+          "code": "AC.01",
+          "reason": "columna 'perdida' incompatible con AC.01 (advertencia)",
+          "new_code": null,
+          "gold_code": null
+        },
+        {
+          "name": "Disponible",
+          "col": "perdida",
+          "code": "AC.01",
+          "reason": "columna 'perdida' incompatible con AC.01 (advertencia)",
+          "new_code": null,
+          "gold_code": null
+        }
+      ],
+      "uncertain_examples": []
+    },
+    {
+      "pattern_idx": 1,
+      "pattern_raw": "\\b(inversion(es)?\\s*(corto\\s*plazo|cp)|fondos?\\s*mutuos?|dep[oó]sito(s)?\\s*a\\s*plazo|pacto(s)?)\\b",
+      "code": "AC.02",
+      "confidence": 0.92,
+      "total_matches": 5,
+      "true_positives": 0,
+      "false_positives": 2,
+      "uncertain": 3,
+      "precision": 60.0,
+      "recall_estimate": 50.0,
+      "gold_matches": 0,
+      "gold_correct": 0,
+      "risk": "Medio",
+      "true_examples": [
+        "DEPOSITO A PLAZO EN US$ → AC.02",
+        "Depositos a plazo → AC.02",
+        "Ingresos por Mediciones de Fondos Mutuos → AC.02"
+      ],
+      "false_examples": [
+        {
+          "name": "Fondo Mutuo CLP",
+          "col": "activo",
+          "code": "AC.02",
+          "reason": "new pipeline dice AC.01 (code), regex da AC.02",
+          "new_code": "AC.01",
+          "gold_code": null
+        },
+        {
+          "name": "Fondo Mutuo CLP",
+          "col": "activo",
+          "code": "AC.02",
+          "reason": "new pipeline dice AC.01 (code), regex da AC.02",
+          "new_code": "AC.01",
+          "gold_code": null
+        }
+      ],
+      "uncertain_examples": []
+    },
+    {
+      "pattern_idx": 2,
+      "pattern_raw": "\\b(clientes?|deudore(s)?\\s*por\\s*venta|cuentas?\\s*por\\s*cobrar\\s*(clientes?)?)\\b",
+      "code": "AC.03",
+      "confidence": 0.9,
+      "total_matches": 44,
+      "true_positives": 2,
+      "false_positives": 14,
+      "uncertain": 28,
+      "precision": 68.2,
+      "recall_estimate": 89.8,
+      "gold_matches": 2,
+      "gold_correct": 2,
+      "risk": "Medio",
+      "true_examples": [
+        "Documentos y cuentas por cobrar empresas relacionadas → AC.03",
+        "GTA. CTE CLIENTES “RO18.047.831 — → AC.03",
+        "o. ANTÍCIFO CLIENTE 245053396 — → AC.03",
+        "CUENTAS POR COBRAR → AC.03 (gold)",
+        "| _ CUENTAS POR COBRAR 94.720.361 INSTITUCIONES DE PREVISION → AC.03",
+        "CLIENTES → AC.03 (gold)"
+      ],
+      "false_examples": [
+        {
+          "name": "Documentos y cuentas por cobrar empresas",
+          "col": "perdida",
+          "code": "AC.03",
+          "reason": "columna 'perdida' incompatible con AC.03 (advertencia)",
+          "new_code": null,
+          "gold_code": null
+        },
+        {
+          "name": "Deudores por venta (neto)",
+          "col": "perdida",
+          "code": "AC.03",
+          "reason": "columna 'perdida' incompatible con AC.03 (advertencia)",
+          "new_code": null,
+          "gold_code": null
+        },
+        {
+          "name": "Deudores por venta USD",
+          "col": "perdida",
+          "code": "AC.03",
+          "reason": "columna 'perdida' incompatible con AC.03 (advertencia)",
+          "new_code": null,
+          "gold_code": null
+        },
+        {
+          "name": "Documentos y cuentas por cobrar a empresas",
+          "col": "perdida",
+          "code": "AC.03",
+          "reason": "columna 'perdida' incompatible con AC.03 (advertencia)",
+          "new_code": null,
+          "gold_code": null
+        },
+        {
+          "name": "1303-07 DEUDORES CLIENTES 5.921.148.2069 5.239.832.052 681.316.016 e £81.318.016",
+          "col": "perdida",
+          "code": "AC.03",
+          "reason": "columna 'perdida' incompatible con AC.03 (advertencia)",
+          "new_code": null,
+          "gold_code": null
+        }
+      ],
+      "uncertain_examples": []
+    },
+    {
+      "pattern_idx": 3,
+      "pattern_raw": "\\b(documento(s)?\\s*por\\s*cobrar|letras?\\s*(por|a)\\s*cobrar|pagare(s)?\\s*por\\s*cobrar|cheques?\\s*por\\s*cobrar)\\b",
+      "code": "AC.04",
+      "confidence": 0.92,
+      "total_matches": 2,
+      "true_positives": 0,
+      "false_positives": 1,
+      "uncertain": 1,
+      "precision": 50.0,
+      "recall_estimate": 28.6,
+      "gold_matches": 0,
+      "gold_correct": 0,
+      "risk": "Alto",
+      "true_examples": [
+        "Documentos por cobrar (neto) → AC.04"
+      ],
+      "false_examples": [
+        {
+          "name": "Otros Documentos por Cobrar",
+          "col": "activo",
+          "code": "AC.04",
+          "reason": "new pipeline dice AC.01 (code), regex da AC.04",
+          "new_code": "AC.01",
+          "gold_code": null
+        }
+      ],
+      "uncertain_examples": []
+    },
+    {
+      "pattern_idx": 4,
+      "pattern_raw": "\\b(inventario(s)?|existencia(s)?|mercader[ií]a(s)?|stock|materia(s)?\\s*prima(s)?|productos?\\s*(terminado|en\\s*proceso))\\b",
+      "code": "AC.05",
+      "confidence": 0.92,
+      "total_matches": 7,
+      "true_positives": 0,
+      "false_positives": 2,
+      "uncertain": 5,
+      "precision": 71.4,
+      "recall_estimate": 58.3,
+      "gold_matches": 0,
+      "gold_correct": 0,
+      "risk": "Medio",
+      "true_examples": [
+        "MERCADERIAS 1.012.655.946 RETENCION 2? CATEGORIA → AC.05",
+        "MERCADERIAS IMPORTADAS 173.670.519 PROVISION IMPTO, 1? CAT → AC.05",
+        "MERCADERIAS 73.252.176 Total Pasivo Circulante → AC.05",
+        "Inventarios 309.739.893 Provisiones por beneficios a los empleados, corrientes → AC.05",
+        "Inventarios → AC.05"
+      ],
+      "false_examples": [
+        {
+          "name": "INVENTARIOS",
+          "col": "desconocido",
+          "code": "AC.05",
+          "reason": "new pipeline dice AC.01 (code), regex da AC.05",
+          "new_code": "AC.01",
+          "gold_code": null
+        },
+        {
+          "name": "Otros Inventarios",
+          "col": "activo",
+          "code": "AC.05",
+          "reason": "new pipeline dice AC.01 (code), regex da AC.05",
+          "new_code": "AC.01",
+          "gold_code": null
+        }
+      ],
+      "uncertain_examples": []
+    },
+    {
+      "pattern_idx": 5,
+      "pattern_raw": "\\b(relacionada(s)?\\s*(cp|corriente)|cuenta\\s*corriente\\s*relacionad)\\b",
+      "code": "AC.06",
+      "confidence": 0.88,
+      "total_matches": 0,
+      "true_positives": 0,
+      "false_positives": 0,
+      "uncertain": 0,
+      "precision": null,
+      "recall_estimate": null,
+      "gold_matches": 0,
+      "gold_correct": 0,
+      "risk": "Sin datos",
+      "true_examples": [],
+      "false_examples": [],
+      "uncertain_examples": []
+    },
+    {
+      "pattern_idx": 6,
+      "pattern_raw": "(cuenta\\s+(particular|corriente)\\s+(socio|accionista))|(cta\\.?\\s*(cte|particular)\\s+(socio|accionista))|retiro(s)?\\s+(de\\s+)?socio|dividendo(s)?\\s+(provisorio|anticipado)",
+      "code": "AC.06S",
+      "confidence": 0.93,
+      "total_matches": 0,
+      "true_positives": 0,
+      "false_positives": 0,
+      "uncertain": 0,
+      "precision": null,
+      "recall_estimate": null,
+      "gold_matches": 0,
+      "gold_correct": 0,
+      "risk": "Sin datos",
+      "true_examples": [],
+      "false_examples": [],
+      "uncertain_examples": []
+    },
+    {
+      "pattern_idx": 7,
+      "pattern_raw": "\\b(iva\\s*(credito|cf)|ppm|impuesto(s)?\\s*por\\s*recuperar|anticipo(s)?\\s*(a\\s*)?proveedor|gasto(s)?\\s*anticipado(s)?|deudore(s)?\\s*varios|fondos?\\s*por\\s*rendir)\\b",
+      "code": "AC.07",
+      "confidence": 0.88,
+      "total_matches": 14,
+      "true_positives": 2,
+      "false_positives": 2,
+      "uncertain": 10,
+      "precision": 85.7,
+      "recall_estimate": 73.7,
+      "gold_matches": 2,
+      "gold_correct": 2,
+      "risk": "Bajo",
+      "true_examples": [
+        "Deudores varios (neto) → AC.07",
+        "PPM → AC.07",
+        "Reajuste PPM-IVA → AC.07",
+        "Reajuste PPM-IVA → AC.07",
+        "IVA CREDITO FISCAL 15.005.038 Pasivo Largo Plazo → AC.07",
+        "IMPUESTOS POR RECUPERAR → AC.07 (gold)",
+        "IVA Credito Fiscal → AC.07 (gold)"
+      ],
+      "false_examples": [
+        {
+          "name": "IVA CREDITO FISCAL 693.484.738 676833294 N",
+          "col": "perdida",
+          "code": "AC.07",
+          "reason": "columna 'perdida' incompatible con AC.07 (advertencia)",
+          "new_code": null,
+          "gold_code": null
+        },
+        {
+          "name": "Deudores Varios",
+          "col": "activo",
+          "code": "AC.07",
+          "reason": "new pipeline dice AC.01 (code), regex da AC.07",
+          "new_code": "AC.01",
+          "gold_code": null
+        }
+      ],
+      "uncertain_examples": []
+    },
+    {
+      "pattern_idx": 8,
+      "pattern_raw": "\\b(activo\\s*fijo|propiedad(es)?\\s*planta|maquinaria(s)?|veh[ií]culo(s)?|terreno(s)?|construccion(es)?|mueble(s)?\\s*y\\s*[uú]til(es)?|equipos?\\s*(de\\s*)?computacion)\\b",
+      "code": "ANC.01",
+      "confidence": 0.9,
+      "total_matches": 46,
+      "true_positives": 5,
+      "false_positives": 16,
+      "uncertain": 25,
+      "precision": 65.2,
+      "recall_estimate": 90.2,
+      "gold_matches": 8,
+      "gold_correct": 5,
+      "risk": "Medio",
+      "true_examples": [
+        "Construcciones y obras de infraestructura → ANC.01",
+        "CONSTRUCCIONES → ANC.01",
+        "o VEHICULOS → ANC.01",
+        "Activo Fijo s Total PATRIMONIO → ANC.01",
+        "MUEBLES Y UTILES → ANC.01 (gold)",
+        "Maquinarias y equipos → ANC.01 (gold)",
+        "MUEBLES Y UTILES → ANC.01 (gold)",
+        "Maquinarias y equipos → ANC.01 (gold)",
+        "Maquinarias y equipos → ANC.01 (gold)"
+      ],
+      "false_examples": [
+        {
+          "name": "MAQUINARIA 211376247 43.379.018 227.497:225",
+          "col": "perdida",
+          "code": "ANC.01",
+          "reason": "columna 'perdida' incompatible con ANC.01 (advertencia)",
+          "new_code": null,
+          "gold_code": null
+        },
+        {
+          "name": ": MAQUINARIA 579.394.650 1.698.296 —",
+          "col": "perdida",
+          "code": "ANC.01",
+          "reason": "columna 'perdida' incompatible con ANC.01 (advertencia)",
+          "new_code": null,
+          "gold_code": null
+        },
+        {
+          "name": ": VEHICULOS",
+          "col": "ganancia",
+          "code": "ANC.01",
+          "reason": "gold standard dice ANC.03 (regex da ANC.01)",
+          "new_code": "ANC.03",
+          "gold_code": "ANC.03"
+        },
+        {
+          "name": "Construcciones y obras de infraestructura",
+          "col": "perdida",
+          "code": "ANC.01",
+          "reason": "columna 'perdida' incompatible con ANC.01 (advertencia)",
+          "new_code": null,
+          "gold_code": null
+        },
+        {
+          "name": "MUEBLES Y UTILES 296407 217069 69347 69347 a",
+          "col": "perdida",
+          "code": "ANC.01",
+          "reason": "columna 'perdida' incompatible con ANC.01 (advertencia)",
+          "new_code": null,
+          "gold_code": null
+        }
+      ],
+      "uncertain_examples": []
+    },
+    {
+      "pattern_idx": 9,
+      "pattern_raw": "\\b(intangible(s)?|goodwill|marca(s)?|patente(s)?|licencia(s)?|software|llave\\s*de\\s*negocio)\\b",
+      "code": "ANC.03",
+      "confidence": 0.9,
+      "total_matches": 8,
+      "true_positives": 0,
+      "false_positives": 1,
+      "uncertain": 7,
+      "precision": 87.5,
+      "recall_estimate": 61.5,
+      "gold_matches": 0,
+      "gold_correct": 0,
+      "risk": "Bajo",
+      "true_examples": [
+        "o LICENCIAS → ANC.03",
+        "l PATENTES → ANC.03",
+        "SOFTWARE → ANC.03",
+        "Gastos por Software y Soporte Técnico → ANC.03",
+        "Gastos por Software y Soporte Tecnico → ANC.03"
+      ],
+      "false_examples": [
+        {
+          "name": "PATENTES “2301974",
+          "col": "perdida",
+          "code": "ANC.03",
+          "reason": "columna 'perdida' incompatible con ANC.03 (advertencia)",
+          "new_code": null,
+          "gold_code": null
+        }
+      ],
+      "uncertain_examples": []
+    },
+    {
+      "pattern_idx": 10,
+      "pattern_raw": "\\b(inversion(es)?\\s*(permanente(s)?|lp|largo\\s*plazo)|accione(s)?\\s*en\\s*sociedad|participacion(es)?\\s*(en\\s*)?soci)\\b",
+      "code": "ANC.04",
+      "confidence": 0.9,
+      "total_matches": 0,
+      "true_positives": 0,
+      "false_positives": 0,
+      "uncertain": 0,
+      "precision": null,
+      "recall_estimate": null,
+      "gold_matches": 0,
+      "gold_correct": 0,
+      "risk": "Sin datos",
+      "true_examples": [],
+      "false_examples": [],
+      "uncertain_examples": []
+    },
+    {
+      "pattern_idx": 11,
+      "pattern_raw": "\\b(relacionada(s)?\\s*(lp|largo\\s*plazo))\\b",
+      "code": "ANC.05",
+      "confidence": 0.88,
+      "total_matches": 0,
+      "true_positives": 0,
+      "false_positives": 0,
+      "uncertain": 0,
+      "precision": null,
+      "recall_estimate": null,
+      "gold_matches": 0,
+      "gold_correct": 0,
+      "risk": "Sin datos",
+      "true_examples": [],
+      "false_examples": [],
+      "uncertain_examples": []
+    },
+    {
+      "pattern_idx": 12,
+      "pattern_raw": "\\b(proveedor(es)?|acreedore(s)?\\s*comercial|facturas?\\s*por\\s*pagar|cuentas?\\s*por\\s*pagar\\s*proveedor)\\b",
+      "code": "PC.01",
+      "confidence": 0.9,
+      "total_matches": 9,
+      "true_positives": 2,
+      "false_positives": 3,
+      "uncertain": 4,
+      "precision": 66.7,
+      "recall_estimate": 64.3,
+      "gold_matches": 4,
+      "gold_correct": 2,
+      "risk": "Medio",
+      "true_examples": [
+        "e ANTICIPO PROVEEDORES 1.348.569.258 —1077.117.567 → PC.01",
+        ": PROVEEDORES 3776402807 — → PC.01",
+        "2301-03 PROVEEDORES 5.295.438.712] 5.928.781.12% S → PC.01",
+        "Anticipo Proveedores 53,414 Retenciones → PC.01",
+        "Proveedores Nacionales → PC.01 (gold)",
+        "Proveedores Nacionales → PC.01 (gold)"
+      ],
+      "false_examples": [
+        {
+          "name": "ANTICIPO PROVEEDORES",
+          "col": "ganancia",
+          "code": "PC.01",
+          "reason": "new pipeline dice AC.01 (learning_fuzzy), regex da PC.01",
+          "new_code": "AC.01",
+          "gold_code": null
+        },
+        {
+          "name": "Anticipo a Proveedores",
+          "col": "activo",
+          "code": "PC.01",
+          "reason": "gold standard dice AC.01 (regex da PC.01)",
+          "new_code": "AC.01",
+          "gold_code": "AC.01"
+        },
+        {
+          "name": "Anticipo a Proveedores",
+          "col": "activo",
+          "code": "PC.01",
+          "reason": "gold standard dice AC.01 (regex da PC.01)",
+          "new_code": "AC.01",
+          "gold_code": "AC.01"
+        }
+      ],
+      "uncertain_examples": []
+    },
+    {
+      "pattern_idx": 13,
+      "pattern_raw": "\\b(obligaciones?\\s*bancarias?\\s*(cp|corto)?|credito(s)?\\s*banc|prestamo(s)?\\s*banc|linea\\s*de\\s*credito|sobregiro)\\b",
+      "code": "PC.02",
+      "confidence": 0.88,
+      "total_matches": 0,
+      "true_positives": 0,
+      "false_positives": 0,
+      "uncertain": 0,
+      "precision": null,
+      "recall_estimate": null,
+      "gold_matches": 0,
+      "gold_correct": 0,
+      "risk": "Sin datos",
+      "true_examples": [],
+      "false_examples": [],
+      "uncertain_examples": []
+    },
+    {
+      "pattern_idx": 14,
+      "pattern_raw": "\\bleasing\\s*(cp|corriente|corto)?\\b",
+      "code": "PC.03",
+      "confidence": 0.9,
+      "total_matches": 10,
+      "true_positives": 0,
+      "false_positives": 2,
+      "uncertain": 8,
+      "precision": 80.0,
+      "recall_estimate": 66.7,
+      "gold_matches": 0,
+      "gold_correct": 0,
+      "risk": "Medio",
+      "true_examples": [
+        "Arriendo por Leasing → PC.03",
+        "Arriendos por Leasing → PC.03",
+        "TAX ASSETS, CURRENT 16.603 11.373 LEASING PAYABLES → PC.03",
+        "Obligaciones por leasing → PC.03",
+        "Obligaciones por leasing largo plazo → PC.03"
+      ],
+      "false_examples": [
+        {
+          "name": "Depreciación Acum. Activos en Leasing",
+          "col": "pasivo",
+          "code": "PC.03",
+          "reason": "new pipeline dice AC.01 (code), regex da PC.03",
+          "new_code": "AC.01",
+          "gold_code": null
+        },
+        {
+          "name": "Impto. Dif. por Oblig Leasing",
+          "col": "activo",
+          "code": "PC.03",
+          "reason": "new pipeline dice AC.07 (code), regex da PC.03",
+          "new_code": "AC.07",
+          "gold_code": null
+        }
+      ],
+      "uncertain_examples": []
+    },
+    {
+      "pattern_idx": 15,
+      "pattern_raw": "\\bfactoring\\b",
+      "code": "PC.04",
+      "confidence": 0.94,
+      "total_matches": 0,
+      "true_positives": 0,
+      "false_positives": 0,
+      "uncertain": 0,
+      "precision": null,
+      "recall_estimate": null,
+      "gold_matches": 0,
+      "gold_correct": 0,
+      "risk": "Sin datos",
+      "true_examples": [],
+      "false_examples": [],
+      "uncertain_examples": []
+    },
+    {
+      "pattern_idx": 16,
+      "pattern_raw": "\\b(iva\\s*(debito|df)|impuesto(s)?\\s*por\\s*pagar|provision\\s*impuesto|impuesto\\s*(a\\s*la\\s*)?renta|primera\\s*categoria|impuesto\\s*unico|ppm\\s*por\\s*pagar|impt?o\\s*por\\s*pagar)\\b",
+      "code": "PC.05",
+      "confidence": 0.88,
+      "total_matches": 8,
+      "true_positives": 4,
+      "false_positives": 0,
+      "uncertain": 4,
+      "precision": 100.0,
+      "recall_estimate": 61.5,
+      "gold_matches": 4,
+      "gold_correct": 4,
+      "risk": "Bajo",
+      "true_examples": [
+        "o IVA DEBITO FISCAL 1094475.077 — → PC.05",
+        "TARJETA DE CREDITO 756.630 IVA DEBITO FISCAL, → PC.05",
+        ": ANTICIPO REMUNERACIONES 544,288 IVA DEBITO FISCAL → PC.05",
+        "Impuestos por pagar → PC.05 (gold)",
+        "IMPUESTO RENTA 12 CATG. 539466 B 539466 a Li] a → PC.05",
+        "Impuestos por pagar → PC.05 (gold)",
+        "Impuestos por pagar → PC.05 (gold)",
+        "IVA Debito Fiscal → PC.05 (gold)"
+      ],
+      "false_examples": [],
+      "uncertain_examples": []
+    },
+    {
+      "pattern_idx": 17,
+      "pattern_raw": "\\b(remuneracion(es)?|sueldo(s)?|vacaciones?|honorario(s)?\\s*por\\s*pagar|gratificacion(es)?|imposicion(es)?|afp|isapre|leyes\\s*sociales|finiquito(s)?|indemnizacion)\\b",
+      "code": "PC.06",
+      "confidence": 0.86,
+      "total_matches": 42,
+      "true_positives": 5,
+      "false_positives": 11,
+      "uncertain": 26,
+      "precision": 73.8,
+      "recall_estimate": 89.4,
+      "gold_matches": 12,
+      "gold_correct": 5,
+      "risk": "Medio",
+      "true_examples": [
+        "AFP → PC.06",
+        "E GRATIFICACION → PC.06",
+        "INDEMNIZACION → PC.06",
+        ", REMUNERACIONES 122.629.043 122.529.043 i → PC.06",
+        "hd : GRATIFICACION → PC.06",
+        "SUELDOS POR PAGAR → PC.06 (gold)",
+        "LEYES SOCIALES → PC.06 (gold)",
+        "Remuneraciones por Pagar → PC.06 (gold)",
+        "Remuneraciones por Pagar → PC.06 (gold)",
+        "Honorarios por Pagar → PC.06 (gold)"
+      ],
+      "false_examples": [
+        {
+          "name": "0 REMUNERACIONES",
+          "col": "pasivo",
+          "code": "PC.06",
+          "reason": "new pipeline dice ER.04 (learning_fuzzy), regex da PC.06",
+          "new_code": "ER.04",
+          "gold_code": null
+        },
+        {
+          "name": "> Remuneraciones",
+          "col": "ganancia",
+          "code": "PC.06",
+          "reason": "gold standard dice ER.04 (regex da PC.06)",
+          "new_code": "ER.04",
+          "gold_code": "ER.04"
+        },
+        {
+          "name": "Remuneraciones",
+          "col": "ganancia",
+          "code": "PC.06",
+          "reason": "gold standard dice ER.04 (regex da PC.06)",
+          "new_code": "ER.04",
+          "gold_code": "ER.04"
+        },
+        {
+          "name": "Finiquitos",
+          "col": "ganancia",
+          "code": "PC.06",
+          "reason": "gold standard dice ER.04 (regex da PC.06)",
+          "new_code": "ER.04",
+          "gold_code": "ER.04"
+        },
+        {
+          "name": "ANTICIPO REMUNERACIONES",
+          "col": "ganancia",
+          "code": "PC.06",
+          "reason": "new pipeline dice AC.07 (dictionary_exact), regex da PC.06",
+          "new_code": "AC.07",
+          "gold_code": null
+        }
+      ],
+      "uncertain_examples": []
+    },
+    {
+      "pattern_idx": 18,
+      "pattern_raw": "\\b(relacionada(s)?\\s*(cp|corriente)\\s*pasivo|cta\\s*cte\\s*socios?\\s*\\(?en\\s*pasivo)\\b",
+      "code": "PC.07",
+      "confidence": 0.86,
+      "total_matches": 0,
+      "true_positives": 0,
+      "false_positives": 0,
+      "uncertain": 0,
+      "precision": null,
+      "recall_estimate": null,
+      "gold_matches": 0,
+      "gold_correct": 0,
+      "risk": "Sin datos",
+      "true_examples": [],
+      "false_examples": [],
+      "uncertain_examples": []
+    },
+    {
+      "pattern_idx": 19,
+      "pattern_raw": "\\b(anticipo(s)?\\s*de\\s*cliente(s)?|ingreso(s)?\\s*(percibido|recibido).*(adelantado|anticipado)|otros?\\s*pasivos?\\s*(corrientes?|circulantes?)|provision(es)?\\s*varia(s)?|acreedore(s)?\\s*vario(s)?)\\b",
+      "code": "PC.08",
+      "confidence": 0.85,
+      "total_matches": 5,
+      "true_positives": 1,
+      "false_positives": 0,
+      "uncertain": 4,
+      "precision": 100.0,
+      "recall_estimate": 50.0,
+      "gold_matches": 1,
+      "gold_correct": 1,
+      "risk": "Bajo",
+      "true_examples": [
+        "o. ACREEDORES VARIOS → PC.08",
+        ": PROVISIONES VARIAS → PC.08 (gold)",
+        "SCOTIABANK 223.810 ACREEDORES VARIOS → PC.08",
+        "TARJETA DE DEBITO 12.501.289 ACREEDORES VARIOS → PC.08",
+        "Ingresos percibidos por adelantado → PC.08"
+      ],
+      "false_examples": [],
+      "uncertain_examples": []
+    },
+    {
+      "pattern_idx": 20,
+      "pattern_raw": "\\b(obligaciones?\\s*bancarias?\\s*(lp|largo)|credito(s)?\\s*banc.*largo|prestamo(s)?\\s*banc.*largo|mutuo(s)?\\s*hipotecario(s)?)\\b",
+      "code": "PNC.01",
+      "confidence": 0.88,
+      "total_matches": 0,
+      "true_positives": 0,
+      "false_positives": 0,
+      "uncertain": 0,
+      "precision": null,
+      "recall_estimate": null,
+      "gold_matches": 0,
+      "gold_correct": 0,
+      "risk": "Sin datos",
+      "true_examples": [],
+      "false_examples": [],
+      "uncertain_examples": []
+    },
+    {
+      "pattern_idx": 21,
+      "pattern_raw": "\\bleasing\\s*(lp|largo)\\b",
+      "code": "PNC.02",
+      "confidence": 0.9,
+      "total_matches": 0,
+      "true_positives": 0,
+      "false_positives": 0,
+      "uncertain": 0,
+      "precision": null,
+      "recall_estimate": null,
+      "gold_matches": 0,
+      "gold_correct": 0,
+      "risk": "Sin datos",
+      "true_examples": [],
+      "false_examples": [],
+      "uncertain_examples": []
+    },
+    {
+      "pattern_idx": 22,
+      "pattern_raw": "\\b(bono(s)?|debenture(s)?)\\b",
+      "code": "PNC.03",
+      "confidence": 0.9,
+      "total_matches": 3,
+      "true_positives": 0,
+      "false_positives": 1,
+      "uncertain": 2,
+      "precision": 66.7,
+      "recall_estimate": 37.5,
+      "gold_matches": 0,
+      "gold_correct": 0,
+      "risk": "Medio",
+      "true_examples": [
+        "BONOS → PNC.03",
+        "BONOS + → PNC.03"
+      ],
+      "false_examples": [
+        {
+          "name": "Bono",
+          "col": "ganancia",
+          "code": "PNC.03",
+          "reason": "columna 'ganancia' incompatible con PNC.03 (advertencia)",
+          "new_code": null,
+          "gold_code": null
+        }
+      ],
+      "uncertain_examples": []
+    },
+    {
+      "pattern_idx": 23,
+      "pattern_raw": "\\b(relacionada(s)?\\s*(lp|largo)\\s*pasivo)\\b",
+      "code": "PNC.04",
+      "confidence": 0.86,
+      "total_matches": 0,
+      "true_positives": 0,
+      "false_positives": 0,
+      "uncertain": 0,
+      "precision": null,
+      "recall_estimate": null,
+      "gold_matches": 0,
+      "gold_correct": 0,
+      "risk": "Sin datos",
+      "true_examples": [],
+      "false_examples": [],
+      "uncertain_examples": []
+    },
+    {
+      "pattern_idx": 24,
+      "pattern_raw": "\\b(indemnizacion(es)?\\s*(por\\s*)?a[ñn]os?\\s*(de\\s*)?servicio|provision(es)?\\s*lp|impuesto(s)?\\s*diferido(s)?\\s*lp)\\b",
+      "code": "PNC.05",
+      "confidence": 0.85,
+      "total_matches": 0,
+      "true_positives": 0,
+      "false_positives": 0,
+      "uncertain": 0,
+      "precision": null,
+      "recall_estimate": null,
+      "gold_matches": 0,
+      "gold_correct": 0,
+      "risk": "Sin datos",
+      "true_examples": [],
+      "false_examples": [],
+      "uncertain_examples": []
+    },
+    {
+      "pattern_idx": 25,
+      "pattern_raw": "\\b(capital\\s*(pagado|suscrito|social|propio)?|aporte(s)?\\s*(de\\s*)?(capital|socios?))\\b",
+      "code": "PAT.01",
+      "confidence": 0.9,
+      "total_matches": 27,
+      "true_positives": 7,
+      "false_positives": 8,
+      "uncertain": 12,
+      "precision": 70.4,
+      "recall_estimate": 84.4,
+      "gold_matches": 7,
+      "gold_correct": 7,
+      "risk": "Medio",
+      "true_examples": [
+        "Capital pagado → PAT.01 (gold)",
+        "Reserva revalorización capital → PAT.01",
+        "CAPITAL SOCIAL → PAT.01 (gold)",
+        "REYALORIZACION CAPITAL PROPIO → PAT.01",
+        "REVALORIZACION CAPITAL PROPIO → PAT.01 (gold)",
+        "CAPITAL SOCIAL → PAT.01 (gold)",
+        "CAPITAL PAGADO → PAT.01 (gold)",
+        "CAPITAL → PAT.01 (gold)",
+        "Capital → PAT.01 (gold)"
+      ],
+      "false_examples": [
+        {
+          "name": "VESSELS AND MACHINERIES 31.634.183 35.015.073 PAID CAPITAL",
+          "col": "perdida",
+          "code": "PAT.01",
+          "reason": "columna 'perdida' incompatible con PAT.01 (advertencia)",
+          "new_code": null,
+          "gold_code": null
+        },
+        {
+          "name": "Reservas revalorización capital",
+          "col": "perdida",
+          "code": "PAT.01",
+          "reason": "columna 'perdida' incompatible con PAT.01 (advertencia)",
+          "new_code": null,
+          "gold_code": null
+        },
+        {
+          "name": "CAPITAL EMITIDO",
+          "col": "desconocido",
+          "code": "PAT.01",
+          "reason": "new pipeline dice PC.01 (code), regex da PAT.01",
+          "new_code": "PC.01",
+          "gold_code": null
+        },
+        {
+          "name": "Capital Autorizado",
+          "col": "pasivo",
+          "code": "PAT.01",
+          "reason": "new pipeline dice PC.01 (code), regex da PAT.01",
+          "new_code": "PC.01",
+          "gold_code": null
+        },
+        {
+          "name": "Revalorización del Capital Distribuido",
+          "col": "pasivo",
+          "code": "PAT.01",
+          "reason": "new pipeline dice PC.01 (code), regex da PAT.01",
+          "new_code": "PC.01",
+          "gold_code": null
+        }
+      ],
+      "uncertain_examples": []
+    },
+    {
+      "pattern_idx": 26,
+      "pattern_raw": "\\b(reserva(s)?(\\s*legal)?|prima\\s*de\\s*emision)\\b",
+      "code": "PAT.02",
+      "confidence": 0.88,
+      "total_matches": 7,
+      "true_positives": 5,
+      "false_positives": 0,
+      "uncertain": 2,
+      "precision": 100.0,
+      "recall_estimate": 58.3,
+      "gold_matches": 5,
+      "gold_correct": 5,
+      "risk": "Bajo",
+      "true_examples": [
+        "RESERVA FUTUROS DIVIDENDOS → PAT.02",
+        "Piscicultura 113.293.296 Otras Reservas → PAT.02",
+        "OTRAS RESERVAS → PAT.02 (gold)",
+        "Otras Reservas → PAT.02 (gold)",
+        "Otras Reservas → PAT.02 (gold)",
+        "OTRAS RESERVAS → PAT.02 (gold)",
+        "Otras Reservas → PAT.02 (gold)"
+      ],
+      "false_examples": [],
+      "uncertain_examples": []
+    },
+    {
+      "pattern_idx": 27,
+      "pattern_raw": "\\b(utilidad(es)?\\s*(acumulada(s)?|retenida(s)?)|resultado(s)?\\s*acumulado(s)?|p[eé]rdida(s)?\\s*acumulada(s)?)\\b",
+      "code": "PAT.03",
+      "confidence": 0.9,
+      "total_matches": 11,
+      "true_positives": 4,
+      "false_positives": 4,
+      "uncertain": 3,
+      "precision": 63.6,
+      "recall_estimate": 68.8,
+      "gold_matches": 4,
+      "gold_correct": 4,
+      "risk": "Medio",
+      "true_examples": [
+        "Utilidades acumuladas → PAT.03 (gold)",
+        "UTILIDADES ACUMULADAS → PAT.03 (gold)",
+        "PERDIDAS ACUMULADAS → PAT.03 (gold)",
+        "Inversiones en Empresas 1.668.792.488 Resultados Acumulados → PAT.03",
+        "Utilidad Acumulada → PAT.03",
+        "Resultados acumulados → PAT.03 (gold)"
+      ],
+      "false_examples": [
+        {
+          "name": "GANANCIA (PERDIDA) ACUMULADA",
+          "col": "desconocido",
+          "code": "PAT.03",
+          "reason": "new pipeline dice PC.01 (code), regex da PAT.03",
+          "new_code": "PC.01",
+          "gold_code": null
+        },
+        {
+          "name": "Utilidades (Perdidas) Acumuladas",
+          "col": "pasivo",
+          "code": "PAT.03",
+          "reason": "new pipeline dice PC.01 (code), regex da PAT.03",
+          "new_code": "PC.01",
+          "gold_code": null
+        },
+        {
+          "name": "GANANCIA (PERDIDA) ACUMULADA",
+          "col": "desconocido",
+          "code": "PAT.03",
+          "reason": "new pipeline dice PC.01 (code), regex da PAT.03",
+          "new_code": "PC.01",
+          "gold_code": null
+        },
+        {
+          "name": "Utilidades (Perdidas) Acumuladas",
+          "col": "pasivo",
+          "code": "PAT.03",
+          "reason": "new pipeline dice PC.01 (code), regex da PAT.03",
+          "new_code": "PC.01",
+          "gold_code": null
+        }
+      ],
+      "uncertain_examples": []
+    },
+    {
+      "pattern_idx": 28,
+      "pattern_raw": "\\butilidad\\s*del\\s*(ejercicio|periodo|a[ñn]o)|resultado\\s*del\\s*(ejercicio|periodo)|p[eé]rdida\\s*del\\s*(ejercicio|periodo)|utilidad\\s*[/(]?\\s*p[eé]rdida\\b",
+      "code": "PAT.04",
+      "confidence": 0.92,
+      "total_matches": 21,
+      "true_positives": 0,
+      "false_positives": 8,
+      "uncertain": 13,
+      "precision": 61.9,
+      "recall_estimate": 80.8,
+      "gold_matches": 0,
+      "gold_correct": 0,
+      "risk": "Medio",
+      "true_examples": [
+        ": MN UTILIDAD DEL EJERCICIO → PAT.04",
+        "INSTALACIONES 39.578.745 UTILIDAD DEL EJERCICIO → PAT.04",
+        "UTILIDAD DEL EJERCICIO → PAT.04",
+        "PERDIDA DEL EJERCICIO → PAT.04",
+        "PERDIDA DEL EJERCICIO → PAT.04"
+      ],
+      "false_examples": [
+        {
+          "name": "Utilidad (pérdida) del ejercicio",
+          "col": "perdida",
+          "code": "PAT.04",
+          "reason": "columna 'perdida' incompatible con PAT.04 (advertencia)",
+          "new_code": "PAT.04",
+          "gold_code": null
+        },
+        {
+          "name": "UTILIDAD DEL EJERCICIO",
+          "col": "perdida",
+          "code": "PAT.04",
+          "reason": "columna 'perdida' incompatible con PAT.04 (advertencia)",
+          "new_code": "PAT.04",
+          "gold_code": null
+        },
+        {
+          "name": "UTILIDAD DEL EJERCICIO",
+          "col": "perdida",
+          "code": "PAT.04",
+          "reason": "columna 'perdida' incompatible con PAT.04 (advertencia)",
+          "new_code": "PAT.04",
+          "gold_code": null
+        },
+        {
+          "name": "Utilidad del Ejercicio... a",
+          "col": "perdida",
+          "code": "PAT.04",
+          "reason": "columna 'perdida' incompatible con PAT.04 (advertencia)",
+          "new_code": "PAT.04",
+          "gold_code": null
+        },
+        {
+          "name": "UTILIDAD (PERDIDA) DEL EJERCICIO",
+          "col": "perdida",
+          "code": "PAT.04",
+          "reason": "columna 'perdida' incompatible con PAT.04 (advertencia)",
+          "new_code": "PAT.04",
+          "gold_code": null
+        }
+      ],
+      "uncertain_examples": []
+    },
+    {
+      "pattern_idx": 29,
+      "pattern_raw": "\\b(venta(s)?|ingreso(s)?\\s*(por\\s*venta|operacional|del\\s*giro)|facturacion)\\b",
+      "code": "ER.01",
+      "confidence": 0.9,
+      "total_matches": 18,
+      "true_positives": 0,
+      "false_positives": 6,
+      "uncertain": 12,
+      "precision": 66.7,
+      "recall_estimate": 78.3,
+      "gold_matches": 4,
+      "gold_correct": 0,
+      "risk": "Medio",
+      "true_examples": [
+        "OTRAS VENTAS → ER.01",
+        "Otras Ventas Fuera del Giro → ER.01",
+        "GASTOS DE ADMINISTRACIÓN Y VENTA → ER.01",
+        "VENTAS EXENTAS → ER.01",
+        "GASTOS DE ADMINISTRACIÓN Y VENTA → ER.01"
+      ],
+      "false_examples": [
+        {
+          "name": "¡ Ventas",
+          "col": "ganancia",
+          "code": "ER.01",
+          "reason": "gold standard dice PAT.01 (regex da ER.01)",
+          "new_code": "PAT.01",
+          "gold_code": "PAT.01"
+        },
+        {
+          "name": "Ventas",
+          "col": "ganancia",
+          "code": "ER.01",
+          "reason": "gold standard dice PAT.01 (regex da ER.01)",
+          "new_code": "PAT.01",
+          "gold_code": "PAT.01"
+        },
+        {
+          "name": "Comisiones por Ventas",
+          "col": "ganancia",
+          "code": "ER.01",
+          "reason": "new pipeline dice ER.05 (dictionary_exact), regex da ER.01",
+          "new_code": "ER.05",
+          "gold_code": null
+        },
+        {
+          "name": "Ventas",
+          "col": "ganancia",
+          "code": "ER.01",
+          "reason": "gold standard dice PAT.01 (regex da ER.01)",
+          "new_code": "PAT.01",
+          "gold_code": "PAT.01"
+        },
+        {
+          "name": "Comisiones por Ventas",
+          "col": "ganancia",
+          "code": "ER.01",
+          "reason": "new pipeline dice ER.05 (dictionary_exact), regex da ER.01",
+          "new_code": "ER.05",
+          "gold_code": null
+        }
+      ],
+      "uncertain_examples": []
+    },
+    {
+      "pattern_idx": 30,
+      "pattern_raw": "\\bcosto(s)?\\s*(de\\s*)?(venta(s)?|explotacion|produccion|mercader[ií]a)\\b",
+      "code": "ER.02",
+      "confidence": 0.92,
+      "total_matches": 9,
+      "true_positives": 0,
+      "false_positives": 1,
+      "uncertain": 8,
+      "precision": 88.9,
+      "recall_estimate": 64.3,
+      "gold_matches": 0,
+      "gold_correct": 0,
+      "risk": "Bajo",
+      "true_examples": [
+        "0 COSTO VENTA ACTIVO → ER.02",
+        "COSTO VENTA → ER.02",
+        "Costo de Ventas → ER.02",
+        "Costo de Ventas → ER.02",
+        "Costo de Ventas → ER.02"
+      ],
+      "false_examples": [
+        {
+          "name": "COSTO VENTA FRUTA",
+          "col": "activo",
+          "code": "ER.02",
+          "reason": "columna 'activo' incompatible con ER.02 (advertencia)",
+          "new_code": null,
+          "gold_code": null
+        }
+      ],
+      "uncertain_examples": []
+    },
+    {
+      "pattern_idx": 31,
+      "pattern_raw": "\\bgasto(s)?\\s*(de\\s*)?(administracion|general(es)?|gestion)\\b",
+      "code": "ER.04",
+      "confidence": 0.88,
+      "total_matches": 7,
+      "true_positives": 2,
+      "false_positives": 0,
+      "uncertain": 5,
+      "precision": 100.0,
+      "recall_estimate": 58.3,
+      "gold_matches": 2,
+      "gold_correct": 2,
+      "risk": "Bajo",
+      "true_examples": [
+        "Recuperacion Gastos de Administracion → ER.04",
+        "Gastos Generales → ER.04 (gold)",
+        "GASTOS GENERALES 19315181 8 19315181 B g a → ER.04",
+        "GASTOS GENERALES → ER.04 (gold)",
+        "Gastos de Administracion → ER.04"
+      ],
+      "false_examples": [],
+      "uncertain_examples": []
+    },
+    {
+      "pattern_idx": 32,
+      "pattern_raw": "\\bgasto(s)?\\s*(de\\s*)?(venta(s)?|comercial(es)?|marketing|distribucion)\\b",
+      "code": "ER.05",
+      "confidence": 0.88,
+      "total_matches": 0,
+      "true_positives": 0,
+      "false_positives": 0,
+      "uncertain": 0,
+      "precision": null,
+      "recall_estimate": null,
+      "gold_matches": 0,
+      "gold_correct": 0,
+      "risk": "Sin datos",
+      "true_examples": [],
+      "false_examples": [],
+      "uncertain_examples": []
+    },
+    {
+      "pattern_idx": 33,
+      "pattern_raw": "\\b(depreciacion|amortizacion)\\b",
+      "code": "ER.07",
+      "confidence": 0.9,
+      "total_matches": 7,
+      "true_positives": 4,
+      "false_positives": 3,
+      "uncertain": 0,
+      "precision": 57.1,
+      "recall_estimate": 58.3,
+      "gold_matches": 4,
+      "gold_correct": 4,
+      "risk": "Alto",
+      "true_examples": [
+        "DEPRECIACION → ER.07 (gold)",
+        "DEPRECIACION → ER.07 (gold)",
+        "Depreciacion → ER.07 (gold)",
+        "Depreciacion → ER.07 (gold)"
+      ],
+      "false_examples": [
+        {
+          "name": "DEPRECIACION ACUMULADA",
+          "col": "ganancia",
+          "code": "ER.07",
+          "reason": "new pipeline dice ANC.01 (dictionary_exact), regex da ER.07",
+          "new_code": "ANC.01",
+          "gold_code": null
+        },
+        {
+          "name": "DEPRECIACION ACUMULADA",
+          "col": "ganancia",
+          "code": "ER.07",
+          "reason": "new pipeline dice ANC.01 (dictionary_exact), regex da ER.07",
+          "new_code": "ANC.01",
+          "gold_code": null
+        },
+        {
+          "name": "DEPRECIACION ACUMULADA",
+          "col": "ganancia",
+          "code": "ER.07",
+          "reason": "new pipeline dice ANC.01 (dictionary_exact), regex da ER.07",
+          "new_code": "ANC.01",
+          "gold_code": null
+        }
+      ],
+      "uncertain_examples": []
+    },
+    {
+      "pattern_idx": 34,
+      "pattern_raw": "\\bgasto(s)?\\s*financiero(s)?|intere(s|ses)?\\s*(pagado|bancario|leasing|factoring)|comision(es)?\\s*bancaria(s)?",
+      "code": "ER.09",
+      "confidence": 0.9,
+      "total_matches": 14,
+      "true_positives": 8,
+      "false_positives": 0,
+      "uncertain": 6,
+      "precision": 100.0,
+      "recall_estimate": 73.7,
+      "gold_matches": 8,
+      "gold_correct": 8,
+      "risk": "Bajo",
+      "true_examples": [
+        "INTERESES BANCARIOS → ER.09 (gold)",
+        "i GASTOS FINANCIEROS → ER.09",
+        "Intereses Pagados o Adeudados → ER.09",
+        "Gastos Financieros → ER.09 (gold)",
+        "Gastos Financieros + → ER.09 (gold)",
+        "Gastos Financieros → ER.09 (gold)",
+        "Gastos Financieros → ER.09 (gold)",
+        "Gastos Financieros → ER.09 (gold)",
+        "Intereses Pagados → ER.09 (gold)",
+        "Intereses Pagados → ER.09 (gold)"
+      ],
+      "false_examples": [],
+      "uncertain_examples": []
+    },
+    {
+      "pattern_idx": 35,
+      "pattern_raw": "\\bimpuesto\\s*(a\\s*la\\s*renta|primera\\s*categoria)\\b",
+      "code": "ER.10",
+      "confidence": 0.9,
+      "total_matches": 6,
+      "true_positives": 0,
+      "false_positives": 0,
+      "uncertain": 6,
+      "precision": 100.0,
+      "recall_estimate": 54.5,
+      "gold_matches": 0,
+      "gold_correct": 0,
+      "risk": "Bajo",
+      "true_examples": [
+        "pe Impuesto a la Renta y → ER.10",
+        "Impuesto a la Renta → ER.10",
+        "Impuesto a la Renta → ER.10",
+        "Impuesto a la Renta → ER.10",
+        "| Impuestoalarenta → ER.10"
+      ],
+      "false_examples": [],
+      "uncertain_examples": []
+    },
+    {
+      "pattern_idx": 36,
+      "pattern_raw": "\\butilidad\\s*neta|resultado\\s*neto|net\\s*income|ganancia\\s*neta",
+      "code": "ER.11",
+      "confidence": 0.92,
+      "total_matches": 2,
+      "true_positives": 0,
+      "false_positives": 0,
+      "uncertain": 2,
+      "precision": 100.0,
+      "recall_estimate": 28.6,
+      "gold_matches": 0,
+      "gold_correct": 0,
+      "risk": "Bajo",
+      "true_examples": [
+        "NET INCOME FOR THE PERIOD → ER.11",
+        "Ganancia neta → ER.11"
+      ],
+      "false_examples": [],
+      "uncertain_examples": []
+    }
+  ],
+  "rankings": {
+    "by_impact": [
+      {
+        "rank": 1,
+        "code": "ANC.01",
+        "matches": 46,
+        "precision": 65.2
+      },
+      {
+        "rank": 2,
+        "code": "AC.03",
+        "matches": 44,
+        "precision": 68.2
+      },
+      {
+        "rank": 3,
+        "code": "AC.01",
+        "matches": 43,
+        "precision": 86.0
+      },
+      {
+        "rank": 4,
+        "code": "PC.06",
+        "matches": 42,
+        "precision": 73.8
+      },
+      {
+        "rank": 5,
+        "code": "PAT.01",
+        "matches": 27,
+        "precision": 70.4
+      },
+      {
+        "rank": 6,
+        "code": "PAT.04",
+        "matches": 21,
+        "precision": 61.9
+      },
+      {
+        "rank": 7,
+        "code": "ER.01",
+        "matches": 18,
+        "precision": 66.7
+      },
+      {
+        "rank": 8,
+        "code": "AC.07",
+        "matches": 14,
+        "precision": 85.7
+      },
+      {
+        "rank": 9,
+        "code": "ER.09",
+        "matches": 14,
+        "precision": 100.0
+      },
+      {
+        "rank": 10,
+        "code": "PAT.03",
+        "matches": 11,
+        "precision": 63.6
+      },
+      {
+        "rank": 11,
+        "code": "PC.03",
+        "matches": 10,
+        "precision": 80.0
+      },
+      {
+        "rank": 12,
+        "code": "PC.01",
+        "matches": 9,
+        "precision": 66.7
+      },
+      {
+        "rank": 13,
+        "code": "ER.02",
+        "matches": 9,
+        "precision": 88.9
+      },
+      {
+        "rank": 14,
+        "code": "ANC.03",
+        "matches": 8,
+        "precision": 87.5
+      },
+      {
+        "rank": 15,
+        "code": "PC.05",
+        "matches": 8,
+        "precision": 100.0
+      },
+      {
+        "rank": 16,
+        "code": "AC.05",
+        "matches": 7,
+        "precision": 71.4
+      },
+      {
+        "rank": 17,
+        "code": "PAT.02",
+        "matches": 7,
+        "precision": 100.0
+      },
+      {
+        "rank": 18,
+        "code": "ER.04",
+        "matches": 7,
+        "precision": 100.0
+      },
+      {
+        "rank": 19,
+        "code": "ER.07",
+        "matches": 7,
+        "precision": 57.1
+      },
+      {
+        "rank": 20,
+        "code": "ER.10",
+        "matches": 6,
+        "precision": 100.0
+      },
+      {
+        "rank": 21,
+        "code": "AC.02",
+        "matches": 5,
+        "precision": 60.0
+      },
+      {
+        "rank": 22,
+        "code": "PC.08",
+        "matches": 5,
+        "precision": 100.0
+      },
+      {
+        "rank": 23,
+        "code": "PNC.03",
+        "matches": 3,
+        "precision": 66.7
+      },
+      {
+        "rank": 24,
+        "code": "AC.04",
+        "matches": 2,
+        "precision": 50.0
+      },
+      {
+        "rank": 25,
+        "code": "ER.11",
+        "matches": 2,
+        "precision": 100.0
+      }
+    ],
+    "by_precision_worst": [
+      {
+        "rank": 1,
+        "code": "AC.04",
+        "matches": 2,
+        "precision": 50.0
+      },
+      {
+        "rank": 2,
+        "code": "ER.07",
+        "matches": 7,
+        "precision": 57.1
+      },
+      {
+        "rank": 3,
+        "code": "AC.02",
+        "matches": 5,
+        "precision": 60.0
+      },
+      {
+        "rank": 4,
+        "code": "PAT.04",
+        "matches": 21,
+        "precision": 61.9
+      },
+      {
+        "rank": 5,
+        "code": "PAT.03",
+        "matches": 11,
+        "precision": 63.6
+      },
+      {
+        "rank": 6,
+        "code": "ANC.01",
+        "matches": 46,
+        "precision": 65.2
+      },
+      {
+        "rank": 7,
+        "code": "PC.01",
+        "matches": 9,
+        "precision": 66.7
+      },
+      {
+        "rank": 8,
+        "code": "PNC.03",
+        "matches": 3,
+        "precision": 66.7
+      },
+      {
+        "rank": 9,
+        "code": "ER.01",
+        "matches": 18,
+        "precision": 66.7
+      },
+      {
+        "rank": 10,
+        "code": "AC.03",
+        "matches": 44,
+        "precision": 68.2
+      },
+      {
+        "rank": 11,
+        "code": "PAT.01",
+        "matches": 27,
+        "precision": 70.4
+      },
+      {
+        "rank": 12,
+        "code": "AC.05",
+        "matches": 7,
+        "precision": 71.4
+      },
+      {
+        "rank": 13,
+        "code": "PC.06",
+        "matches": 42,
+        "precision": 73.8
+      },
+      {
+        "rank": 14,
+        "code": "PC.03",
+        "matches": 10,
+        "precision": 80.0
+      },
+      {
+        "rank": 15,
+        "code": "AC.07",
+        "matches": 14,
+        "precision": 85.7
+      },
+      {
+        "rank": 16,
+        "code": "AC.01",
+        "matches": 43,
+        "precision": 86.0
+      },
+      {
+        "rank": 17,
+        "code": "ANC.03",
+        "matches": 8,
+        "precision": 87.5
+      },
+      {
+        "rank": 18,
+        "code": "ER.02",
+        "matches": 9,
+        "precision": 88.9
+      },
+      {
+        "rank": 19,
+        "code": "PC.05",
+        "matches": 8,
+        "precision": 100.0
+      },
+      {
+        "rank": 20,
+        "code": "PC.08",
+        "matches": 5,
+        "precision": 100.0
+      },
+      {
+        "rank": 21,
+        "code": "PAT.02",
+        "matches": 7,
+        "precision": 100.0
+      },
+      {
+        "rank": 22,
+        "code": "ER.04",
+        "matches": 7,
+        "precision": 100.0
+      },
+      {
+        "rank": 23,
+        "code": "ER.09",
+        "matches": 14,
+        "precision": 100.0
+      },
+      {
+        "rank": 24,
+        "code": "ER.10",
+        "matches": 6,
+        "precision": 100.0
+      },
+      {
+        "rank": 25,
+        "code": "ER.11",
+        "matches": 2,
+        "precision": 100.0
+      }
+    ]
+  }
+}

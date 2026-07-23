@@ -48,7 +48,7 @@ def main() -> None:
     try:
         conn = obtener_conexion()
         catalogo = cargar_json("catalogo_maestro.json")
-        diccionario = cargar_json("diccionario_optimizado.json")
+        diccionario = cargar_json("diccionario.json")
         upsert_catalogo(conn, catalogo)
         upsert_diccionario(conn, diccionario)
         logging.info("¡Carga inicial ejecutada con éxito!")

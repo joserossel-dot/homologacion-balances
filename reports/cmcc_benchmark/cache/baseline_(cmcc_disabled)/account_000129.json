@@ -1,0 +1,1 @@
+{"source_file": "", "account_code": "", "account_name": "o. ACREEDORES VARIOS", "nature": "asset", "standard_code": "PC.08", "final_code": "PC.08", "confidence": 0.8444, "method": "learning_fuzzy", "reason": "Gold Standard (fuzzy) → PC.08 (matched: Varios Acreedores)", "cmcc_score": 0.0, "cmcc_code": null, "cmcc_concept": null, "is_unknown": false}

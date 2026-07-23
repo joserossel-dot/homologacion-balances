@@ -1,0 +1,60 @@
+{
+  "release_id": "REL_20260722_231446",
+  "timestamp": "2026-07-22T23:14:47.039343+00:00",
+  "git_commit": "ab7b81d Update parser_universal.py",
+  "git_branch": "HEAD",
+  "decision": "BLOCKED",
+  "stages": [
+    {
+      "stage_id": "STAGE_8",
+      "stage_name": "Deployment Decision",
+      "status": "PASS",
+      "duration": 0.0,
+      "errors": [],
+      "warnings": [],
+      "artifacts": {
+        "decision": "BLOCKED",
+        "gates_passed": 6,
+        "gates_warning": 0,
+        "gates_failed": 1
+      },
+      "started_at": "2026-07-22T23:14:47.039484+00:00",
+      "finished_at": "2026-07-22T23:14:47.039621+00:00"
+    }
+  ],
+  "gates": [
+    {
+      "gate_id": "DRIFT_GATE",
+      "gate_name": "Coverage Drift",
+      "status": "FAIL",
+      "message": "Coverage dropped 5pp",
+      "evidence": {},
+      "report_path": ""
+    },
+    {
+      "gate_id": "UNKNOWN_GATE",
+      "gate_name": "UNKNOWN Growth",
+      "status": "FAIL",
+      "message": "UNKNOWN grew by 1000",
+      "evidence": {},
+      "report_path": ""
+    }
+  ],
+  "reasons": [
+    {
+      "gate": "DRIFT_GATE",
+      "status": "FAIL",
+      "reason": "Coverage dropped 5pp",
+      "report": "reports/quality_monitoring/quality_monitoring.md"
+    },
+    {
+      "gate": "UNKNOWN_GATE",
+      "status": "FAIL",
+      "reason": "UNKNOWN grew by 1000",
+      "report": "reports/quality_monitoring/quality_monitoring.md"
+    }
+  ],
+  "tests_passed": 0,
+  "tests_failed": 0,
+  "execution_time": 0.06
+}

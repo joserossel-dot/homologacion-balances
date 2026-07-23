@@ -1,0 +1,114 @@
+{
+  "metadata": {
+    "sprint": "28.3",
+    "title": "AccountTypeResolver",
+    "date": "2026-07-20",
+    "modified_file": "parser_universal.py",
+    "new_files": [
+      "parsers/account_type_resolver.py",
+      "tests/test_account_type_resolver.py"
+    ]
+  },
+  "design": {
+    "responsibility": "Determinar universo permitido de tipo de cuenta usando origen_columna + layout + reglas contables",
+    "prohibited": ["classification", "regex", "fuzzy_match", "CMCC"],
+    "output_types": ["ACTIVO", "PASIVO", "PATRIMONIO", "PERDIDA", "GANANCIA", "DESCONOCIDO"],
+    "derivation_table": {
+      "ACTIVO": {"allowed": ["ACTIVO"], "resolved_by": "origen_columna"},
+      "PASIVO": {"allowed": ["PASIVO", "PATRIMONIO"], "resolved_by": "layout+code_prefix"},
+      "PERDIDA": {"allowed": ["PERDIDA"], "resolved_by": "origen_columna"},
+      "GANANCIA": {"allowed": ["GANANCIA"], "resolved_by": "origen_columna"},
+      "DEUDOR": {"allowed": ["ACTIVO", "PERDIDA"], "resolved_by": "code_prefix"},
+      "ACREEDOR": {"allowed": ["PASIVO", "GANANCIA"], "resolved_by": "code_prefix"},
+      "DESCONOCIDO": {"allowed": ["ACTIVO", "PASIVO", "PATRIMONIO", "PERDIDA", "GANANCIA"], "resolved_by": "code_prefix_fallback"}
+    },
+    "code_prefix_rules": {
+      "ANC": "ACTIVO",
+      "AC": "ACTIVO",
+      "PNC": "PASIVO",
+      "PC": "PASIVO",
+      "PAT": "PATRIMONIO",
+      "ER+DEUDOR": "PERDIDA",
+      "ER+ACREEDOR": "GANANCIA"
+    }
+  },
+  "integration_points": [
+    {
+      "location": "parser_universal.py:41",
+      "description": "Feature flag ENABLE_ACCOUNT_TYPE_RESOLVER = False",
+      "type": "module_constant"
+    },
+    {
+      "location": "parser_universal.py:88",
+      "description": "tipo_cuenta: Optional[str] = None on CuentaRaw",
+      "type": "data_field"
+    },
+    {
+      "location": "parser_universal.py:619",
+      "description": "layout_columns capture from LayoutDetector",
+      "type": "data_flow"
+    },
+    {
+      "location": "parser_universal.py:658-668",
+      "description": "Post-processing: AccountTypeResolver.resolve() for each account",
+      "type": "integration"
+    }
+  ],
+  "tests": {
+    "total_existing": 883,
+    "passed_existing": 869,
+    "passed_new": 36,
+    "failed_pre_existing": 14,
+    "failed_new": 0,
+    "test_classes": [
+      "TestDirectMapping",
+      "TestPasivoAmbiguo",
+      "TestDeudorAmbiguo",
+      "TestAcreedorAmbiguo",
+      "TestDesconocido",
+      "TestCodePrefix",
+      "TestIntegrationParserUniversal"
+    ],
+    "total_test_methods": 36
+  },
+  "validation": {
+    "total_pdfs": 182,
+    "processed": 182,
+    "errors": 0,
+    "documents_with_account_count_change": 0,
+    "total_accounts_resolved": 30829,
+    "distribution_tipo_cuenta": {
+      "DESCONOCIDO": 17249,
+      "GANANCIA": 5384,
+      "ACTIVO": 3203,
+      "PASIVO": 2499,
+      "PERDIDA": 2494
+    },
+    "distribution_origen_columna": {
+      "desconocido": 17249,
+      "ganancia": 5384,
+      "activo": 3203,
+      "pasivo": 2499,
+      "perdida": 2494
+    }
+  },
+  "diff": {
+    "file": "See git diff parser_universal.py",
+    "parser_universal_lines_added": 138,
+    "parser_universal_lines_deleted": 12,
+    "files_changed_total": 1
+  },
+  "rollback": {
+    "option_a_restore_parser": "git checkout -- parser_universal.py",
+    "option_b_delete_new_files": "rm parsers/account_type_resolver.py tests/test_account_type_resolver.py",
+    "impact": "Zero — no other modules modified, no data persisted"
+  },
+  "regression_check": {
+    "account_count_unchanged": true,
+    "no_new_errors": true,
+    "classic_behavior_preserved": true,
+    "only_parser_universal_modified": true,
+    "homologation_pipeline_untouched": true
+  },
+  "verdict": "GO"
+}

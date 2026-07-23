@@ -1,0 +1,30 @@
+{
+  "total_documents": 185,
+  "pdf_count": 162,
+  "excel_count": 23,
+  "ocr_count": 0,
+  "accounts_total": 10672,
+  "accounts_classified": 1910,
+  "accounts_manual": 8762,
+  "accounts_unclassified": 8762,
+  "learning_hits": 1204,
+  "dictionary_hits": 539,
+  "code_hits": 167,
+  "fuzzy_hits": 293,
+  "parser_errors": 0,
+  "processing_time": 1607.702,
+  "avg_time": 8.6903,
+  "p95_time": 39.4668,
+  "files_by_group": {
+    "edge_cases": 97,
+    "validacion": 88
+  },
+  "methods_distribution": {
+    "unclassified": 8762,
+    "learning_exact": 1049,
+    "learning_fuzzy": 155,
+    "dictionary_exact": 246,
+    "dictionary_fuzzy": 293,
+    "code": 167
+  }
+}

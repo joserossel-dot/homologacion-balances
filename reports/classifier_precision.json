@@ -1,0 +1,320 @@
+{
+  "metadata": {
+    "source": "Disagreement Audit (319 accounts, 248 with verified ground truth)",
+    "total_audited": 319,
+    "total_verified": 248,
+    "date": "2026-07-22"
+  },
+  "classifier_metrics": {
+    "code": {
+      "name": "Código Contable",
+      "precision": 0.2692,
+      "recall": 0.0556,
+      "f1": 0.0921,
+      "coverage": 0.2063,
+      "error_rate": 0.7308,
+      "correct_predictions": 7,
+      "incorrect_predictions": 19,
+      "categorization": {
+        "correcta": 7,
+        "probablemente_correcta": 175,
+        "incorrecta": 19,
+        "no_verificable": 11377
+      }
+    },
+    "dict_exact": {
+      "name": "Diccionario Exacto",
+      "precision": 0.4231,
+      "recall": 0.5238,
+      "f1": 0.4681,
+      "coverage": 1.2381,
+      "error_rate": 0.5769,
+      "correct_predictions": 66,
+      "incorrect_predictions": 90,
+      "categorization": {
+        "correcta": 66,
+        "probablemente_correcta": 1018,
+        "incorrecta": 90,
+        "no_verificable": 10336
+      }
+    },
+    "dict_fuzzy": {
+      "name": "Diccionario Fuzzy",
+      "precision": 0.5833,
+      "recall": 0.1667,
+      "f1": 0.2593,
+      "coverage": 0.2857,
+      "error_rate": 0.4167,
+      "correct_predictions": 21,
+      "incorrect_predictions": 15,
+      "categorization": {
+        "correcta": 21,
+        "probablemente_correcta": 307,
+        "incorrecta": 15,
+        "no_verificable": 11297
+      }
+    },
+    "sm_tier_1": {
+      "name": "SemanticMatcher Tier 1",
+      "precision": 0.5161,
+      "recall": 0.7619,
+      "f1": 0.6154,
+      "coverage": 1.4762,
+      "error_rate": 0.4839,
+      "correct_predictions": 96,
+      "incorrect_predictions": 90,
+      "categorization": {
+        "correcta": 96,
+        "probablemente_correcta": 658,
+        "incorrecta": 90,
+        "no_verificable": 10936
+      }
+    },
+    "sm_tier_2": {
+      "name": "SemanticMatcher Tier 2",
+      "precision": 1.0,
+      "recall": 0.4762,
+      "f1": 0.6452,
+      "coverage": 0.4762,
+      "error_rate": 0.0,
+      "correct_predictions": 60,
+      "incorrect_predictions": 0,
+      "categorization": {
+        "correcta": 60,
+        "probablemente_correcta": 208,
+        "incorrecta": 0,
+        "no_verificable": 11422
+      }
+    },
+    "sm_tier_3": {
+      "name": "SemanticMatcher Tier 3",
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "coverage": 0.0,
+      "error_rate": 0.0,
+      "correct_predictions": 0,
+      "incorrect_predictions": 0,
+      "categorization": {
+        "correcta": 0,
+        "probablemente_correcta": 0,
+        "incorrecta": 0,
+        "no_verificable": 11690
+      }
+    },
+    "sm_tier_4": {
+      "name": "SemanticMatcher Tier 4",
+      "precision": 0.2698,
+      "recall": 0.2698,
+      "f1": 0.2698,
+      "coverage": 1.0,
+      "error_rate": 0.7302,
+      "correct_predictions": 34,
+      "incorrect_predictions": 92,
+      "categorization": {
+        "correcta": 34,
+        "probablemente_correcta": 925,
+        "incorrecta": 92,
+        "no_verificable": 10559
+      }
+    },
+    "sm_tier_5": {
+      "name": "SemanticMatcher Tier 5",
+      "precision": 1.0,
+      "recall": 0.3016,
+      "f1": 0.4634,
+      "coverage": 0.3016,
+      "error_rate": 0.0,
+      "correct_predictions": 38,
+      "incorrect_predictions": 0,
+      "categorization": {
+        "correcta": 38,
+        "probablemente_correcta": 235,
+        "incorrecta": 0,
+        "no_verificable": 11340
+      }
+    },
+    "sm_tier_6": {
+      "name": "SemanticMatcher Tier 6",
+      "precision": 0.6512,
+      "recall": 0.4444,
+      "f1": 0.5283,
+      "coverage": 0.6825,
+      "error_rate": 0.3488,
+      "correct_predictions": 56,
+      "incorrect_predictions": 30,
+      "categorization": {
+        "correcta": 56,
+        "probablemente_correcta": 1254,
+        "incorrecta": 30,
+        "no_verificable": 10069
+      }
+    },
+    "regex": {
+      "name": "RegexFallback",
+      "precision": 0.4724,
+      "recall": 1.2222,
+      "f1": 0.6814,
+      "coverage": 2.5873,
+      "error_rate": 0.5276,
+      "correct_predictions": 154,
+      "incorrect_predictions": 172,
+      "categorization": {
+        "correcta": 154,
+        "probablemente_correcta": 2967,
+        "incorrecta": 172,
+        "no_verificable": 8315
+      }
+    },
+    "gs_exact": {
+      "name": "Gold Standard Exacto",
+      "precision": 0.3841,
+      "recall": 0.4603,
+      "f1": 0.4188,
+      "coverage": 1.1984,
+      "error_rate": 0.6159,
+      "correct_predictions": 58,
+      "incorrect_predictions": 93,
+      "categorization": {
+        "correcta": 58,
+        "probablemente_correcta": 784,
+        "incorrecta": 93,
+        "no_verificable": 10560
+      }
+    },
+    "gs_fuzzy": {
+      "name": "Gold Standard Fuzzy",
+      "precision": 0.3125,
+      "recall": 0.0397,
+      "f1": 0.0704,
+      "coverage": 0.127,
+      "error_rate": 0.6875,
+      "correct_predictions": 5,
+      "incorrect_predictions": 11,
+      "categorization": {
+        "correcta": 5,
+        "probablemente_correcta": 120,
+        "incorrecta": 11,
+        "no_verificable": 11514
+      }
+    },
+    "decision_engine_v2": {
+      "name": "DecisionEngine V2",
+      "precision": 0.5927,
+      "recall": 1.1667,
+      "f1": 0.7861,
+      "coverage": 1.9683,
+      "error_rate": 0.4073,
+      "correct_predictions": 147,
+      "incorrect_predictions": 101,
+      "categorization": {
+        "correcta": 147,
+        "probablemente_correcta": 0,
+        "incorrecta": 101,
+        "no_verificable": 11690
+      }
+    },
+    "sm_combined": {
+      "name": "sm_combined",
+      "precision": 0.5726,
+      "recall": 1.127,
+      "f1": 0.7594,
+      "coverage": 1.9683,
+      "error_rate": 0.4274,
+      "correct_predictions": 142,
+      "incorrect_predictions": 106,
+      "categorization": {
+        "correcta": 142,
+        "probablemente_correcta": 3422,
+        "incorrecta": 106,
+        "no_verificable": 7566
+      }
+    }
+  },
+  "categorization": {
+    "code": {
+      "correcta": 7,
+      "probablemente_correcta": 175,
+      "incorrecta": 19,
+      "no_verificable": 11377
+    },
+    "dict_exact": {
+      "correcta": 66,
+      "probablemente_correcta": 1018,
+      "incorrecta": 90,
+      "no_verificable": 10336
+    },
+    "dict_fuzzy": {
+      "correcta": 21,
+      "probablemente_correcta": 307,
+      "incorrecta": 15,
+      "no_verificable": 11297
+    },
+    "sm_tier_1": {
+      "correcta": 96,
+      "probablemente_correcta": 658,
+      "incorrecta": 90,
+      "no_verificable": 10936
+    },
+    "sm_tier_2": {
+      "correcta": 60,
+      "probablemente_correcta": 208,
+      "incorrecta": 0,
+      "no_verificable": 11422
+    },
+    "sm_tier_3": {
+      "correcta": 0,
+      "probablemente_correcta": 0,
+      "incorrecta": 0,
+      "no_verificable": 11690
+    },
+    "sm_tier_4": {
+      "correcta": 34,
+      "probablemente_correcta": 925,
+      "incorrecta": 92,
+      "no_verificable": 10559
+    },
+    "sm_tier_5": {
+      "correcta": 38,
+      "probablemente_correcta": 235,
+      "incorrecta": 0,
+      "no_verificable": 11340
+    },
+    "sm_tier_6": {
+      "correcta": 56,
+      "probablemente_correcta": 1254,
+      "incorrecta": 30,
+      "no_verificable": 10069
+    },
+    "regex": {
+      "correcta": 154,
+      "probablemente_correcta": 2967,
+      "incorrecta": 172,
+      "no_verificable": 8315
+    },
+    "gs_exact": {
+      "correcta": 58,
+      "probablemente_correcta": 784,
+      "incorrecta": 93,
+      "no_verificable": 10560
+    },
+    "gs_fuzzy": {
+      "correcta": 5,
+      "probablemente_correcta": 120,
+      "incorrecta": 11,
+      "no_verificable": 11514
+    },
+    "decision_engine_v2": {
+      "correcta": 147,
+      "probablemente_correcta": 0,
+      "incorrecta": 101,
+      "no_verificable": 11690
+    },
+    "sm_combined": {
+      "correcta": 142,
+      "probablemente_correcta": 3422,
+      "incorrecta": 106,
+      "no_verificable": 7566
+    }
+  }
+}

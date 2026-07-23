@@ -1,0 +1,72 @@
+{
+  "generated_at": "2026-07-10T01:34:08.789117+00:00",
+  "total_accounts": 10672,
+  "total_classified": 1952,
+  "total_unknown": 8720,
+  "coverage_pct": 18.3,
+  "root_causes": {
+    "RC05_DICTIONARY": {
+      "count": 5134,
+      "percentage": 58.9,
+      "amount_usd": 1188609604121.0,
+      "companies_affected": 1,
+      "documents_affected": 1
+    },
+    "RC06_CMCC": {
+      "count": 2637,
+      "percentage": 30.2,
+      "amount_usd": 865356739213.0,
+      "companies_affected": 1,
+      "documents_affected": 1
+    },
+    "RC02_OCR": {
+      "count": 473,
+      "percentage": 5.4,
+      "amount_usd": 98394239447.0,
+      "companies_affected": 1,
+      "documents_affected": 1
+    },
+    "RC01_LAYOUT": {
+      "count": 292,
+      "percentage": 3.3,
+      "amount_usd": 57225360624.0,
+      "companies_affected": 1,
+      "documents_affected": 1
+    },
+    "RC04_NORMALIZATION": {
+      "count": 184,
+      "percentage": 2.1,
+      "amount_usd": 83585921796.0,
+      "companies_affected": 1,
+      "documents_affected": 1
+    }
+  },
+  "pareto": {
+    "top_three_causes": [
+      "RC05_DICTIONARY",
+      "RC06_CMCC",
+      "RC02_OCR"
+    ],
+    "top_three_total_pct": 94.5,
+    "top_three_explain_80pct": true,
+    "first_cause_pct": 58.9
+  },
+  "simulations": {
+    "eliminate_rc01_coverage_pct": 21.0,
+    "eliminate_rc01_gain_pct": 2.7,
+    "eliminate_rc05_coverage_pct": 66.4,
+    "eliminate_rc05_gain_pct": 48.1,
+    "eliminate_rc06_coverage_pct": 43.0,
+    "eliminate_rc06_gain_pct": 24.7
+  },
+  "dependency_analysis": {
+    "parser_dependent_count": 292,
+    "parser_dependent_pct": 3.3,
+    "knowledge_dependent_count": 7771,
+    "knowledge_dependent_pct": 89.1,
+    "ocr_dependent_count": 473,
+    "ocr_dependent_pct": 5.4,
+    "layout_dependent_count": 292,
+    "layout_dependent_pct": 3.3
+  }
+}

@@ -1,0 +1,1 @@
+{"source_file": "", "account_code": "", "account_name": "hd : INTERESES FINANCIEROS ——", "nature": "liability", "standard_code": "ER.09", "final_code": "ER.09", "confidence": 0.8333, "method": "dictionary_fuzzy", "reason": "Coincidencia fuzzy (93.33333333333333%) con 'INTERESES FINANCIEROS' → ER.09", "cmcc_score": 0.0, "cmcc_code": null, "cmcc_concept": null, "is_unknown": false}

@@ -1,0 +1,145 @@
+{
+  "timestamp": "2026-07-10T19:35:51.697112+00:00",
+  "uniqueness": {
+    "total_review_entries": 259,
+    "unique_account_names": 239,
+    "unique_matched_variants": 204,
+    "unique_concepts": 9,
+    "unique_companies": 7,
+    "unique_documents": 9,
+    "human_decisions_needed": 204,
+    "duplicate_accounts_saved": 55,
+    "savings_pct": 21.24
+  },
+  "pareto": {
+    "top_153": {
+      "variants": 153,
+      "entries_covered": 208,
+      "pct_covered": 80.31
+    },
+    "top_179": {
+      "variants": 179,
+      "entries_covered": 234,
+      "pct_covered": 90.35
+    },
+    "top_192": {
+      "variants": 192,
+      "entries_covered": 247,
+      "pct_covered": 95.37
+    },
+    "top_5": {
+      "variants": 5,
+      "entries_covered": 20,
+      "pct_covered": 7.72
+    },
+    "top_10": {
+      "variants": 10,
+      "entries_covered": 33,
+      "pct_covered": 12.74
+    },
+    "top_20": {
+      "variants": 20,
+      "entries_covered": 53,
+      "pct_covered": 20.46
+    },
+    "top_50": {
+      "variants": 50,
+      "entries_covered": 105,
+      "pct_covered": 40.54
+    },
+    "top_100": {
+      "variants": 100,
+      "entries_covered": 155,
+      "pct_covered": 59.85
+    }
+  },
+  "coverage_simulation": {
+    "current": {
+      "classified": 556,
+      "unknown": 445,
+      "coverage_pct": 34.19
+    },
+    "by_variants": {
+      "scenario": "Approve one decision per unique variant",
+      "new_classified": 204,
+      "total_classified": 760,
+      "total_unknown": 241,
+      "new_coverage_pct": 46.74,
+      "delta_pct": 12.55,
+      "delta_abs": 204
+    },
+    "by_account_names": {
+      "scenario": "Approve per unique account_name",
+      "new_classified": 239,
+      "total_classified": 795,
+      "total_unknown": 206,
+      "new_coverage_pct": 48.89,
+      "delta_pct": 14.7,
+      "delta_abs": 239
+    },
+    "by_entries": {
+      "scenario": "Approve all REVIEW entries",
+      "new_classified": 259,
+      "total_classified": 815,
+      "total_unknown": 186,
+      "new_coverage_pct": 50.12,
+      "delta_pct": 15.93,
+      "delta_abs": 259
+    },
+    "total_accounts": 1626
+  },
+  "recommendation": {
+    "best_approach": "Review by concept (dominant concept >50% of REVIEW)",
+    "recommend_by_concept": true,
+    "recommend_by_variant": true,
+    "recommend_by_account": false,
+    "roi_analysis": {
+      "savings_vs_account_level_pct": 21.24,
+      "pareto80_variants": 153,
+      "pareto80_entries_covered": 208,
+      "pareto80_pct": 80.31,
+      "pareto90_variants": 179,
+      "pareto90_pct": 90.35,
+      "pareto95_variants": 192,
+      "pareto95_pct": 95.37,
+      "dominant_concept": "AC.01",
+      "dominant_concept_pct": 58.69,
+      "dominant_company": "BALANCE ORIGINAL",
+      "dominant_company_pct": 45.56
+    },
+    "risks": [
+      "High concentration on AC.01 (58.69%) — verify CMCC quality"
+    ],
+    "go_nogo_conditions": [
+      "Pareto80 within manageable effort",
+      "Dominant concept CMCC quality verified",
+      "No ambiguous variants"
+    ],
+    "all_conditions_met": false,
+    "recommendation": "NO GO (risks identified)",
+    "estimated_effort_scenarios": {
+      "30s_variant_hours": 1.7,
+      "1min_variant_hours": 3.4,
+      "2min_variant_hours": 6.8
+    }
+  },
+  "validations": {
+    "issues": [
+      "✓ All variants map to exactly one concept",
+      "✓ No account maps to multiple concepts",
+      "✓ All scores = 1.0 (expected)"
+    ],
+    "status": "PASS"
+  },
+  "effort_summary": {
+    "A (30s/variant)": {
+      "effort_hours_all_variants": 1.7
+    },
+    "B (1min/variant)": {
+      "effort_hours_all_variants": 3.4
+    },
+    "C (2min/variant)": {
+      "effort_hours_all_variants": 6.8
+    }
+  }
+}

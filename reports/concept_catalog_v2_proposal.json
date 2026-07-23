@@ -1,0 +1,700 @@
+{
+  "metadata": {
+    "total_unknown": 6995,
+    "concept_proposals": 30,
+    "new_concepts": 25,
+    "concept_expansions": 5,
+    "ocr_expansions": 6,
+    "parser_issues": 10,
+    "recovered_by_new_concepts": 734,
+    "recovered_by_ocr": 529,
+    "total_recoverable": 1263,
+    "total_recoverable_pct": 18.1,
+    "remaining_after_v2": 5732,
+    "remaining_after_v2_pct": 81.9
+  },
+  "proposals": [
+    {
+      "proposed_name": "DEUDORES_VARIOS",
+      "target_code": "AC.03",
+      "target_type": "ACTIVO",
+      "pattern": "deudore?s?\\s*(varios?|div[eo]rsos?)?",
+      "total_matches": 103,
+      "incremental": 103,
+      "incremental_pct": 1.5,
+      "cumulative": 103,
+      "cumulative_pct": 1.5,
+      "new_concept": true,
+      "samples": [
+        "Varios Deudores",
+        "Deudores por venta USD Pl",
+        "11306-0000 OTROS DEUDORES VARIOS"
+      ],
+      "type": "new_concept"
+    },
+    {
+      "proposed_name": "SUELDOS",
+      "target_code": "PC.06",
+      "target_type": "PASIVO",
+      "pattern": "\\bsueldos?\\b",
+      "total_matches": 79,
+      "incremental": 79,
+      "incremental_pct": 1.1,
+      "cumulative": 182,
+      "cumulative_pct": 2.6,
+      "new_concept": true,
+      "samples": [
+        "SEP-2013 PORCEL VALENZUELA, DIF. SUELDO SEP-2013",
+        "SUELDO 697ad0dl a 63/93331 B 3 E",
+        "Sueldos Por Pagar"
+      ],
+      "type": "new_concept"
+    },
+    {
+      "proposed_name": "IVA",
+      "target_code": "AC.07",
+      "target_type": "ACTIVO",
+      "pattern": "\\biva\\b",
+      "total_matches": 71,
+      "incremental": 71,
+      "incremental_pct": 1.0,
+      "cumulative": 253,
+      "cumulative_pct": 3.6,
+      "new_concept": true,
+      "samples": [
+        "IVA CF",
+        "IVA POR PAGAR",
+        "IVA CREDITO FISCAL"
+      ],
+      "type": "new_concept"
+    },
+    {
+      "proposed_name": "REAJUSTE",
+      "target_code": "ER.11",
+      "target_type": "PERDIDA",
+      "pattern": "\\breajuste",
+      "total_matches": 63,
+      "incremental": 45,
+      "incremental_pct": 0.6,
+      "cumulative": 298,
+      "cumulative_pct": 4.3,
+      "new_concept": true,
+      "samples": [
+        "REAJUSTES GANADOS",
+        "40405-9999 INTERESES Y REAJUSTES GANADOS",
+        "66 Menos: Saldo puesto a 86 16510656 - 69 Reajuste Art. 72 línea 68: 0.6%"
+      ],
+      "type": "new_concept"
+    },
+    {
+      "proposed_name": "ACTIVO_FIJO",
+      "target_code": "ANC.01",
+      "target_type": "ACTIVO",
+      "pattern": "activ\\w*\\s*fij",
+      "total_matches": 46,
+      "incremental": 46,
+      "incremental_pct": 0.7,
+      "cumulative": 344,
+      "cumulative_pct": 4.9,
+      "new_concept": true,
+      "samples": [
+        "9.9.10,191 Utilidad en Venta de Activos Fijo:",
+        "Activo Fijo s Total PATRIMONIO",
+        "Fotal Activo Fijo"
+      ],
+      "type": "new_concept"
+    },
+    {
+      "proposed_name": "ACREEDORES_VARIOS",
+      "target_code": "PC.08",
+      "target_type": "PASIVO",
+      "pattern": "acreedore?s?\\s*(varios?|div[eo]rsos?)?",
+      "total_matches": 40,
+      "incremental": 36,
+      "incremental_pct": 0.5,
+      "cumulative": 380,
+      "cumulative_pct": 5.4,
+      "new_concept": true,
+      "samples": [
+        "Acreedores Varios L/p",
+        "VARJEVA DE DEBIO 12.501.289 ACREEDORES VARIOS",
+        "SCOTIABANK 1.754.885 ACREEDORES VARIOS"
+      ],
+      "type": "new_concept"
+    },
+    {
+      "proposed_name": "LINEA_CREDITO",
+      "target_code": "PC.02",
+      "target_type": "PASIVO",
+      "pattern": "l[íi]nea\\s*(de\\s*)?cr[eé]dit",
+      "total_matches": 37,
+      "incremental": 37,
+      "incremental_pct": 0.5,
+      "cumulative": 417,
+      "cumulative_pct": 6.0,
+      "new_concept": true,
+      "samples": [
+        "Linea de Credito Itau",
+        "LINEA DE CREDITO BANCO SANTANDER",
+        "Linea Credito Santander"
+      ],
+      "type": "new_concept"
+    },
+    {
+      "proposed_name": "LEASING",
+      "target_code": "ANC.03",
+      "target_type": "ACTIVO",
+      "pattern": "\\bleas",
+      "total_matches": 36,
+      "incremental": 31,
+      "incremental_pct": 0.4,
+      "cumulative": 448,
+      "cumulative_pct": 6.4,
+      "new_concept": true,
+      "samples": [
+        "Correccion Monetaria Bs. en Leasing,",
+        "COSECHAS EN CURSO Descuentos Leasing Habit",
+        "LEASING PLANTA, MAQUINARIA Y1 E,2N2V4A,3S1E6S"
+      ],
+      "type": "new_concept"
+    },
+    {
+      "proposed_name": "COMISIONES",
+      "target_code": "PC.06",
+      "target_type": "PASIVO",
+      "pattern": "comisiones?",
+      "total_matches": 29,
+      "incremental": 29,
+      "incremental_pct": 0.4,
+      "cumulative": 477,
+      "cumulative_pct": 6.8,
+      "new_concept": true,
+      "samples": [
+        "TARJETA RIPLEY 135.608 COMISIONES POR PAGAR",
+        "DARJETA KIPLEY 135.008 COMISIONES POR PAGAR",
+        "CUENTAS POR COBRAR ASTURIAS 43. $16.067 COMISIONES POR PAGAR"
+      ],
+      "type": "new_concept"
+    },
+    {
+      "proposed_name": "HONORARIOS",
+      "target_code": "PC.06",
+      "target_type": "PASIVO",
+      "pattern": "\\bhonorarios?\\b",
+      "total_matches": 29,
+      "incremental": 29,
+      "incremental_pct": 0.4,
+      "cumulative": 506,
+      "cumulative_pct": 7.2,
+      "new_concept": false,
+      "samples": [
+        "TARJETA CREDITO 3 CUOTAS 29.666.698 HONORARIOS POR PAGAR",
+        "20424PROVISIÓN HONORARIOS DIRECTORES",
+        "CUENTAS POR COBRAR EMPRESA RELAC, 785.538.278 HONORARIOS POR PAGAR"
+      ],
+      "type": "expansion"
+    },
+    {
+      "proposed_name": "PPM",
+      "target_code": "AC.07",
+      "target_type": "ACTIVO",
+      "pattern": "\\bppm\\b",
+      "total_matches": 29,
+      "incremental": 9,
+      "incremental_pct": 0.1,
+      "cumulative": 515,
+      "cumulative_pct": 7.4,
+      "new_concept": true,
+      "samples": [
+        "PPM POR PAGAR",
+        "Regjuste PPM-AIVA a",
+        "Reajuste PPM-IVA"
+      ],
+      "type": "new_concept"
+    },
+    {
+      "proposed_name": "CONSTRUCCIONES",
+      "target_code": "ANC.01",
+      "target_type": "ACTIVO",
+      "pattern": "construccion",
+      "total_matches": 27,
+      "incremental": 27,
+      "incremental_pct": 0.4,
+      "cumulative": 542,
+      "cumulative_pct": 7.7,
+      "new_concept": true,
+      "samples": [
+        "12201-0000 CONSTRUCCIONES Y OBRAS",
+        "Construcciones 1042 159 093 ¿de",
+        "Construcciones Taller Olivo 5.978.215 11.652.194 Bonificación Forestal"
+      ],
+      "type": "new_concept"
+    },
+    {
+      "proposed_name": "FONDOS_MUTUOS",
+      "target_code": "ANC.04",
+      "target_type": "ACTIVO",
+      "pattern": "fondos?\\s*mutuo",
+      "total_matches": 27,
+      "incremental": 27,
+      "incremental_pct": 0.4,
+      "cumulative": 569,
+      "cumulative_pct": 8.1,
+      "new_concept": true,
+      "samples": [
+        "11151-0000 CUOTAS FONDOS MUTUOS",
+        "Fondos Mutuos Security US$",
+        "Fondos Mutuos 7 31.427.156 Capital pagado"
+      ],
+      "type": "new_concept"
+    },
+    {
+      "proposed_name": "PATENTES",
+      "target_code": "ER.04",
+      "target_type": "PERDIDA",
+      "pattern": "patente\\w*\\s*(municipal|comercial)?",
+      "total_matches": 30,
+      "incremental": 30,
+      "incremental_pct": 0.4,
+      "cumulative": 599,
+      "cumulative_pct": 8.6,
+      "new_concept": false,
+      "samples": [
+        "Patente Comercial y Vehiculos",
+        "Patente Comercial y Vehículos",
+        "52452-1000 PATENTES MUNICIPALES"
+      ],
+      "type": "expansion"
+    },
+    {
+      "proposed_name": "TARJETA_CREDITO",
+      "target_code": "PC.02",
+      "target_type": "PASIVO",
+      "pattern": "tarjeta\\s*(de\\s*)?cr[eé]dit",
+      "total_matches": 24,
+      "incremental": 18,
+      "incremental_pct": 0.3,
+      "cumulative": 617,
+      "cumulative_pct": 8.8,
+      "new_concept": true,
+      "samples": [
+        "TARJETA CREDITO 3 CUOTAS 33.358.152 RETENCION 2* CAT, PROFESIONALES",
+        "TARJETA CREDITO 3 CUOTAS 25.491.398 INSTITUCIONES DE PREVISION",
+        "TARJETA CREDITO 3 CUOTAS 29.666.698 HONORARIOS POR PAGAR"
+      ],
+      "type": "new_concept"
+    },
+    {
+      "proposed_name": "IMPUESTOS_DIFERIDOS",
+      "target_code": "AC.07",
+      "target_type": "ACTIVO",
+      "pattern": "impuestos?\\s*diferidos?",
+      "total_matches": 22,
+      "incremental": 22,
+      "incremental_pct": 0.3,
+      "cumulative": 639,
+      "cumulative_pct": 9.1,
+      "new_concept": true,
+      "samples": [
+        "40500IMPUESTO DIFERIDO",
+        "Maquinarias y equipos 104,193,999 Impuesto Diferido L/p",
+        "Impuesto Diferido por Pagar"
+      ],
+      "type": "new_concept"
+    },
+    {
+      "proposed_name": "CAPACITACION",
+      "target_code": "ER.04",
+      "target_type": "PERDIDA",
+      "pattern": "capacitaci[oó]n",
+      "total_matches": 16,
+      "incremental": 16,
+      "incremental_pct": 0.2,
+      "cumulative": 655,
+      "cumulative_pct": 9.4,
+      "new_concept": false,
+      "samples": [
+        "i CREDITO GASTOS CAPACITACION",
+        "CREDITO GASTOS CAPACITACION 1.400.000 CAPITAL PAGADO",
+        "69 [Cred. Gastos capacitación 5900000/774 |Remanente FUT ejercicio"
+      ],
+      "type": "expansion"
+    },
+    {
+      "proposed_name": "INMUEBLES",
+      "target_code": "ANC.01",
+      "target_type": "ACTIVO",
+      "pattern": "inmuebl",
+      "total_matches": 13,
+      "incremental": 13,
+      "incremental_pct": 0.2,
+      "cumulative": 668,
+      "cumulative_pct": 9.5,
+      "new_concept": true,
+      "samples": [
+        "E OBRAS B. INMUEBLE",
+        "MANTENCION DE BS.INMUEBLES",
+        "INMUEBLE CALAMA ROL 2116-10"
+      ],
+      "type": "new_concept"
+    },
+    {
+      "proposed_name": "HERRAMIENTAS",
+      "target_code": "ANC.05",
+      "target_type": "ACTIVO",
+      "pattern": "herramient",
+      "total_matches": 12,
+      "incremental": 11,
+      "incremental_pct": 0.2,
+      "cumulative": 679,
+      "cumulative_pct": 9.7,
+      "new_concept": false,
+      "samples": [
+        "INSTRUMENTOS Y HERRAMIENTAS",
+        "Deprec. Acumulada Herramientas",
+        "12251-0000 MAQUINARIAS Y HERRAMIENTAS"
+      ],
+      "type": "expansion"
+    },
+    {
+      "proposed_name": "DIFERENCIA_CAMBIO",
+      "target_code": "ER.05",
+      "target_type": "PERDIDA",
+      "pattern": "diferencia?\\s*cambi",
+      "total_matches": 9,
+      "incremental": 9,
+      "incremental_pct": 0.1,
+      "cumulative": 688,
+      "cumulative_pct": 9.8,
+      "new_concept": true,
+      "samples": [
+        "Diferencia Cambio en US$",
+        "30500DIFERENCIA CAMBIO CTO FORWARD",
+        "55102-9999 UTILIDAD POR DIFERENCIA CAMBIO"
+      ],
+      "type": "new_concept"
+    },
+    {
+      "proposed_name": "PRESTAMO_HIPOTECARIO",
+      "target_code": "PNC.01",
+      "target_type": "PASIVO",
+      "pattern": "(pr[eé]stamo|cr[eé]dito)\\s*hipotec",
+      "total_matches": 8,
+      "incremental": 8,
+      "incremental_pct": 0.1,
+      "cumulative": 696,
+      "cumulative_pct": 9.9,
+      "new_concept": true,
+      "samples": [
+        "Planta y Equipos 722.330.902 1.017.138 Crédito Hipotecario",
+        "CREDITO HIPOTECARIO L/P",
+        "CREDITO HIPOTECARIO C/P"
+      ],
+      "type": "new_concept"
+    },
+    {
+      "proposed_name": "CAPITAL_SOCIAL",
+      "target_code": "PAT.01",
+      "target_type": "PATRIMONIO",
+      "pattern": "capital\\s*social",
+      "total_matches": 8,
+      "incremental": 7,
+      "incremental_pct": 0.1,
+      "cumulative": 703,
+      "cumulative_pct": 10.1,
+      "new_concept": true,
+      "samples": [
+        "Activo Fijo CAPITAL SOCIAL",
+        "TERRENOS 359 764 95 CAPITAL SOCIAL",
+        "2201-01 CAPITAL SOCIAL E]"
+      ],
+      "type": "new_concept"
+    },
+    {
+      "proposed_name": "ANTICIPOS",
+      "target_code": "AC.07",
+      "target_type": "ACTIVO",
+      "pattern": "anticipos?\\s*(proveedor|cliente)",
+      "total_matches": 7,
+      "incremental": 7,
+      "incremental_pct": 0.1,
+      "cumulative": 710,
+      "cumulative_pct": 10.2,
+      "new_concept": true,
+      "samples": [
+        "ANTICIPOS CLIENTES",
+        "11301-0000.- ANTICIPO PROVEEDORES:- SALDO SEGUN LIBRO $",
+        "11301-0000 ANTICIPO PROVEEDORES"
+      ],
+      "type": "new_concept"
+    },
+    {
+      "proposed_name": "MANO_OBRA",
+      "target_code": "ER.04",
+      "target_type": "PERDIDA",
+      "pattern": "mano\\s*de\\s*obra",
+      "total_matches": 5,
+      "incremental": 4,
+      "incremental_pct": 0.1,
+      "cumulative": 714,
+      "cumulative_pct": 10.2,
+      "new_concept": true,
+      "samples": [
+        "MANO DE OBRA",
+        "COSTO MANO DE OBRA",
+        "PLANTACION CEREZO MANO DE OBRA"
+      ],
+      "type": "new_concept"
+    },
+    {
+      "proposed_name": "RESULTADO_EJERCICIO",
+      "target_code": "ER.11",
+      "target_type": "PERDIDA",
+      "pattern": "resultad\\w*\\s*(ejercicio|del\\s*ejercicio)",
+      "total_matches": 6,
+      "incremental": 6,
+      "incremental_pct": 0.1,
+      "cumulative": 720,
+      "cumulative_pct": 10.3,
+      "new_concept": true,
+      "samples": [
+        "RESULTADOS EJERCICIOS",
+        "Fotal RESULTADO DEL EJERCICIO a A a",
+        "Cta. En Part. Inmob. Don Sergio ($) 63.065.615 347.466.070 Resultado del Ejercicio"
+      ],
+      "type": "new_concept"
+    },
+    {
+      "proposed_name": "INSTALACIONES",
+      "target_code": "ANC.03",
+      "target_type": "ACTIVO",
+      "pattern": "instalaciones?",
+      "total_matches": 4,
+      "incremental": 4,
+      "incremental_pct": 0.1,
+      "cumulative": 724,
+      "cumulative_pct": 10.4,
+      "new_concept": false,
+      "samples": [
+        "11760DEPREC.ACUM.INSTALACIONES",
+        "EQUIPOS E INSTALACIONES 366747 El a B Li",
+        "Deprec. Acumulada Instalacione"
+      ],
+      "type": "expansion"
+    },
+    {
+      "proposed_name": "PRESTAMO_BANCARIO",
+      "target_code": "PC.02",
+      "target_type": "PASIVO",
+      "pattern": "pr[eé]stamo\\s*bancar",
+      "total_matches": 3,
+      "incremental": 3,
+      "incremental_pct": 0.0,
+      "cumulative": 727,
+      "cumulative_pct": 10.4,
+      "new_concept": true,
+      "samples": [
+        "PRESTAMO BANCARIO",
+        ": PRESTAMO BANCARIO",
+        "Prestamo Bancario Largo Plazo"
+      ],
+      "type": "new_concept"
+    },
+    {
+      "proposed_name": "GASTOS_GENERALES",
+      "target_code": "ER.04",
+      "target_type": "PERDIDA",
+      "pattern": "gastos?\\s*(gral\\.?|generales?)\\b",
+      "total_matches": 5,
+      "incremental": 5,
+      "incremental_pct": 0.1,
+      "cumulative": 732,
+      "cumulative_pct": 10.5,
+      "new_concept": true,
+      "samples": [
+        "52451-1000 GASTOS GENERALES OFICINA",
+        "50605-4000 GASTOS GENERALES FORESTALES",
+        "50601-2000 GASTOS GENERALES DIVERSOS"
+      ],
+      "type": "new_concept"
+    },
+    {
+      "proposed_name": "MATERIA_PRIMA",
+      "target_code": "AC.05",
+      "target_type": "ACTIVO",
+      "pattern": "materia\\s*prima",
+      "total_matches": 1,
+      "incremental": 1,
+      "incremental_pct": 0.0,
+      "cumulative": 733,
+      "cumulative_pct": 10.5,
+      "new_concept": true,
+      "samples": [
+        "MATERIA PRIMA 66137878 3 66137878 A B a"
+      ],
+      "type": "new_concept"
+    },
+    {
+      "proposed_name": "SUBSIDIO",
+      "target_code": "ER.01",
+      "target_type": "GANANCIA",
+      "pattern": "subsidio|subvencion",
+      "total_matches": 1,
+      "incremental": 1,
+      "incremental_pct": 0.0,
+      "cumulative": 734,
+      "cumulative_pct": 10.5,
+      "new_concept": true,
+      "samples": [
+        "Subsidio Estatal Seguros Agricolas"
+      ],
+      "type": "new_concept"
+    }
+  ],
+  "ocr_expansions": [
+    {
+      "concept_name": "DEPRECIACION",
+      "pattern": "\\bdep\\b(?!(art|ar|artam|artament|osito|osita|artamento|artid|artamento))",
+      "total_matches": 77,
+      "incremental": 69,
+      "incremental_pct": 1.0,
+      "samples": [
+        "Dep. Acum. Laboratorio z",
+        "12506-0000 DEP.ACUM.ESTAC.Y BODEGAS",
+        "DEP.ACUM RED GLOBE"
+      ]
+    },
+    {
+      "concept_name": "IMPUESTOS",
+      "pattern": "\\bimpto\\b|\\bimpt[oó]\\b",
+      "total_matches": 85,
+      "incremental": 80,
+      "incremental_pct": 1.1,
+      "samples": [
+        "o IMPTO. COMBUSTIBLE 2.253.029 223309.”",
+        "IMPTO. ALA RENTA 1*",
+        "IMPTO.ADICIONAL 13070565 a816081"
+      ]
+    },
+    {
+      "concept_name": "PRESTAMOS",
+      "pattern": "\\bptmo\\b",
+      "total_matches": 31,
+      "incremental": 31,
+      "incremental_pct": 0.4,
+      "samples": [
+        "Ptmo. BCI",
+        "PTMO EL CARMEN LTDA",
+        "Ptmo Santander F-882725016"
+      ]
+    },
+    {
+      "concept_name": "CUENTA_CONTABLE",
+      "pattern": "\\bcta\\b",
+      "total_matches": 214,
+      "incremental": 207,
+      "incremental_pct": 3.0,
+      "samples": [
+        "CTA MINERA LA RUBIA",
+        "CTA.CTE.ACACIAS LTDA",
+        "BANCO DE CHILE CONCEPCION 100.301 CTA CTE CONSIGNADOR"
+      ]
+    },
+    {
+      "concept_name": "CLIENTES",
+      "pattern": "\\bcte\\b",
+      "total_matches": 132,
+      "incremental": 132,
+      "incremental_pct": 1.9,
+      "samples": [
+        "CTA.CTE.ACACIAS LTDA",
+        "BANCO DE CHILE CONCEPCION 100.301 CTA CTE CONSIGNADOR",
+        "Cta. Cte. Camila Vial P"
+      ]
+    },
+    {
+      "concept_name": "BANCOS",
+      "pattern": "\\bb[co]n?[co]\\b",
+      "total_matches": 11,
+      "incremental": 10,
+      "incremental_pct": 0.1,
+      "samples": [
+        "Bono",
+        "INGRESO BONO RIEGO RES 3061 LEY",
+        "Construcciones 965.932.470 Prestamos Bco. Largo Plazo"
+      ]
+    }
+  ],
+  "parser_issues": [
+    {
+      "issue": "Año/periodo en nombre",
+      "pattern": "\\b(19|20)\\d{2}\\b",
+      "accounts": 563,
+      "pct": 8.0,
+      "incremental": 563
+    },
+    {
+      "issue": "Razón social en nombre",
+      "pattern": "\\b(ltda|spa|eirl|sa)\\b",
+      "accounts": 516,
+      "pct": 7.4,
+      "incremental": 461
+    },
+    {
+      "issue": "Preparación EEFF",
+      "pattern": "\\bpreparaci[oó]n\\b",
+      "accounts": 189,
+      "pct": 2.7,
+      "incremental": 73
+    },
+    {
+      "issue": "Plantilla/template",
+      "pattern": "\\bplantaci[oó]n\\b",
+      "accounts": 229,
+      "pct": 3.3,
+      "incremental": 168
+    },
+    {
+      "issue": "Habilitación",
+      "pattern": "\\bhabilitaci[oó]n\\b",
+      "accounts": 125,
+      "pct": 1.8,
+      "incremental": 106
+    },
+    {
+      "issue": "Administración general",
+      "pattern": "\\badministraci[oó]n\\b(?!.*(gasto|ingreso))",
+      "accounts": 126,
+      "pct": 1.8,
+      "incremental": 56
+    },
+    {
+      "issue": "Mes en nombre",
+      "pattern": "\\b(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\\b",
+      "accounts": 234,
+      "pct": 3.3,
+      "incremental": 128
+    },
+    {
+      "issue": "Inicio período",
+      "pattern": "\\bdesde\\b",
+      "accounts": 42,
+      "pct": 0.6,
+      "incremental": 2
+    },
+    {
+      "issue": "Página",
+      "pattern": "\\bp[áa]gina\\b",
+      "accounts": 116,
+      "pct": 1.7,
+      "incremental": 112
+    },
+    {
+      "issue": "Ceros filler",
+      "pattern": "\\b0{2,4}\\b",
+      "accounts": 519,
+      "pct": 7.4,
+      "incremental": 298
+    }
+  ]
+}

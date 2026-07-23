@@ -1,0 +1,447 @@
+{
+  "metadata": {
+    "total_documents": 186,
+    "pdf_count": 162,
+    "excel_count": 24,
+    "total_accounts": 30006,
+    "avg_accounts_per_doc": 161.32258064516128,
+    "ocr_documents": 74,
+    "ocr_pct": 39.784946236559136,
+    "compatible_si": 58,
+    "compatible_no": 77,
+    "compatible_parcial": 27,
+    "risk_avg": 32.53763440860215,
+    "risk_high_count": 74,
+    "risk_critical_count": 2,
+    "avg_contamination": 17.238769326120888,
+    "total_lines_processed": 65699
+  },
+  "layouts": {
+    "SIN_HEADERS_DETECTADOS": {
+      "count": 60,
+      "compatible_most_common": "NO",
+      "compatibility_breakdown": {
+        "NO": 36,
+        "": 24
+      },
+      "file_types": {
+        "pdf": 36,
+        "xlsx": 23,
+        "xls": 1
+      },
+      "groups": {
+        "edge_cases": 28,
+        "validacion": 32
+      },
+      "risk_avg": 42.2,
+      "ocr_count": 14
+    },
+    "Deudor | Acreedor | Activo | Pasivo | Pérdida | Ganancia": {
+      "count": 37,
+      "compatible_most_common": "SI",
+      "compatibility_breakdown": {
+        "SI": 37
+      },
+      "file_types": {
+        "pdf": 37
+      },
+      "groups": {
+        "edge_cases": 3,
+        "validacion": 34
+      },
+      "risk_avg": 10.0,
+      "ocr_count": 20
+    },
+    "Activo | Pasivo": {
+      "count": 15,
+      "compatible_most_common": "NO",
+      "compatibility_breakdown": {
+        "NO": 15
+      },
+      "file_types": {
+        "pdf": 15
+      },
+      "groups": {
+        "edge_cases": 15
+      },
+      "risk_avg": 54.333333333333336,
+      "ocr_count": 13
+    },
+    "Pasivo | Corriente | Corriente": {
+      "count": 15,
+      "compatible_most_common": "PARCIAL",
+      "compatibility_breakdown": {
+        "PARCIAL": 15
+      },
+      "file_types": {
+        "pdf": 15
+      },
+      "groups": {
+        "edge_cases": 15
+      },
+      "risk_avg": 30.0,
+      "ocr_count": 0
+    },
+    "Debe | Haber | Deudor | Acreedor | Activo | Pasivo | Pérdida | Ganancia": {
+      "count": 13,
+      "compatible_most_common": "SI",
+      "compatibility_breakdown": {
+        "SI": 13
+      },
+      "file_types": {
+        "pdf": 13
+      },
+      "groups": {
+        "validacion": 13
+      },
+      "risk_avg": 8.461538461538462,
+      "ocr_count": 2
+    },
+    "Activo | Pasivo | Patrimonio": {
+      "count": 5,
+      "compatible_most_common": "NO",
+      "compatibility_breakdown": {
+        "NO": 5
+      },
+      "file_types": {
+        "pdf": 5
+      },
+      "groups": {
+        "edge_cases": 5
+      },
+      "risk_avg": 47.0,
+      "ocr_count": 1
+    },
+    "Activo | Neto": {
+      "count": 5,
+      "compatible_most_common": "NO",
+      "compatibility_breakdown": {
+        "NO": 5
+      },
+      "file_types": {
+        "pdf": 5
+      },
+      "groups": {
+        "edge_cases": 5
+      },
+      "risk_avg": 51.0,
+      "ocr_count": 1
+    },
+    "Activo | Corriente | Pasivo | Corriente": {
+      "count": 4,
+      "compatible_most_common": "PARCIAL",
+      "compatibility_breakdown": {
+        "PARCIAL": 4
+      },
+      "file_types": {
+        "pdf": 4
+      },
+      "groups": {
+        "edge_cases": 4
+      },
+      "risk_avg": 33.75,
+      "ocr_count": 3
+    },
+    "Pasivo | Patrimonio": {
+      "count": 4,
+      "compatible_most_common": "NO",
+      "compatibility_breakdown": {
+        "NO": 4
+      },
+      "file_types": {
+        "pdf": 4
+      },
+      "groups": {
+        "edge_cases": 4
+      },
+      "risk_avg": 55.0,
+      "ocr_count": 4
+    },
+    "Pérdida | Ejercicio": {
+      "count": 4,
+      "compatible_most_common": "PARCIAL",
+      "compatibility_breakdown": {
+        "PARCIAL": 4
+      },
+      "file_types": {
+        "pdf": 4
+      },
+      "groups": {
+        "edge_cases": 4
+      },
+      "risk_avg": 35.0,
+      "ocr_count": 4
+    },
+    "Saldo | Deudor | Saldo | Acreedor | Activo | Pasivo | Pérdida | Ganancia": {
+      "count": 3,
+      "compatible_most_common": "SI",
+      "compatibility_breakdown": {
+        "SI": 3
+      },
+      "file_types": {
+        "pdf": 3
+      },
+      "groups": {
+        "edge_cases": 2,
+        "validacion": 1
+      },
+      "risk_avg": 6.666666666666667,
+      "ocr_count": 0
+    },
+    "Activo | Corriente | Activo": {
+      "count": 3,
+      "compatible_most_common": "NO",
+      "compatibility_breakdown": {
+        "NO": 3
+      },
+      "file_types": {
+        "pdf": 3
+      },
+      "groups": {
+        "edge_cases": 3
+      },
+      "risk_avg": 50.0,
+      "ocr_count": 0
+    },
+    "Activo | Pérdida | Ejercicio": {
+      "count": 2,
+      "compatible_most_common": "PARCIAL",
+      "compatibility_breakdown": {
+        "PARCIAL": 2
+      },
+      "file_types": {
+        "pdf": 2
+      },
+      "groups": {
+        "edge_cases": 2
+      },
+      "risk_avg": 35.0,
+      "ocr_count": 2
+    },
+    "Activo | Pasivo | Pérdida | Ganancia": {
+      "count": 2,
+      "compatible_most_common": "SI",
+      "compatibility_breakdown": {
+        "SI": 2
+      },
+      "file_types": {
+        "pdf": 2
+      },
+      "groups": {
+        "validacion": 2
+      },
+      "risk_avg": 0.0,
+      "ocr_count": 0
+    },
+    "Debe | Haber | Deudor | Activo | Pasivo | Pérdida": {
+      "count": 1,
+      "compatible_most_common": "NO",
+      "compatibility_breakdown": {
+        "NO": 1
+      },
+      "file_types": {
+        "pdf": 1
+      },
+      "groups": {
+        "edge_cases": 1
+      },
+      "risk_avg": 55.0,
+      "ocr_count": 1
+    },
+    "Activo | Neto | Resultado | Ejercicio": {
+      "count": 1,
+      "compatible_most_common": "PARCIAL",
+      "compatibility_breakdown": {
+        "PARCIAL": 1
+      },
+      "file_types": {
+        "pdf": 1
+      },
+      "groups": {
+        "edge_cases": 1
+      },
+      "risk_avg": 20.0,
+      "ocr_count": 0
+    },
+    "Saldo | Acreedor | Activo | Pasivo | Pérdida | Ganancia": {
+      "count": 1,
+      "compatible_most_common": "SI",
+      "compatibility_breakdown": {
+        "SI": 1
+      },
+      "file_types": {
+        "pdf": 1
+      },
+      "groups": {
+        "edge_cases": 1
+      },
+      "risk_avg": 15.0,
+      "ocr_count": 1
+    },
+    "Gastos | Patrimonio": {
+      "count": 1,
+      "compatible_most_common": "NO",
+      "compatibility_breakdown": {
+        "NO": 1
+      },
+      "file_types": {
+        "pdf": 1
+      },
+      "groups": {
+        "edge_cases": 1
+      },
+      "risk_avg": 55.0,
+      "ocr_count": 1
+    },
+    "Ingresos | Bruto | Pérdida": {
+      "count": 1,
+      "compatible_most_common": "NO",
+      "compatibility_breakdown": {
+        "NO": 1
+      },
+      "file_types": {
+        "pdf": 1
+      },
+      "groups": {
+        "edge_cases": 1
+      },
+      "risk_avg": 55.0,
+      "ocr_count": 1
+    },
+    "Activo | Corriente": {
+      "count": 1,
+      "compatible_most_common": "NO",
+      "compatibility_breakdown": {
+        "NO": 1
+      },
+      "file_types": {
+        "pdf": 1
+      },
+      "groups": {
+        "edge_cases": 1
+      },
+      "risk_avg": 55.0,
+      "ocr_count": 1
+    },
+    "Activo | Corriente | Pasivo": {
+      "count": 1,
+      "compatible_most_common": "NO",
+      "compatibility_breakdown": {
+        "NO": 1
+      },
+      "file_types": {
+        "pdf": 1
+      },
+      "groups": {
+        "edge_cases": 1
+      },
+      "risk_avg": 55.0,
+      "ocr_count": 1
+    },
+    "Activo | Pasivo | Gastos | Ingresos": {
+      "count": 1,
+      "compatible_most_common": "PARCIAL",
+      "compatibility_breakdown": {
+        "PARCIAL": 1
+      },
+      "file_types": {
+        "pdf": 1
+      },
+      "groups": {
+        "validacion": 1
+      },
+      "risk_avg": 20.0,
+      "ocr_count": 0
+    },
+    "Deudor | Activo | Pasivo | Pérdida": {
+      "count": 1,
+      "compatible_most_common": "NO",
+      "compatibility_breakdown": {
+        "NO": 1
+      },
+      "file_types": {
+        "pdf": 1
+      },
+      "groups": {
+        "validacion": 1
+      },
+      "risk_avg": 55.0,
+      "ocr_count": 1
+    },
+    "Activo | Pasivo | Pérdida": {
+      "count": 1,
+      "compatible_most_common": "NO",
+      "compatibility_breakdown": {
+        "NO": 1
+      },
+      "file_types": {
+        "pdf": 1
+      },
+      "groups": {
+        "validacion": 1
+      },
+      "risk_avg": 55.0,
+      "ocr_count": 1
+    },
+    "Acreedor | Pérdida": {
+      "count": 1,
+      "compatible_most_common": "NO",
+      "compatibility_breakdown": {
+        "NO": 1
+      },
+      "file_types": {
+        "pdf": 1
+      },
+      "groups": {
+        "validacion": 1
+      },
+      "risk_avg": 55.0,
+      "ocr_count": 1
+    },
+    "Patrimonio | Neto | Capital": {
+      "count": 1,
+      "compatible_most_common": "NO",
+      "compatibility_breakdown": {
+        "NO": 1
+      },
+      "file_types": {
+        "pdf": 1
+      },
+      "groups": {
+        "validacion": 1
+      },
+      "risk_avg": 40.0,
+      "ocr_count": 0
+    },
+    "Debe | Haber | Deudor | Activo | Pasivo | Pérdida | Ganancia": {
+      "count": 1,
+      "compatible_most_common": "SI",
+      "compatibility_breakdown": {
+        "SI": 1
+      },
+      "file_types": {
+        "pdf": 1
+      },
+      "groups": {
+        "validacion": 1
+      },
+      "risk_avg": 15.0,
+      "ocr_count": 1
+    },
+    "Pasivo | Pérdida | Ganancia": {
+      "count": 1,
+      "compatible_most_common": "SI",
+      "compatibility_breakdown": {
+        "SI": 1
+      },
+      "file_types": {
+        "pdf": 1
+      },
+      "groups": {
+        "validacion": 1
+      },
+      "risk_avg": 0.0,
+      "ocr_count": 0
+    }
+  }
+}

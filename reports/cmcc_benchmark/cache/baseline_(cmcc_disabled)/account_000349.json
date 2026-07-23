@@ -1,0 +1,1 @@
+{"source_file": "", "account_code": "", "account_name": "Impuestos por pagar", "nature": "loss", "standard_code": "PC.05", "final_code": "PC.05", "confidence": 0.98, "method": "learning_exact", "reason": "Gold Standard (exact) → PC.05 (matched: Impuestos por pagar)", "cmcc_score": 0.0, "cmcc_code": null, "cmcc_concept": null, "is_unknown": false}

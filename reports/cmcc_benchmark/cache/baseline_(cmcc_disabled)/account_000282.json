@@ -1,0 +1,1 @@
+{"source_file": "", "account_code": "", "account_name": "i GASTOS FINANCIEROS", "nature": "liability", "standard_code": "ER.09", "final_code": "ER.09", "confidence": 0.8474, "method": "learning_fuzzy", "reason": "Gold Standard (fuzzy) → ER.09 (matched: Gastos Financieros)", "cmcc_score": 0.0, "cmcc_code": null, "cmcc_concept": null, "is_unknown": false}

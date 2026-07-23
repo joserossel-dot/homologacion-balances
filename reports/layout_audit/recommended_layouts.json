@@ -1,0 +1,343 @@
+{
+  "analysis_date": "2026-07-07T19:34:20",
+  "total_documents": 186,
+  "layouts_detected": 28,
+  "heuristic": "ULTIMAS_COLS = [ACTIVO, PASIVO, PERDIDA, GANANCIA]",
+  "summary": {
+    "compatible_count": 58,
+    "compatible_pct": 31.2,
+    "incompatible_count": 77,
+    "incompatible_pct": 41.4,
+    "partial_count": 27,
+    "partial_pct": 14.5,
+    "high_risk_count": 74,
+    "critical_risk_count": 2
+  },
+  "detected_layouts": [
+    {
+      "signature": "SIN_HEADERS_DETECTADOS",
+      "count": 60,
+      "compatibility": "NO",
+      "headers": [],
+      "recommended_approach": "Sin headers detectados — requiere parser posicional (analizar estructura numérica de la tabla)"
+    },
+    {
+      "signature": "Deudor | Acreedor | Activo | Pasivo | Pérdida | Ganancia",
+      "count": 37,
+      "compatibility": "SI",
+      "headers": [
+        "Deudor",
+        "Acreedor",
+        "Activo",
+        "Pasivo",
+        "Pérdida",
+        "Ganancia"
+      ],
+      "recommended_approach": "Formato Deudor/Acreedor — requiere mapeo explícito de columnas"
+    },
+    {
+      "signature": "Activo | Pasivo",
+      "count": 15,
+      "compatibility": "NO",
+      "headers": [
+        "Activo",
+        "Pasivo"
+      ],
+      "recommended_approach": "Solo Activo/Pasivo (balance sin ER) — requiere detectar si hay ER en páginas separadas o agregar etiquetas faltantes"
+    },
+    {
+      "signature": "Pasivo | Corriente | Corriente",
+      "count": 15,
+      "compatibility": "PARCIAL",
+      "headers": [
+        "Pasivo",
+        "Corriente",
+        "Corriente"
+      ],
+      "recommended_approach": "Layout no estándar (Pasivo | Corriente | Corriente) — requiere análisis manual para FASE 2B"
+    },
+    {
+      "signature": "Debe | Haber | Deudor | Acreedor | Activo | Pasivo | Pérdida | Ganancia",
+      "count": 13,
+      "compatibility": "SI",
+      "headers": [
+        "Debe",
+        "Haber",
+        "Deudor",
+        "Acreedor",
+        "Activo",
+        "Pasivo",
+        "Pérdida",
+        "Ganancia"
+      ],
+      "recommended_approach": "Formato Debe/Haber — requiere detección de qué columnas son saldos clasificados vs intermedias"
+    },
+    {
+      "signature": "Activo | Pasivo | Patrimonio",
+      "count": 5,
+      "compatibility": "NO",
+      "headers": [
+        "Activo",
+        "Pasivo",
+        "Patrimonio"
+      ],
+      "recommended_approach": "Solo Activo/Pasivo (balance sin ER) — requiere detectar si hay ER en páginas separadas o agregar etiquetas faltantes"
+    },
+    {
+      "signature": "Activo | Neto",
+      "count": 5,
+      "compatibility": "NO",
+      "headers": [
+        "Activo",
+        "Neto"
+      ],
+      "recommended_approach": "Layout no estándar (Activo | Neto) — requiere análisis manual para FASE 2B"
+    },
+    {
+      "signature": "Activo | Corriente | Pasivo | Corriente",
+      "count": 4,
+      "compatibility": "PARCIAL",
+      "headers": [
+        "Activo",
+        "Corriente",
+        "Pasivo",
+        "Corriente"
+      ],
+      "recommended_approach": "Formato EEFF (Activo/Pasivo Corriente/No Corriente) — requiere detectar sub-columnas de activo/pasivo"
+    },
+    {
+      "signature": "Pasivo | Patrimonio",
+      "count": 4,
+      "compatibility": "NO",
+      "headers": [
+        "Pasivo",
+        "Patrimonio"
+      ],
+      "recommended_approach": "Layout no estándar (Pasivo | Patrimonio) — requiere análisis manual para FASE 2B"
+    },
+    {
+      "signature": "Pérdida | Ejercicio",
+      "count": 4,
+      "compatibility": "PARCIAL",
+      "headers": [
+        "Pérdida",
+        "Ejercicio"
+      ],
+      "recommended_approach": "Layout no estándar (Pérdida | Ejercicio) — requiere análisis manual para FASE 2B"
+    },
+    {
+      "signature": "Saldo | Deudor | Saldo | Acreedor | Activo | Pasivo | Pérdida | Ganancia",
+      "count": 3,
+      "compatibility": "SI",
+      "headers": [
+        "Saldo",
+        "Deudor",
+        "Saldo",
+        "Acreedor",
+        "Activo",
+        "Pasivo",
+        "Pérdida",
+        "Ganancia"
+      ],
+      "recommended_approach": "Formato Deudor/Acreedor — requiere mapeo explícito de columnas"
+    },
+    {
+      "signature": "Activo | Corriente | Activo",
+      "count": 3,
+      "compatibility": "NO",
+      "headers": [
+        "Activo",
+        "Corriente",
+        "Activo"
+      ],
+      "recommended_approach": "Layout no estándar (Activo | Corriente | Activo) — requiere análisis manual para FASE 2B"
+    },
+    {
+      "signature": "Activo | Pérdida | Ejercicio",
+      "count": 2,
+      "compatibility": "PARCIAL",
+      "headers": [
+        "Activo",
+        "Pérdida",
+        "Ejercicio"
+      ],
+      "recommended_approach": "Layout no estándar (Activo | Pérdida | Ejercicio) — requiere análisis manual para FASE 2B"
+    },
+    {
+      "signature": "Activo | Pasivo | Pérdida | Ganancia",
+      "count": 2,
+      "compatibility": "SI",
+      "headers": [
+        "Activo",
+        "Pasivo",
+        "Pérdida",
+        "Ganancia"
+      ],
+      "recommended_approach": "Layout no estándar (Activo | Pasivo | Pérdida | Ganancia) — requiere análisis manual para FASE 2B"
+    },
+    {
+      "signature": "Debe | Haber | Deudor | Activo | Pasivo | Pérdida",
+      "count": 1,
+      "compatibility": "NO",
+      "headers": [
+        "Debe",
+        "Haber",
+        "Deudor",
+        "Activo",
+        "Pasivo",
+        "Pérdida"
+      ],
+      "recommended_approach": "Formato Debe/Haber — requiere detección de qué columnas son saldos clasificados vs intermedias"
+    },
+    {
+      "signature": "Activo | Neto | Resultado | Ejercicio",
+      "count": 1,
+      "compatibility": "PARCIAL",
+      "headers": [
+        "Activo",
+        "Neto",
+        "Resultado",
+        "Ejercicio"
+      ],
+      "recommended_approach": "Layout no estándar (Activo | Neto | Resultado | Ejercicio) — requiere análisis manual para FASE 2B"
+    },
+    {
+      "signature": "Saldo | Acreedor | Activo | Pasivo | Pérdida | Ganancia",
+      "count": 1,
+      "compatibility": "SI",
+      "headers": [
+        "Saldo",
+        "Acreedor",
+        "Activo",
+        "Pasivo",
+        "Pérdida",
+        "Ganancia"
+      ],
+      "recommended_approach": "Layout no estándar (Saldo | Acreedor | Activo | Pasivo | Pérdida | Ganancia) — requiere análisis manual para FASE 2B"
+    },
+    {
+      "signature": "Gastos | Patrimonio",
+      "count": 1,
+      "compatibility": "NO",
+      "headers": [
+        "Gastos",
+        "Patrimonio"
+      ],
+      "recommended_approach": "Layout no estándar (Gastos | Patrimonio) — requiere análisis manual para FASE 2B"
+    },
+    {
+      "signature": "Ingresos | Bruto | Pérdida",
+      "count": 1,
+      "compatibility": "NO",
+      "headers": [
+        "Ingresos",
+        "Bruto",
+        "Pérdida"
+      ],
+      "recommended_approach": "Layout no estándar (Ingresos | Bruto | Pérdida) — requiere análisis manual para FASE 2B"
+    },
+    {
+      "signature": "Activo | Corriente",
+      "count": 1,
+      "compatibility": "NO",
+      "headers": [
+        "Activo",
+        "Corriente"
+      ],
+      "recommended_approach": "Layout no estándar (Activo | Corriente) — requiere análisis manual para FASE 2B"
+    },
+    {
+      "signature": "Activo | Corriente | Pasivo",
+      "count": 1,
+      "compatibility": "NO",
+      "headers": [
+        "Activo",
+        "Corriente",
+        "Pasivo"
+      ],
+      "recommended_approach": "Formato EEFF (Activo/Pasivo Corriente/No Corriente) — requiere detectar sub-columnas de activo/pasivo"
+    },
+    {
+      "signature": "Activo | Pasivo | Gastos | Ingresos",
+      "count": 1,
+      "compatibility": "PARCIAL",
+      "headers": [
+        "Activo",
+        "Pasivo",
+        "Gastos",
+        "Ingresos"
+      ],
+      "recommended_approach": "Solo Activo/Pasivo (balance sin ER) — requiere detectar si hay ER en páginas separadas o agregar etiquetas faltantes"
+    },
+    {
+      "signature": "Deudor | Activo | Pasivo | Pérdida",
+      "count": 1,
+      "compatibility": "NO",
+      "headers": [
+        "Deudor",
+        "Activo",
+        "Pasivo",
+        "Pérdida"
+      ],
+      "recommended_approach": "Solo Activo/Pasivo (balance sin ER) — requiere detectar si hay ER en páginas separadas o agregar etiquetas faltantes"
+    },
+    {
+      "signature": "Activo | Pasivo | Pérdida",
+      "count": 1,
+      "compatibility": "NO",
+      "headers": [
+        "Activo",
+        "Pasivo",
+        "Pérdida"
+      ],
+      "recommended_approach": "Solo Activo/Pasivo (balance sin ER) — requiere detectar si hay ER en páginas separadas o agregar etiquetas faltantes"
+    },
+    {
+      "signature": "Acreedor | Pérdida",
+      "count": 1,
+      "compatibility": "NO",
+      "headers": [
+        "Acreedor",
+        "Pérdida"
+      ],
+      "recommended_approach": "Layout no estándar (Acreedor | Pérdida) — requiere análisis manual para FASE 2B"
+    },
+    {
+      "signature": "Patrimonio | Neto | Capital",
+      "count": 1,
+      "compatibility": "NO",
+      "headers": [
+        "Patrimonio",
+        "Neto",
+        "Capital"
+      ],
+      "recommended_approach": "Layout no estándar (Patrimonio | Neto | Capital) — requiere análisis manual para FASE 2B"
+    },
+    {
+      "signature": "Debe | Haber | Deudor | Activo | Pasivo | Pérdida | Ganancia",
+      "count": 1,
+      "compatibility": "SI",
+      "headers": [
+        "Debe",
+        "Haber",
+        "Deudor",
+        "Activo",
+        "Pasivo",
+        "Pérdida",
+        "Ganancia"
+      ],
+      "recommended_approach": "Formato Debe/Haber — requiere detección de qué columnas son saldos clasificados vs intermedias"
+    },
+    {
+      "signature": "Pasivo | Pérdida | Ganancia",
+      "count": 1,
+      "compatibility": "SI",
+      "headers": [
+        "Pasivo",
+        "Pérdida",
+        "Ganancia"
+      ],
+      "recommended_approach": "Layout no estándar (Pasivo | Pérdida | Ganancia) — requiere análisis manual para FASE 2B"
+    }
+  ]
+}

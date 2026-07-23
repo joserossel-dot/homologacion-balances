@@ -1,0 +1,169 @@
+{
+  "timestamp": "2026-07-10T20:17:17.904756+00:00",
+  "v1": {
+    "total": 52,
+    "codes": [
+      "AC.01",
+      "AC.02",
+      "AC.03",
+      "AC.04",
+      "AC.05",
+      "AC.06",
+      "AC.06S",
+      "AC.07",
+      "AC.08",
+      "AC.09",
+      "ANC.01",
+      "ANC.02",
+      "ANC.03",
+      "ANC.04",
+      "ANC.05",
+      "ANC.06",
+      "ANC.07",
+      "ANC.08",
+      "PC.01",
+      "PC.02",
+      "PC.03",
+      "PC.04",
+      "PC.05",
+      "PC.06",
+      "PC.07",
+      "PC.08",
+      "PNC.01",
+      "PNC.02",
+      "PNC.03",
+      "PNC.04",
+      "PNC.05",
+      "PAT.01",
+      "PAT.02",
+      "PAT.03",
+      "PAT.04",
+      "PAT.05",
+      "ER.01",
+      "ER.02",
+      "ER.03",
+      "ER.04",
+      "ER.05",
+      "ER.06",
+      "ER.07",
+      "ER.08",
+      "ER.09",
+      "ER.10",
+      "ER.11",
+      "ER.12",
+      "ER.13",
+      "ER.14",
+      "ER.15",
+      "ER.16"
+    ]
+  },
+  "v2": {
+    "total": 75,
+    "account": 69,
+    "calculated": 6,
+    "leaf": 66,
+    "hierarchical": 21,
+    "new": 13,
+    "by_family": {
+      "ACTIVO CORRIENTE": 18,
+      "ACTIVO NO CORRIENTE": 10,
+      "PASIVO CORRIENTE": 15,
+      "PASIVO NO CORRIENTE": 8,
+      "PATRIMONIO": 6,
+      "ESTADO DE RESULTADOS": 18
+    },
+    "by_level": {
+      "1": 54,
+      "2": 21
+    },
+    "by_type": {
+      "ACCOUNT": 69,
+      "CALCULATED": 6
+    }
+  },
+  "migration": {
+    "v1_split_into_multiple": 13,
+    "split_codes": [
+      "AC.01",
+      "AC.02",
+      "AC.03",
+      "AC.04",
+      "AC.07",
+      "AC.08",
+      "ANC.06",
+      "PC.01",
+      "PC.05",
+      "PC.08",
+      "PNC.05",
+      "ER.07",
+      "ER.13"
+    ],
+    "v2_merges": 8,
+    "v1_orphaned": 4,
+    "v2_compatible": 62,
+    "v2_new_no_v1": 7
+  },
+  "impact": {
+    "v1_concepts": 52,
+    "v2_concepts_total": 75,
+    "v2_account_concepts": 69,
+    "v2_calculated_concepts": 6,
+    "v2_leaf_concepts": 66,
+    "v2_hierarchical_concepts": 21,
+    "v2_new_concepts": 13,
+    "v1_split_into_multiple": 13,
+    "v1_codes_split": [
+      "AC.01",
+      "AC.02",
+      "AC.03",
+      "AC.04",
+      "AC.07",
+      "AC.08",
+      "ANC.06",
+      "PC.01",
+      "PC.05",
+      "PC.08",
+      "PNC.05",
+      "ER.07",
+      "ER.13"
+    ],
+    "v2_concepts_from_merges": 8,
+    "v2_merge_details": {
+      "AC.02": [
+        "AC.01",
+        "AC.02"
+      ],
+      "AC.04": [
+        "AC.03",
+        "AC.04"
+      ],
+      "AC.05": [
+        "AC.06",
+        "AC.06S"
+      ],
+      "AC.11": [
+        "AC.07",
+        "AC.08"
+      ],
+      "PC.01.02": [
+        "PC.01",
+        "PC.08"
+      ],
+      "PC.04.01": [
+        "PC.05",
+        "PC.08"
+      ],
+      "ER.03": [
+        "ER.04",
+        "ER.05"
+      ],
+      "ER.09": [
+        "ER.14",
+        "ER.15"
+      ]
+    },
+    "v1_orphaned": 4,
+    "delta": 23,
+    "delta_leaf_vs_v1": 14
+  }
+}

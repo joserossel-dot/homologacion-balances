@@ -29,9 +29,12 @@ import streamlit as st
 from rapidfuzz import fuzz, process
 
 from clasificador_codigo_cuenta import ClasificadorCodigo
+from gold_standard.builder import GoldBuilder
+from gold_standard.models import GoldRecord
 from reglas_especiales import ProcesadorReglasEspeciales, calcular_patrimonio_efectivo
+from analytics.dashboard import AnalyticsDashboard
 from parser_universal import ParserPDF, CuentaRaw, OrigenColumna
-from db_repository import RepositorioDiccionario, normalizar_nombre as normalizar_nombre_repo
+from src.db_repository import RepositorioDiccionario
 from extractor_metadata import extraer_metadata, MetadataEmpresa
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -40,6 +43,8 @@ from extractor_metadata import extraer_metadata, MetadataEmpresa
 
 BASE_DIR = Path(__file__).parent
 UMBRAL_REVISION = 0.85  # bajo este valor, la cuenta va a la cola de revisión
+USE_LEGACY_ENGINE = False  # True → MotorHibridoLocal (antiguo); False → HomologationPipeline (nuevo, default)
+SHADOW_MODE = True  # True → ejecuta nuevo pipeline en paralelo sin afectar UI, guarda logs en logs/shadow/
 
 st.set_page_config(
     page_title="Homologación de Balances Tributarios",
@@ -284,6 +289,22 @@ def parsear_excel(file) -> list[CuentaRaw]:
 # INTERFAZ DE USUARIO PRINCIPAL (MAIN)
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _save_gold_standard(account_name, account_code, final_code, reviewer="analista"):
+    try:
+        builder = GoldBuilder()
+        record = GoldRecord(
+            account_name=account_name,
+            account_code_original=account_code,
+            final_code=final_code,
+            reviewer=reviewer,
+            source_file=st.session_state.get("archivo_activo_select", ""),
+        )
+        builder.add_or_update(record)
+        builder.close()
+    except Exception:
+        pass
+
+
 def main():
     st.title("📊 Homologación de Balances Tributarios Chilenos")
     st.caption(
@@ -383,6 +404,7 @@ def main():
             st.session_state.resultados.pop(k, None)
             st.session_state.metadata_files.pop(k, None)
 
+<<<<<<< HEAD
     for archivo in archivos:
         if archivo.name not in st.session_state.resultados:
             with st.spinner(f"Clasificando cuentas de {archivo.name}..."):
@@ -407,6 +429,198 @@ def main():
                     })
                 df_file = pd.DataFrame(filas)
                 st.session_state.resultados[archivo.name] = df_file
+=======
+    # ── Procesar archivos nuevos ──────────────────────────────────────────────
+    if USE_LEGACY_ENGINE:
+        # LEGACY PIPELINE (MotorHibridoLocal)
+        for archivo in archivos:
+            if archivo.name not in st.session_state.resultados:
+                with st.spinner(f"Clasificando cuentas de {archivo.name}..."):
+                    lineas_encabezado = _extraer_lineas_encabezado(archivo)
+                    meta_indiv = extraer_metadata(lineas_encabezado)
+                    st.session_state.metadata_files[archivo.name] = meta_indiv
+
+                    cuentas = _extraer_cuentas(archivo)
+                    motor = MotorHibridoLocal(st.session_state.diccionario)
+                    filas = []
+                    for c in cuentas:
+                        if c.monto is None and not c.codigo:
+                            continue
+                        if not c.codigo and PATRON_NO_CUENTA.match(c.nombre.strip()):
+                            continue
+                        r = motor.clasificar(c, company_giro_norm)
+                        filas.append({
+                            'linea': c.linea,
+                            'codigo_original': c.codigo or '',
+                            'nombre_original': c.nombre,
+                            'monto': c.monto,
+                            'origen_columna': c.origen_columna.value,
+                            'es_total': c.es_total,
+                            'codigo_clasificado': r['codigo_estandar'] or '',
+                            'metodo': r['metodo'],
+                            'confianza': r['confianza'],
+                            'requiere_revision': r['requiere_revision'],
+                            'nota': r.get('nota_regla_especial', ''),
+                            'confianza_extraccion': c.confianza_extraccion,
+                            'origen_columna_display': c.origen_columna.value,
+                        })
+                    df_file = pd.DataFrame(filas)
+                    st.session_state.resultados[archivo.name] = df_file
+
+                    # SHADOW MODE — homologación comparativa contra motor legacy
+                    if SHADOW_MODE and Path(archivo.name).suffix.lower() == '.pdf':
+                        import tempfile
+                        from pipeline.homologation_pipeline import HomologationPipeline
+                        from shadow.shadow_logger import ShadowLogger
+                        tmp_shadow = tempfile.NamedTemporaryFile(suffix='.pdf', delete=False)
+                        try:
+                            tmp_shadow.write(archivo.read())
+                            tmp_shadow.close()
+                            sh_path = Path(tmp_shadow.name)
+                            hp_shadow = HomologationPipeline()
+                            sh_summary = hp_shadow.process(sh_path)
+                            logger_sh = ShadowLogger()
+                            comparisons = []
+                            matches = 0
+                            for sh_entry in sh_summary.get("classified", []):
+                                aname = sh_entry["account_name"]
+                                amatch = df_file[df_file["nombre_original"] == aname]
+                                if amatch.empty:
+                                    continue
+                                comparisons.append(logger_sh.build_comparison(
+                                    account_name=aname,
+                                    account_code=sh_entry.get("account_code", ""),
+                                    legacy_code=amatch.iloc[0]["codigo_clasificado"] or None,
+                                    legacy_confidence=amatch.iloc[0]["confianza"],
+                                    new_code=sh_entry.get("final_code") or sh_entry.get("standard_code"),
+                                    new_confidence=sh_entry.get("confidence", 0.0),
+                                    new_method=sh_entry.get("method", ""),
+                                    learning_hit="learning" in sh_entry.get("method", ""),
+                                ))
+                                if comparisons[-1]["match"]:
+                                    matches += 1
+                            total_comp = len(comparisons)
+                            match_rate = matches / total_comp if total_comp else 1.0
+                            logger_sh.log(archivo.name, comparisons, match_rate)
+                        finally:
+                            sh_path.unlink(missing_ok=True)
+                            archivo.seek(0)
+    else:
+        # NEW PIPELINE (HomologationPipeline)
+        import logging as _logging
+        _shadow_logger = _logging.getLogger("homologation_pipeline")
+        from pipeline.homologation_pipeline import HomologationPipeline
+        from adapters.account_adapter import AccountAdapter
+        from interpreters.balance_interpreter import BalanceInterpreter
+
+        hp = HomologationPipeline()
+        for archivo in archivos:
+            if archivo.name not in st.session_state.resultados:
+                with st.spinner(f"Clasificando cuentas de {archivo.name}..."):
+                    _t0 = time.perf_counter()
+                    lineas_encabezado = _extraer_lineas_encabezado(archivo)
+                    meta_indiv = extraer_metadata(lineas_encabezado)
+                    st.session_state.metadata_files[archivo.name] = meta_indiv
+
+                    cuentas = _extraer_cuentas(archivo)
+                    total_cuentas = len(cuentas)
+                    filas = []
+                    clasificadas = 0
+                    learning_hits = 0
+                    fallback_count = 0
+
+                    for c in cuentas:
+                        if c.monto is None and not c.codigo:
+                            continue
+                        if not c.codigo and PATRON_NO_CUENTA.match(c.nombre.strip()):
+                            continue
+                        ab = AccountAdapter.from_cuenta_raw(c)
+                        interp = BalanceInterpreter(ab)
+                        classification_amount = interp.classification_amount
+                        if classification_amount is None or classification_amount == 0:
+                            codigo_clasificado = ""
+                            metodo = "movement_only"
+                            confianza = 0.0
+                            requiere_revision = True
+                            nota = ""
+                        else:
+                            clasificadas += 1
+                            classification = hp._classify_account(ab.account_code, ab.account_name)
+                            adjustment = hp._rule_processor.aplicar(
+                                nombre_cuenta=ab.account_name,
+                                codigo_clasificado=classification.get("standard_code") or "",
+                                monto=classification_amount,
+                            )
+                            final_code = (
+                                adjustment.codigo_final if adjustment.aplica
+                                else classification.get("standard_code")
+                            )
+                            codigo_clasificado = final_code or ""
+                            metodo = classification.get("method", "")
+                            confianza = classification.get("confidence", 0.0)
+                            requiere_revision = confianza < UMBRAL_REVISION
+                            nota = adjustment.nota if adjustment.aplica else ""
+                            if metodo.startswith("learning_"):
+                                learning_hits += 1
+                            else:
+                                fallback_count += 1
+
+                        filas.append({
+                            'linea': c.linea,
+                            'codigo_original': c.codigo or '',
+                            'nombre_original': c.nombre,
+                            'monto': c.monto,
+                            'origen_columna': c.origen_columna.value,
+                            'es_total': c.es_total,
+                            'codigo_clasificado': codigo_clasificado,
+                            'metodo': metodo,
+                            'confianza': confianza,
+                            'requiere_revision': requiere_revision,
+                            'nota': nota,
+                            'confianza_extraccion': c.confianza_extraccion,
+                            'origen_columna_display': c.origen_columna.value,
+                        })
+
+                    df_file = pd.DataFrame(filas)
+                    st.session_state.resultados[archivo.name] = df_file
+
+                    _t1 = time.perf_counter()
+                    _shadow_logger.info(
+                        "archivo=%s cuentas=%d clasificadas=%d learning_hits=%d fallback=%d time=%.3fs",
+                        archivo.name, total_cuentas, clasificadas,
+                        learning_hits, fallback_count, _t1 - _t0,
+                    )
+    # After processing all uploaded files, propagate classifications across all balances
+    if 'propagation_done' not in st.session_state:
+        # Define helper to propagate classifications across balances
+        def propagar_entre_balances():
+            """Propaga códigos clasificados entre balances cargados."""
+            # Build mapping from normalized account name to list of (file, index)
+            name_map = {}
+            for fname, df in st.session_state.resultados.items():
+                for idx, row in df.iterrows():
+                    nombre = row['nombre_original']
+                    if not nombre:
+                        continue
+                    norm = normalizar_nombre(nombre)
+                    name_map.setdefault(norm, []).append((fname, idx, row['codigo_clasificado']))
+            # Propagar si existe alguna clasificación
+            for norm, entries in name_map.items():
+                classified_code = None
+                for fname, idx, cod in entries:
+                    if cod and cod not in ('', '__EXCLUIR__'):
+                        classified_code = cod
+                        break
+                if classified_code:
+                    for fname, idx, cod in entries:
+                        if not cod or cod == '':
+                            st.session_state.resultados[fname].at[idx, 'codigo_clasificado'] = classified_code
+                            st.session_state.resultados[fname].at[idx, 'metodo'] = 'propagado_automático'
+                            st.session_state.resultados[fname].at[idx, 'confianza'] = 1.0
+                            st.session_state.resultados[fname].at[idx, 'requiere_revision'] = False
+        propagar_entre_balances()
+        st.session_state['propagation_done'] = True
+>>>>>>> 6f7d24a (Recovery: save all work through Sprint 28.5)
 
     if 'propagation_done' not in st.session_state:
         def propagar_entre_balances():
@@ -494,8 +708,9 @@ def main():
             pass
 
     with col_trabajo:
-        tab_resumen, tab_revision, tab_balance, tab_diccionario = st.tabs(
-            ["📈 Resumen", "🔍 Cola de Revisión", "📋 Balance Normalizado", "📚 Diccionario"]
+        tab_resumen, tab_revision, tab_balance, tab_diccionario, tab_aprendizaje, tab_analytics = st.tabs(
+            ["📈 Resumen", "🔍 Cola de Revisión", "📋 Balance Normalizado",
+             "📚 Diccionario", "🧠 Aprendizaje", "📊 Analytics"]
         )
 
         with tab_resumen: _tab_resumen(df)
@@ -504,9 +719,18 @@ def main():
         with tab_diccionario: _tab_diccionario()
 
 
+<<<<<<< HEAD
 # ─────────────────────────────────────────────────────────────────────────────
 # FUNCIONES AUXILIARES DE INTERFAZ Y PROCESAMIENTO
 # ─────────────────────────────────────────────────────────────────────────────
+=======
+        with tab_aprendizaje:
+            _tab_aprendizaje()
+
+        with tab_analytics:
+            st.markdown("Analytics Dashboard (Work in Progress)")
+
+>>>>>>> 6f7d24a (Recovery: save all work through Sprint 28.5)
 
 def _visor_documento(archivo):
     import tempfile, base64, io, platform, shutil, subprocess, glob
@@ -702,10 +926,13 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                 procesados = 0
                 for idx_lote in list(st.session_state.lote_seleccion):
                     nombre_orig = df.at[idx_lote, 'nombre_original']
+                    codigo_orig = df.at[idx_lote, 'codigo_original']
                     st.session_state.resultados[archivo_nombre].at[idx_lote, 'codigo_clasificado'] = codigo_lote
                     st.session_state.resultados[archivo_nombre].at[idx_lote, 'metodo'] = 'validacion_humana_lote'
                     st.session_state.resultados[archivo_nombre].at[idx_lote, 'confianza'] = 1.0
                     st.session_state.resultados[archivo_nombre].at[idx_lote, 'requiere_revision'] = False
+                    # Gold Standard autoaprendizaje
+                    _save_gold_standard(nombre_orig, codigo_orig, codigo_lote)
                     if "diccionario" in alcance_lote:
                         entrada = {'cuenta_original': nombre_orig, 'codigo_estandar': codigo_lote, 'fuente': 'validacion_humana_lote'}
                         st.session_state.diccionario.append(entrada)
@@ -747,6 +974,7 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                 st.write(f"Sugerido: **{sugerido or '(ninguno)'}**")
 
             with c3:
+<<<<<<< HEAD
                 default_idx = opciones_codigo.index(sugerido) if sugerido in opciones_codigo else 0
                 seleccion = st.selectbox("Clasificación correcta", opciones_codigo, index=default_idx,
                                          format_func=lambda c: f"{c} — {catalogo[c]['nombre_estandar']}" if c in catalogo else c, key=f"sel_{idx}")
@@ -761,6 +989,119 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                             json.dump(st.session_state.diccionario, f, ensure_ascii=False, indent=2)
                     st.session_state.lote_seleccion.discard(idx)
                     st.rerun()
+=======
+                default_idx = (opciones_codigo.index(sugerido)
+                               if sugerido in opciones_codigo else 0)
+                seleccion = st.selectbox(
+                    "Clasificación correcta",
+                    opciones_codigo,
+                    index=default_idx,
+                    format_func=lambda c: (
+                        f"{c} — {catalogo[c]['nombre_estandar']}" if c in catalogo
+                        else c if c else "(sin clasificar)"
+                    ),
+                    key=f"sel_{idx}"
+                )
+
+                es_nueva_cat = seleccion == '➕ NUEVA CATEGORÍA'
+                if es_nueva_cat:
+                    st.info("Define la nueva categoría:")
+                    nuevo_codigo = st.text_input("Código (ej: AC.10, ER.17)",
+                                                  key=f"new_cod_{idx}", max_chars=10)
+                    nuevo_nombre = st.text_input("Nombre de la categoría",
+                                                  key=f"new_nom_{idx}")
+                    nuevo_tipo = st.selectbox("Tipo de estado",
+                                              ['balance', 'resultados'],
+                                              key=f"new_tipo_{idx}")
+                    nuevo_cat = st.selectbox(
+                        "Categoría",
+                        ['activo_corriente', 'activo_no_corriente',
+                         'pasivo_corriente', 'pasivo_no_corriente',
+                         'patrimonio', 'resultado'],
+                        key=f"new_cat_{idx}"
+                    )
+
+                if not es_nueva_cat and seleccion not in ('', '🚫 NO INCLUIR'):
+                    alcance = st.radio(
+                        "¿Aplicar esta clasificación?",
+                        ["Solo para este caso",
+                         "Agregar al diccionario (aplica a casos futuros iguales)"],
+                        index=1, key=f"alc_{idx}", horizontal=True
+                    )
+                else:
+                    alcance = "Solo para este caso"
+
+                if st.button("✅ Confirmar", key=f"btn_{idx}"):
+                    codigo_final = None
+
+                    if es_nueva_cat:
+                        if nuevo_codigo and nuevo_nombre:
+                            nueva_entrada = {
+                                'codigo_estandar': nuevo_codigo.strip().upper(),
+                                'nombre_estandar': nuevo_nombre.strip(),
+                                'categoria': nuevo_cat,
+                                'tipo_estado': nuevo_tipo,
+                                'naturaleza': 'deudora' if nuevo_cat.startswith('activo') else 'acreedora',
+                                'signo_normal': 1,
+                                'es_deuda_financiera': False,
+                                'es_activo_liquido': False,
+                                'afecta_ebitda': False,
+                            }
+                            catalogo[nuevo_codigo.strip().upper()] = nueva_entrada
+                            with open(BASE_DIR / 'catalogo_maestro.json', 'w', encoding='utf-8') as f:
+                                json.dump(catalogo, f, ensure_ascii=False, indent=2)
+                            codigo_final = nuevo_codigo.strip().upper()
+                            st.toast(f"Nueva categoría '{nuevo_nombre}' ({codigo_final}) creada ✨", icon="🆕")
+                        else:
+                            st.error("Debes ingresar código y nombre.")
+
+                    elif seleccion == '🚫 NO INCLUIR':
+                        st.session_state.resultados[archivo_nombre].at[idx, 'codigo_clasificado'] = '__EXCLUIR__'
+                        st.session_state.resultados[archivo_nombre].at[idx, 'metodo'] = 'excluido_analista'
+                        st.session_state.resultados[archivo_nombre].at[idx, 'confianza'] = 1.0
+                        st.session_state.resultados[archivo_nombre].at[idx, 'requiere_revision'] = False
+                        if "diccionario" in alcance:
+                            st.session_state.diccionario.append({
+                                'cuenta_original': row['nombre_original'],
+                                'codigo_estandar': '__EXCLUIR__',
+                                'fuente': 'excluido_analista'
+                            })
+                            with open(BASE_DIR / 'diccionario.json', 'w', encoding='utf-8') as f:
+                                json.dump(st.session_state.diccionario, f, ensure_ascii=False, indent=2)
+                        # PROPAGACIÓN:
+                        propagar_clasificacion_resultados(row['nombre_original'], '__EXCLUIR__', 'excluido_analista_propagado')
+                        st.session_state.lote_seleccion.discard(idx)
+                        st.toast(f"'{row['nombre_original'][:35]}' excluida", icon="🚫")
+                        st.rerun()
+
+                    elif seleccion:
+                        codigo_final = seleccion
+
+                    if codigo_final:
+                        st.session_state.resultados[archivo_nombre].at[idx, 'codigo_clasificado'] = codigo_final
+                        st.session_state.resultados[archivo_nombre].at[idx, 'metodo'] = 'validacion_humana'
+                        st.session_state.resultados[archivo_nombre].at[idx, 'confianza'] = 1.0
+                        st.session_state.resultados[archivo_nombre].at[idx, 'requiere_revision'] = False
+                        st.session_state.lote_seleccion.discard(idx)
+                        # Gold Standard autoaprendizaje
+                        _save_gold_standard(row['nombre_original'], row['codigo_original'], codigo_final)
+                        if "diccionario" in alcance:
+                            nuevo_dic = {
+                                'cuenta_original': row['nombre_original'],
+                                'codigo_estandar': codigo_final,
+                                'fuente': 'validacion_humana'
+                            }
+                            st.session_state.diccionario.append(nuevo_dic)
+                            st.session_state.correcciones.append(nuevo_dic)
+                            with open(BASE_DIR / 'diccionario.json', 'w', encoding='utf-8') as f:
+                                json.dump(st.session_state.diccionario, f, ensure_ascii=False, indent=2)
+                            st.toast(f"'{row['nombre_original'][:35]}' → {codigo_final} guardado 📚", icon="✅")
+                        else:
+                            st.toast(f"'{row['nombre_original'][:35]}' → {codigo_final} (solo este caso)", icon="✅")
+                        # PROPAGACIÓN:
+                        propagar_clasificacion_resultados(row['nombre_original'], codigo_final, 'validacion_humana_propagada')
+                        st.rerun()
+>>>>>>> 6f7d24a (Recovery: save all work through Sprint 28.5)
 
 
 def _tab_balance(df: pd.DataFrame, catalogo: dict):
@@ -994,6 +1335,39 @@ def _tab_diccionario():
         }),
         use_container_width=True, hide_index=True, height=500
     )
+
+
+def _tab_aprendizaje():
+    st.subheader("🧠 Autoaprendizaje — Gold Standard")
+    try:
+        builder = GoldBuilder()
+        stats = builder.statistics()
+        top = builder.top_learned()
+        conflicts = builder.find_conflicts()
+        builder.close()
+    except Exception as e:
+        st.error(f"No se pudieron cargar estadísticas: {e}")
+        return
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Registros aprendidos", stats["total_records"])
+    c2.metric("Coincidencias exactas", stats["exact_hits"])
+    c3.metric("Cuentas con conflicto", stats["conflicts"])
+
+    if stats["total_records"] > 0:
+        st.subheader("🏆 Top 20 cuentas más aprendidas")
+        top_df = pd.DataFrame(top)
+        top_df.columns = ["Cuenta", "Código Final", "Veces Usada", "Último Uso"]
+        top_df["Último Uso"] = top_df["Último Uso"].str[:19]
+        st.dataframe(top_df, use_container_width=True, hide_index=True)
+
+    if conflicts:
+        st.subheader("⚔️ Cuentas con conflicto (múltiples códigos asignados)")
+        cf_df = pd.DataFrame(conflicts)
+        cf_df.columns = ["Cuenta", "Códigos Distintos", "Códigos", "Versiones"]
+        st.dataframe(cf_df, use_container_width=True, hide_index=True)
+    else:
+        st.info("No hay cuentas con conflictos de clasificación.")
 
 
 def _mostrar_resumen_catalogo(catalogo: dict):

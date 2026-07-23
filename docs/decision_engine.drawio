@@ -1,0 +1,188 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="app.diagrams.net" agent="Mozilla/5.0" version="24.2.5">
+  <diagram id="decision-engine-v2" name="Decision Engine v2">
+    <mxGraphModel dx="2000" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <!-- Title -->
+        <mxCell id="title" value="Decision Engine v2 — Architecture" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=20;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="350" y="10" width="500" height="40" as="geometry"/>
+        </mxCell>
+
+        <!-- INPUT BOX -->
+        <mxCell id="input" value="Account Name + Code + Type" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;" vertex="1" parent="1">
+          <mxGeometry x="460" y="60" width="280" height="40" as="geometry"/>
+        </mxCell>
+
+        <!-- EVIDENCE COLLECTOR -->
+        <mxCell id="collector" value="EVIDENCE COLLECTOR" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="460" y="120" width="280" height="40" as="geometry"/>
+        </mxCell>
+
+        <!-- 7 Classifier boxes (input to collector) -->
+        <mxCell id="c1" value="Código Contable" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="50" y="120" width="140" height="36"/>
+        </mxCell>
+        <mxCell id="c2" value="Diccionario Exacto" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="210" y="120" width="140" height="36"/>
+        </mxCell>
+        <mxCell id="c3" value="Diccionario Fuzzy" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="370" y="120" width="140" height="36"/>
+        </mxCell>
+        <mxCell id="c4" value="SemanticMatcher" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="530" y="120" width="140" height="36"/>
+        </mxCell>
+        <mxCell id="c5" value="RegexFallback" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="690" y="120" width="140" height="36"/>
+        </mxCell>
+        <mxCell id="c6" value="Gold Standard" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="850" y="120" width="140" height="36"/>
+        </mxCell>
+        <mxCell id="c7" value="AccountTypeResolver" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1010" y="120" width="140" height="36"/>
+        </mxCell>
+
+        <!-- Arrows from input to classifiers -->
+        <mxCell id="ai1" style="edgeStyle=elbow;edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="input" target="c1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="ai2" style="edgeStyle=elbow;edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="input" target="c2">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="ai3" style="edgeStyle=elbow;edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="input" target="c3">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="ai4" style="edgeStyle=elbow;edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="input" target="c4">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="ai5" style="edgeStyle=elbow;edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="input" target="c5">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="ai6" style="edgeStyle=elbow;edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="input" target="c6">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="ai7" style="edgeStyle=elbow;edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="input" target="c7">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Arrows from classifiers to collector -->
+        <mxCell id="ac1" style="edgeStyle=elbow;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="c1" target="collector">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="ac2" style="edgeStyle=elbow;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="c2" target="collector">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="ac3" style="edgeStyle=elbow;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="c3" target="collector">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="ac4" style="edgeStyle=elbow;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="c4" target="collector">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="ac5" style="edgeStyle=elbow;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="c5" target="collector">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="ac6" style="edgeStyle=elbow;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="c6" target="collector">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="ac7" style="edgeStyle=elbow;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="c7" target="collector">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Evidence list output -->
+        <mxCell id="evlist" value="[code, score, explanation, source]" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=10;fontStyle=2;" vertex="1" parent="1">
+          <mxGeometry x="540" y="158" width="120" height="20"/>
+        </mxCell>
+
+        <!-- ACCOUNT TYPE FILTER -->
+        <mxCell id="filter" value="ACCOUNT TYPE FILTER" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="460" y="200" width="280" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="ef" style="edgeStyle=elbow;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="collector" target="filter">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- SCORING ENGINE -->
+        <mxCell id="scoring" value="SCORING ENGINE&#10;Weighted Ensemble + Consensus Bonus" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="460" y="280" width="280" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="fs" style="edgeStyle=elbow;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="filter" target="scoring">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- DECISION RULES -->
+        <mxCell id="rules" value="DECISION RULES (R1-R12)&#10;Priority Matrix + Tie-Breaking" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="460" y="370" width="280" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="s2r" style="edgeStyle=elbow;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="scoring" target="rules">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- FINAL DECISION -->
+        <mxCell id="decision" value="FINAL DECISION&#10;+ Final Code + Score + Confidence&#10;+ Review Required + Explanation" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="460" y="470" width="280" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="r2d" style="edgeStyle=elbow;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="rules" target="decision">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- HUMAN REVIEW BRANCH -->
+        <mxCell id="review" value="HUMAN REVIEW&#10;HR-1 to HR-5" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="850" y="470" width="180" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="d2r" style="edgeStyle=elbow;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="decision" target="review">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- AUDIT LOG -->
+        <mxCell id="audit" value="AUDIT LOG&#10;Metrics + Per-Classifier Tracking" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="850" y="370" width="180" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="d2a" style="edgeStyle=elbow;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="scoring" target="audit">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="r2a" style="edgeStyle=elbow;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="rules" target="audit">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- CONFIDENCE ENGINE -->
+        <mxCell id="confidence" value="CONFIDENCE ENGINE&#10;Decomposition + History + Calibration" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="460" y="580" width="280" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="dec2conf" style="edgeStyle=elbow;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="decision" target="confidence">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- PRIORITY MATRIX (side panel) -->
+        <mxCell id="matrix_title" value="PRIORITY MATRIX" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="110" y="280" width="200" height="30"/>
+        </mxCell>
+
+        <mxCell id="mt1" value="Tier 1: SM T1, SM T2&#10;Always win" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="50" y="320" width="180" height="40"/>
+        </mxCell>
+        <mxCell id="mt2" value="Tier 2: Regex, DictExact, GS Exact&#10;Win over T3-T5" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="50" y="370" width="180" height="40"/>
+        </mxCell>
+        <mxCell id="mt3" value="Tier 3: Code, DictFuzzy, SM T4&#10;Win conditionally" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="50" y="420" width="180" height="40"/>
+        </mxCell>
+        <mxCell id="mt4" value="Tier 4: GS Fuzzy, SM T5&#10;Win with corroboration" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="50" y="470" width="180" height="40"/>
+        </mxCell>
+        <mxCell id="mt5" value="Tier 5: SM T6&#10;Loses to all" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="50" y="520" width="180" height="40"/>
+        </mxCell>
+
+        <!-- SCORING FORMULA side panel -->
+        <mxCell id="formula_title" value="SCORING FORMULA" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="110" y="590" width="200" height="30"/>
+        </mxCell>
+        <mxCell id="formula" value="final_score =&#10;  Σ(w_i × score_i) / Σ(w_i)&#10;&#10;Consensus 2+: ×1.15 (cap 1.0)&#10;Consensus 3+: ×1.25 (cap 1.0)&#10;Conflict: ×0.80&#10;Solo: ×0.90" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="50" y="630" width="220" height="100"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

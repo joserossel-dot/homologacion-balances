@@ -24,6 +24,11 @@ mypy = "^1.0"
 ruff = "^0.4"
 pytest-cov = "^7.1.0"
 
+[tool.pytest.ini_options]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+]
+
 [tool.poetry.scripts]
 carpeta-tributaria = "src.cli:main"
 

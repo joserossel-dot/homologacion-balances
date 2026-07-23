@@ -1,0 +1,423 @@
+{
+  "generated_at": "2026-07-07T16:38:06.191990",
+  "files": {
+    "diccionario.json": {
+      "total": 826,
+      "unique_names": 826,
+      "unique_codes": 49,
+      "unique_fuentes": [
+        "correccion_manual",
+        "balances_reales_validado+conflicto_resuelto",
+        "balances_auditados_ifrs",
+        "balances_reales_validado",
+        "validacion_humana_lote",
+        "validacion_humana",
+        "vaciador_crediticio",
+        "excluido_analista",
+        "correccion_v2"
+      ],
+      "num_name_duplicates": 0,
+      "num_suspicious_names": 16,
+      "num_invalid_codes": 0,
+      "name_duplicates": [],
+      "suspicious_names": [
+        {
+          "name": "Banco Bci $ Egresos DSI",
+          "issues": [
+            "caracteres_extraños"
+          ]
+        },
+        {
+          "name": "Banco Santander $",
+          "issues": [
+            "caracteres_extraños"
+          ]
+        },
+        {
+          "name": "Impuesto de 2° Categoría por Pagar",
+          "issues": [
+            "caracteres_extraños"
+          ]
+        },
+        {
+          "name": "BANCO DE CHILE N°",
+          "issues": [
+            "caracteres_extraños"
+          ]
+        },
+        {
+          "name": "BCI N°",
+          "issues": [
+            "caracteres_extraños"
+          ]
+        },
+        {
+          "name": "Crédito BCI N° 902445",
+          "issues": [
+            "caracteres_extraños"
+          ]
+        },
+        {
+          "name": "Proveedores Extranjeros US$",
+          "issues": [
+            "caracteres_extraños"
+          ]
+        },
+        {
+          "name": "I+D",
+          "issues": [
+            "caracteres_extraños"
+          ]
+        },
+        {
+          "name": "> < valor de inversiones",
+          "issues": [
+            "caracteres_extraños"
+          ]
+        },
+        {
+          "name": "ctas por cobrar leasing 3° LP",
+          "issues": [
+            "caracteres_extraños"
+          ]
+        },
+        {
+          "name": "credito impto 2° categoria",
+          "issues": [
+            "caracteres_extraños"
+          ]
+        },
+        {
+          "name": "crédito impuesto 2° categoría",
+          "issues": [
+            "caracteres_extraños"
+          ]
+        },
+        {
+          "name": "— 1,2.08,01 Nogales",
+          "issues": [
+            "caracteres_extraños"
+          ]
+        },
+        {
+          "name": "Impuesto retención 2* Categ",
+          "issues": [
+            "caracteres_extraños"
+          ]
+        },
+        {
+          "name": "Intereses Créditos Bancarios 54,399,278 10] 54,399,278 0 : 0 o 54,399,278 [0]",
+          "issues": [
+            "caracteres_extraños"
+          ]
+        },
+        {
+          "name": "BANCO CREDITO E INVERSIONES N°",
+          "issues": [
+            "caracteres_extraños"
+          ]
+        }
+      ],
+      "invalid_codes": [],
+      "fuente_distribution": {
+        "balances_auditados_ifrs": 76,
+        "balances_reales_validado": 436,
+        "balances_reales_validado+conflicto_resuelto": 1,
+        "correccion_manual": 7,
+        "correccion_v2": 2,
+        "excluido_analista": 3,
+        "vaciador_crediticio": 190,
+        "validacion_humana": 109,
+        "validacion_humana_lote": 2
+      }
+    },
+    "diccionario_actualizado.json": {
+      "total": 781,
+      "unique_names": 781,
+      "unique_codes": 49,
+      "unique_fuentes": [
+        "correccion_manual",
+        "balances_reales_validado+conflicto_resuelto",
+        "balances_auditados_ifrs",
+        "balances_reales_validado",
+        "validacion_humana",
+        "vaciador_crediticio",
+        "excluido_analista",
+        "correccion_v2"
+      ],
+      "num_name_duplicates": 0,
+      "num_suspicious_names": 16,
+      "num_invalid_codes": 0,
+      "name_duplicates": [],
+      "suspicious_names": [
+        {
+          "name": "Banco Bci $ Egresos DSI",
+          "issues": [
+            "caracteres_extraños"
+          ]
+        },
+        {
+          "name": "Banco Santander $",
+          "issues": [
+            "caracteres_extraños"
+          ]
+        },
+        {
+          "name": "Impuesto de 2° Categoría por Pagar",
+          "issues": [
+            "caracteres_extraños"
+          ]
+        },
+        {
+          "name": "BANCO DE CHILE N°",
+          "issues": [
+            "caracteres_extraños"
+          ]
+        },
+        {
+          "name": "BCI N°",
+          "issues": [
+            "caracteres_extraños"
+          ]
+        },
+        {
+          "name": "Crédito BCI N° 902445",
+          "issues": [
+            "caracteres_extraños"
+          ]
+        },
+        {
+          "name": "Proveedores Extranjeros US$",
+          "issues": [
+            "caracteres_extraños"
+          ]
+        },
+        {
+          "name": "I+D",
+          "issues": [
+            "caracteres_extraños"
+          ]
+        },
+        {
+          "name": "> < valor de inversiones",
+          "issues": [
+            "caracteres_extraños"
+          ]
+        },
+        {
+          "name": "ctas por cobrar leasing 3° LP",
+          "issues": [
+            "caracteres_extraños"
+          ]
+        },
+        {
+          "name": "credito impto 2° categoria",
+          "issues": [
+            "caracteres_extraños"
+          ]
+        },
+        {
+          "name": "crédito impuesto 2° categoría",
+          "issues": [
+            "caracteres_extraños"
+          ]
+        },
+        {
+          "name": "— 1,2.08,01 Nogales",
+          "issues": [
+            "caracteres_extraños"
+          ]
+        },
+        {
+          "name": "Impuesto retención 2* Categ",
+          "issues": [
+            "caracteres_extraños"
+          ]
+        },
+        {
+          "name": "Intereses Créditos Bancarios 54,399,278 10] 54,399,278 0 : 0 o 54,399,278 [0]",
+          "issues": [
+            "caracteres_extraños"
+          ]
+        },
+        {
+          "name": "BANCO CREDITO E INVERSIONES N°",
+          "issues": [
+            "caracteres_extraños"
+          ]
+        }
+      ],
+      "invalid_codes": [],
+      "fuente_distribution": {
+        "balances_auditados_ifrs": 76,
+        "balances_reales_validado": 436,
+        "balances_reales_validado+conflicto_resuelto": 1,
+        "correccion_manual": 7,
+        "correccion_v2": 2,
+        "excluido_analista": 3,
+        "vaciador_crediticio": 190,
+        "validacion_humana": 66
+      }
+    },
+    "diccionario_optimizado.json": {
+      "total": 712,
+      "unique_names": 712,
+      "unique_codes": 46,
+      "unique_fuentes": [
+        "correccion_manual",
+        "balances_reales_validado+conflicto_resuelto",
+        "balances_auditados_ifrs",
+        "balances_reales_validado",
+        "vaciador_crediticio",
+        "correccion_v2"
+      ],
+      "num_name_duplicates": 0,
+      "num_suspicious_names": 12,
+      "num_invalid_codes": 0,
+      "name_duplicates": [],
+      "suspicious_names": [
+        {
+          "name": "Banco Bci $ Egresos DSI",
+          "issues": [
+            "caracteres_extraños"
+          ]
+        },
+        {
+          "name": "Banco Santander $",
+          "issues": [
+            "caracteres_extraños"
+          ]
+        },
+        {
+          "name": "Impuesto de 2° Categoría por Pagar",
+          "issues": [
+            "caracteres_extraños"
+          ]
+        },
+        {
+          "name": "BANCO DE CHILE N°",
+          "issues": [
+            "caracteres_extraños"
+          ]
+        },
+        {
+          "name": "BCI N°",
+          "issues": [
+            "caracteres_extraños"
+          ]
+        },
+        {
+          "name": "Crédito BCI N° 902445",
+          "issues": [
+            "caracteres_extraños"
+          ]
+        },
+        {
+          "name": "Proveedores Extranjeros US$",
+          "issues": [
+            "caracteres_extraños"
+          ]
+        },
+        {
+          "name": "I+D",
+          "issues": [
+            "caracteres_extraños"
+          ]
+        },
+        {
+          "name": "> < valor de inversiones",
+          "issues": [
+            "caracteres_extraños"
+          ]
+        },
+        {
+          "name": "ctas por cobrar leasing 3° LP",
+          "issues": [
+            "caracteres_extraños"
+          ]
+        },
+        {
+          "name": "credito impto 2° categoria",
+          "issues": [
+            "caracteres_extraños"
+          ]
+        },
+        {
+          "name": "crédito impuesto 2° categoría",
+          "issues": [
+            "caracteres_extraños"
+          ]
+        }
+      ],
+      "invalid_codes": [],
+      "fuente_distribution": {
+        "balances_auditados_ifrs": 76,
+        "balances_reales_validado": 436,
+        "balances_reales_validado+conflicto_resuelto": 1,
+        "correccion_manual": 7,
+        "correccion_v2": 2,
+        "vaciador_crediticio": 190
+      }
+    }
+  },
+  "comparison": {
+    "common_in_all": 712,
+    "only_in_diccionario_json": 45,
+    "only_in_actualizado_json": 0,
+    "only_in_optimizado_json": 0,
+    "conflicts_in_common": [],
+    "same_name_diff_code_total": 0,
+    "same_name_diff_code_all": []
+  },
+  "only_in_each_file": {
+    "only_in_diccionario_json_list": [
+      "ARRIENDOS VEHICULOS",
+      "BANCO DE CHILE",
+      "BCÍ",
+      "COMBUSTIBLE",
+      "COSTO ALIMENTACION",
+      "COSTO ALOJAMIENTO",
+      "COSTO ARRIENDO DE INMUEBLE E INSTALACIONES",
+      "COSTO ARTICULOS DE ASEO",
+      "COSTO ARTICULOS DE OFICINA",
+      "COSTO CAPACITACIONES",
+      "COSTO COMBUSTIBLES",
+      "COSTO DE AGUA POTABLE",
+      "COSTO DE COMUNICACIONES",
+      "COSTO DE CORRESPONDENCIA",
+      "COSTO DE ESTACIONAMIENTOS",
+      "COSTO DE FLETES",
+      "COSTO DE IMPLEMENTOS Y ARTICULOS DE SEGURIDAD (EPP)",
+      "COSTO DE PEAJES",
+      "COSTO DE TRAMITES LEGALES",
+      "COSTO EXAMENES Y ANALISIS",
+      "COSTO HERRAMIENTAS MENORES",
+      "COSTO HORAS EXTRAS",
+      "COSTO IMPLEMENTOS DE PROTECCION PERSONAL",
+      "COSTO INSUMOS Y REPUESTOS DE MANTENCION",
+      "COSTO MES DE AVISO",
+      "COSTO MOVILIZACION",
+      "COSTO REPARACION DE EQUIPOS",
+      "COSTO REPARACION Y MANTENCION DE OFICINA",
+      "Corpbanca / IFAU",
+      "Créditos Bancarios L/P",
+      "DOCTOS.x COBRAR EMP.RELACIONAD",
+      "DOCTOS.x PAGAR EMP.RELACIONAD",
+      "EGRESOS VARIOS",
+      "EXAMENES MEDICOS",
+      "GASTOS COMUNES",
+      "IMPLEMENTOS Y ARTICULOS DE SEGURIDAD (EPP)",
+      "IMPUESTOS BANCARIOS",
+      "INGRESO FUERA EXPLOTACION",
+      "INTERESES FINANCIEROS",
+      "INTERESES POR PAGOS ATRASADOS",
+      "MATERIALES E INSUMOS",
+      "MULTAS E INTERESES FISCALES",
+      "OTROS GASTOS ADMINISTRACION",
+      "TERRENO",
+      "UTILIDAD ACUMULADA"
+    ],
+    "only_in_actualizado_json_list": [],
+    "only_in_optimizado_json_list": []
+  }
+}

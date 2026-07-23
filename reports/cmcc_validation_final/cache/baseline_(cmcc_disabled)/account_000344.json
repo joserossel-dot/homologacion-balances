@@ -1,0 +1,1 @@
+{"source_file": "", "account_code": "", "account_name": "Obligaciones por leasing", "nature": "loss", "standard_code": "PC.03", "final_code": "PC.03", "confidence": 0.813, "method": "dictionary_fuzzy", "reason": "Coincidencia fuzzy (91.30434782608697%) con 'obligaciones x leasing' → PC.03", "cmcc_score": 0.0, "cmcc_code": null, "cmcc_concept": null, "is_unknown": false}

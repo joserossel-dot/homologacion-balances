@@ -1,0 +1,1 @@
+{"summary": {"label": "BASELINE (CMCC disabled)", "files": 10, "total_accounts": 1626, "total_classified": 556, "total_unknown": 445, "coverage_pct": 34.19, "unknown_pct": 27.37, "method_distribution": {"unclassified": 445, "learning_exact": 46, "code": 28, "dictionary_exact": 14, "dictionary_fuzzy": 13, "learning_fuzzy": 10}, "time_seconds": 87.5}, "elapsed": 87.50013110597502}

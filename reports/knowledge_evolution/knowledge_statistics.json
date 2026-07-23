@@ -1,0 +1,45 @@
+{
+  "snapshot": {
+    "timestamp": "2026-07-09T17:00:42.689488+00:00",
+    "cmcc_hash": "3350547d0ddb268d",
+    "variant_count": 3064,
+    "concept_count": 52,
+    "synonym_count": 18,
+    "rule_count": 0
+  },
+  "impact": {
+    "total_new_accounts": 172,
+    "total_new_companies": 114,
+    "concept_gains": {
+      "ANC.01": 139,
+      "ER.04": 13,
+      "AC.01": 8,
+      "ER.01": 6,
+      "PC.01": 6
+    },
+    "variants_added": {
+      "AC.01": 6,
+      "ER.01": 4,
+      "PC.01": 3,
+      "ER.04": 3,
+      "ANC.01": 3
+    }
+  },
+  "diff": {
+    "snapshot_a_version": "1.0",
+    "snapshot_b_version": "1.0",
+    "concept_diff": 0,
+    "variant_diff": 19,
+    "unknown_diff": -172,
+    "classify_rate_diff": 1.6,
+    "concepts_changed": [
+      "AC.01",
+      "ANC.01",
+      "ER.01",
+      "ER.04",
+      "PC.01"
+    ],
+    "changes_count": 19
+  },
+  "generated_at": "2026-07-09T17:00:42.811654+00:00"
+}

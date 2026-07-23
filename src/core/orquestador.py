@@ -2,7 +2,6 @@ from decimal import Decimal
 from pathlib import Path
 
 from src.db_repository import RepositorioDiccionario
-from app_validacion import TaxFolder
 
 UMBRAL_DESVIACION_VENTAS = Decimal("2.0")
 RIESGO_GIRO_MAP: dict[str, list[str]] = {
@@ -24,9 +23,24 @@ RIESGO_GIRO_MAP: dict[str, list[str]] = {
 }
 
 class PipelineOrquestador:
-    def __init__(self):
-        pass
+    def __init__(self, repo=None):
+        self._repo = repo
 
     def procesar(self, ruta_pdf: str):
         print(f"Procesando: {ruta_pdf}")
         return {"status": "ok"}
+
+    def procesar_analisis_completo(
+        self,
+        datos_fiscales_raw: dict | None = None,
+        balance_raw: list | None = None,
+        giro_empresa: str = "",
+    ) -> dict:
+        alertas: list[str] = []
+        datos_fiscales_raw = datos_fiscales_raw or {}
+        if giro_empresa and giro_empresa.lower() in RIESGO_GIRO_MAP:
+            alertas = RIESGO_GIRO_MAP[giro_empresa.lower()][:2]
+        return {
+            "alertas_comite_riesgo": alertas,
+            "balance_homologado": balance_raw or [],
+        }

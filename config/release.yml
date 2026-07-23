@@ -1,0 +1,24 @@
+release:
+  version: "2.0"
+  name: "CMCC Release 2.0"
+
+gates:
+  coverage_drop_pct: 2.0
+  accuracy_drop_pct: 1.0
+  parser_confidence_min: 0.5
+  unknown_growth_abs: 500
+  unknown_growth_pct: 5.0
+  critical_alerts_max: 0
+  high_alerts_max: 3
+  required_tests_pct: 100.0
+  min_classify_rate: 15.0
+
+stages:
+  run_tests: true
+  parser_validation: true
+  scientific_validation: true
+  knowledge_evolution: true
+  quality_snapshot: true
+  drift_detection: true
+  regression_detection: true
+  deployment_decision: true

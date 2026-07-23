@@ -1,0 +1,146 @@
+{
+  "timestamp": "2026-07-10T19:46:49.908398+00:00",
+  "total_concepts": 52,
+  "concepts_with_variants": 48,
+  "concepts_empty": 4,
+  "total_variants": 3064,
+  "total_vocabulary": 2969,
+  "action_summary": {
+    "NO ACTION": 24,
+    "EXPAND": 6,
+    "SPLIT": 3,
+    "MERGE → AC.02": 1,
+    "MERGE → AC.04": 1,
+    "MERGE → AC.08": 1,
+    "MERGE → ANC.04": 1,
+    "MERGE → ANC.05": 1,
+    "REVIEW": 1,
+    "MERGE → PC.03": 1,
+    "MERGE → PNC.02": 1,
+    "MERGE → PNC.03": 1,
+    "MERGE → PNC.05": 1,
+    "MERGE → PAT.04": 1,
+    "MERGE → ER.05": 1,
+    "MERGE → ER.10": 1,
+    "MERGE → ER.11": 1,
+    "MERGE → AC.09": 1,
+    "MERGE → ANC.08": 1,
+    "MERGE → PAT.05": 1,
+    "MERGE → ER.15": 1,
+    "MERGE → ER.16": 1
+  },
+  "top_10_risk": [
+    {
+      "code": "AC.01",
+      "name": "Caja y Bancos",
+      "risk": 73.13,
+      "action": "SPLIT"
+    },
+    {
+      "code": "ER.01",
+      "name": "Ventas",
+      "risk": 67.68,
+      "action": "SPLIT"
+    },
+    {
+      "code": "ER.02",
+      "name": "Costo de Ventas",
+      "risk": 63.33,
+      "action": "SPLIT"
+    },
+    {
+      "code": "AC.09",
+      "name": "Activos Biológicos CP",
+      "risk": 63.0,
+      "action": "MERGE → AC.09"
+    },
+    {
+      "code": "PAT.05",
+      "name": "Participaciones No Controladoras",
+      "risk": 58.21,
+      "action": "MERGE → PAT.05"
+    },
+    {
+      "code": "ER.07",
+      "name": "Depreciación y Amortización",
+      "risk": 57.51,
+      "action": "EXPAND"
+    },
+    {
+      "code": "PC.03",
+      "name": "Leasing CP",
+      "risk": 52.14,
+      "action": "MERGE → PC.03"
+    },
+    {
+      "code": "PC.07",
+      "name": "Relacionadas CP",
+      "risk": 50.0,
+      "action": "NO ACTION"
+    },
+    {
+      "code": "PNC.02",
+      "name": "Leasing LP",
+      "risk": 49.94,
+      "action": "MERGE → PNC.02"
+    },
+    {
+      "code": "PNC.04",
+      "name": "Relacionadas LP",
+      "risk": 49.64,
+      "action": "EXPAND"
+    }
+  ],
+  "top_10_similar_pairs": [
+    {
+      "a": "PC.03",
+      "b": "PNC.02",
+      "similarity": 0.6
+    },
+    {
+      "a": "ANC.05",
+      "b": "PNC.04",
+      "similarity": 0.2857
+    },
+    {
+      "a": "ANC.05",
+      "b": "PC.07",
+      "similarity": 0.2667
+    },
+    {
+      "a": "PC.02",
+      "b": "PNC.01",
+      "similarity": 0.2542
+    },
+    {
+      "a": "PC.07",
+      "b": "PNC.04",
+      "similarity": 0.2273
+    },
+    {
+      "a": "PNC.01",
+      "b": "PNC.04",
+      "similarity": 0.1852
+    },
+    {
+      "a": "AC.06",
+      "b": "PC.07",
+      "similarity": 0.1702
+    },
+    {
+      "a": "AC.08",
+      "b": "ANC.06",
+      "similarity": 0.1346
+    },
+    {
+      "a": "AC.07",
+      "b": "PC.05",
+      "similarity": 0.1339
+    },
+    {
+      "a": "ANC.05",
+      "b": "PNC.01",
+      "similarity": 0.1316
+    }
+  ]
+}

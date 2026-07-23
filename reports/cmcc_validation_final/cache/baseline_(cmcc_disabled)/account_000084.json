@@ -1,0 +1,1 @@
+{"source_file": "", "account_code": "", "account_name": "CREDITO SENGE", "nature": "asset", "standard_code": "AC.07", "final_code": "AC.07", "confidence": 0.8231, "method": "learning_fuzzy", "reason": "Gold Standard (fuzzy) → AC.07 (matched: CREDITO SENCE)", "cmcc_score": 0.0, "cmcc_code": null, "cmcc_concept": null, "is_unknown": false}

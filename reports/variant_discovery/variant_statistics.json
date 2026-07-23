@@ -1,0 +1,137 @@
+{
+  "total_accounts": 8857,
+  "total_clusters": 4398,
+  "multi_clusters": 847,
+  "singleton_count": 3551,
+  "high_confidence_count": 416,
+  "needs_review_count": 431,
+  "cluster_size_distribution": {
+    "2-4": 763,
+    "5-9": 74,
+    "1 (singleton)": 3551,
+    "10+": 10
+  },
+  "top_suggested_concepts": [
+    [
+      "PC.01 — Proveedores",
+      592
+    ],
+    [
+      "PAT.01 — Capital",
+      574
+    ],
+    [
+      "ER.04 — Gastos de Administración",
+      308
+    ],
+    [
+      "ANC.01 — Activo Fijo",
+      173
+    ],
+    [
+      "ER.02 — Costo de Ventas",
+      153
+    ],
+    [
+      "PC.06 — Remuneraciones por Pagar",
+      118
+    ],
+    [
+      "AC.05 — Inventarios",
+      118
+    ],
+    [
+      "AC.07 — Otras Cuentas por Cobrar CP",
+      117
+    ],
+    [
+      "AC.06 — Relacionadas CP",
+      115
+    ],
+    [
+      "ER.07 — Depreciación y Amortización",
+      105
+    ],
+    [
+      "ER.13 — Otras Ganancias y Pérdidas",
+      105
+    ],
+    [
+      "PC.08 — Otros Pasivos Corrientes",
+      105
+    ],
+    [
+      "AC.03 — Clientes",
+      97
+    ],
+    [
+      "ANC.07 — Activos Biológicos LP",
+      96
+    ],
+    [
+      "ER.09 — Gastos Financieros",
+      95
+    ],
+    [
+      "PC.05 — Impuestos por Pagar",
+      95
+    ],
+    [
+      "ER.01 — Ventas",
+      95
+    ],
+    [
+      "AC.01 — Caja y Bancos",
+      91
+    ],
+    [
+      "AC.06S — Cta. Cte. Socios / Retiros (Activo)",
+      83
+    ],
+    [
+      "ER.14 — Corrección Monetaria y Reajustes",
+      81
+    ],
+    [
+      "PC.02 — Obligaciones Bancarias CP",
+      72
+    ],
+    [
+      "ANC.06 — Otros Activos No Corrientes",
+      72
+    ],
+    [
+      "PNC.01 — Obligaciones Bancarias LP",
+      70
+    ],
+    [
+      "PNC.05 — Otros Pasivos LP",
+      68
+    ],
+    [
+      "ANC.03 — Intangibles",
+      64
+    ],
+    [
+      "ER.16 — Resultado Método Participación",
+      61
+    ],
+    [
+      "ER.05 — Gastos de Venta",
+      60
+    ],
+    [
+      "AC.02 — Inversiones Corto Plazo",
+      59
+    ],
+    [
+      "PAT.02 — Reservas",
+      56
+    ],
+    [
+      "ANC.05 — Relacionadas LP",
+      45
+    ]
+  ],
+  "generated_at": "2026-07-09T15:44:45.667912+00:00"
+}

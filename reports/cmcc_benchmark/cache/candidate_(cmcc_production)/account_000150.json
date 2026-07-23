@@ -1,0 +1,1 @@
+{"source_file": "", "account_code": "", "account_name": ": PROVISIONES VARIAS", "nature": "asset", "standard_code": "PC.08", "final_code": "PC.08", "confidence": 0.98, "method": "learning_exact", "reason": "Gold Standard (exact) → PC.08 (matched: Provisiones Varias)", "cmcc_score": 0.0, "cmcc_code": null, "cmcc_concept": null, "is_unknown": false}

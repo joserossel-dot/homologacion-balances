@@ -1,0 +1,88 @@
+{
+  "audit_date": "2026-07-16",
+  "module": "parsers/layout_detector.py",
+  "verdict": "B",
+  "verdict_label": "80% listo",
+  "verdict_rationale": "LayoutDetector como analizador de encabezados está 100% implementado (139 líneas, 1 clase, 3 métodos, 0 TODO, 0 FIXME, 0 pass, 0 NotImplemented). Lo que falta (~20%) no es mejorar LayoutDetector sino modificar parsear_linea() en parser_universal.py para aceptar un mapeo de columnas externo en vez de usar ULTIMAS_COLS hardcodeado. LayoutDetector ya está importado, instanciado y llamado desde ParserCore2.parse() pero su salida solo se almacena como métrica (pdf_parser.py:137-139). El benchmark sobre 20 documentos demostró 100% match de cuentas. La auditoría de layout sobre 186 documentos validó los 28 layouts reales.",
+
+  "ownership": {
+    "commits": 0,
+    "author": "No existe evidencia en git",
+    "creation_date": "No existe evidencia en git",
+    "version_control": "UNTRACKED — nunca commiteado",
+    "design_doc": "docs/parser_core_2.0.md (tampoco commiteado)"
+  },
+
+  "implementation": {
+    "total_lines": 139,
+    "classes": ["DetectedLayout", "LayoutDetector"],
+    "methods": ["detect", "_find_header_candidates", "_resolve_order"],
+    "todo_count": 0,
+    "fixme_count": 0,
+    "pass_count": 0,
+    "not_implemented_count": 0,
+    "code_completeness_pct": 100,
+    "test_coverage_pct": 0
+  },
+
+  "integration": {
+    "imported_by": ["parsers/__init__.py", "parsers/pdf_parser.py"],
+    "instantiated_in": "parsers/pdf_parser.py:84",
+    "called_in": "parsers/pdf_parser.py:133",
+    "output_used_for_column_mapping": false,
+    "output_current_use": "Stored as metric in ParseResult.layout only (pdf_parser.py:137-139)"
+  },
+
+  "blockers": [
+    {
+      "item": "parsear_linea() no acepta mapeo de columnas externo",
+      "file": "parser_universal.py",
+      "line": "430-542",
+      "type": "interface"
+    },
+    {
+      "item": "ParserCore2.parse() delega columnas a _parsear_linea() que tiene ULTIMAS_COLS hardcodeado",
+      "file": "parsers/pdf_parser.py → parser_universal.py",
+      "line": "150 → 510-527",
+      "type": "coupling"
+    },
+    {
+      "item": "No existe ruta para pasar DetectedLayout a parsear_todas() ni a parsear_linea()",
+      "file": "parsers/line_parser.py",
+      "line": "89-101",
+      "type": "interface"
+    },
+    {
+      "item": "Layout detectado se usa solo como métrica, no como input de parseo",
+      "file": "parsers/pdf_parser.py",
+      "line": "137-139",
+      "type": "integration"
+    }
+  ],
+
+  "execution_evidence": [
+    {
+      "source": "reports/parser_benchmark/parser_benchmark.md",
+      "documents": 20,
+      "match_rate": 100.0,
+      "layout_confidence_avg": 0.79,
+      "verification": "20/20 docs match exacto, 2692 cuentas idénticas"
+    },
+    {
+      "source": "reports/parser_stress_test/parser_stress_test.md",
+      "verification": "0 diferencias entre v1 y v2. LayoutDetector identificado como 'informativo'."
+    },
+    {
+      "source": "reports/layout_audit/layout_summary.md",
+      "documents": 186,
+      "layouts_detected": 28,
+      "verification": "ULTIMAS_COLS válida solo para 31% de documentos"
+    }
+  ],
+
+  "reusable_code_pct": 100,
+  "lines_reusable": 139,
+  "lines_needed_for_integration": 0,
+  "migration_risk": "Baja — benchmark demostró 0 regresiones en 20 documentos. LayoutDetector comparte mismo parser base.",
+  "drop_cost": "Si se descarta, no existe alternativa: ULTIMAS_COLS falla para 69% de documentos (41% incompatible + 15% parcial + 13% sin headers)."
+}

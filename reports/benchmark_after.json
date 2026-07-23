@@ -1,0 +1,19 @@
+{
+  "total": 187,
+  "legacy_correct": 187,
+  "legacy_wrong": 0,
+  "legacy_accuracy": 1.0,
+  "new_correct": 187,
+  "new_wrong": 0,
+  "new_accuracy": 1.0,
+  "improvement": 0.0,
+  "new_better_count": 0,
+  "new_worse_count": 0,
+  "both_wrong_count": 0,
+  "both_correct_count": 187,
+  "new_better": [],
+  "new_worse": [],
+  "legacy_errors_top50": [],
+  "new_errors_top50": [],
+  "execution_time_seconds": 0.29
+}

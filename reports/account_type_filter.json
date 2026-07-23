@@ -1,0 +1,102 @@
+{
+  "metadata": {
+    "sprint": "28.4",
+    "title": "AccountTypeFilter",
+    "date": "2026-07-21",
+    "modified_files": [
+      "pipeline/features.py",
+      "pipeline/homologation_pipeline.py"
+    ],
+    "new_files": [
+      "tests/test_account_type_filter.py",
+      "reports/run_account_type_filter.py"
+    ],
+    "not_modified": ["parsers/layout_detector.py", "parser_universal.py", "HomologationPipeline._classify_account"]
+  },
+  "design": {
+    "flow": "CuentaRaw → AccountTypeResolver.resolve() → account_tipo → _classify_account() → _is_code_allowed_for_tipo(code, tipo) → accept or demote",
+    "validation_rules": {
+      "ANC": ["ACTIVO"],
+      "AC": ["ACTIVO"],
+      "PNC": ["PASIVO"],
+      "PC": ["PASIVO"],
+      "PAT": ["PATRIMONIO"],
+      "ER": ["PERDIDA", "GANANCIA"],
+      "DESCONOCIDO": "all codes allowed",
+      "unknown_prefix": "all codes allowed"
+    },
+    "behavior_when_rejected": {
+      "standard_code": null,
+      "confidence": 0.0,
+      "method": "unclassified",
+      "reason": "Filtrado: código incompatible con tipo {tipo}"
+    }
+  },
+  "integration_points": [
+    {
+      "location": "pipeline/features.py:46",
+      "description": "ENABLE_ACCOUNT_TYPE_FILTER = False",
+      "type": "feature_flag"
+    },
+    {
+      "location": "pipeline/homologation_pipeline.py:240-247",
+      "description": "AccountTypeResolver.resolve() for each CuentaRaw",
+      "type": "pre_classification"
+    },
+    {
+      "location": "pipeline/homologation_pipeline.py:259-268",
+      "description": "Post-classification: _is_code_allowed_for_tipo() validation",
+      "type": "post_classification_filter"
+    },
+    {
+      "location": "pipeline/homologation_pipeline.py:397-415",
+      "description": "_is_code_allowed_for_tipo() static method",
+      "type": "validation_method"
+    }
+  ],
+  "tests": {
+    "total_passed": 928,
+    "previous_passed": 905,
+    "new_tests": 23,
+    "all_passed": true
+  },
+  "validation": {
+    "total_pdfs": 182,
+    "processed": 182,
+    "errors": 0,
+    "total_classified_off": 11696,
+    "total_classified_on": 11696,
+    "total_unk_off": 9533,
+    "total_unk_on": 10743,
+    "delta_unk": 1210,
+    "total_filtered": 1210,
+    "total_code_changes": 1157,
+    "docs_with_changes": 117,
+    "change_patterns": {
+      "PC → UNK": 228,
+      "PAT → UNK": 216,
+      "ER → UNK": 163,
+      "AC → UNK": 151,
+      "ANC → UNK": 135,
+      "PNC → UNK": 8
+    }
+  },
+  "diff": {
+    "features_py_changes": "1 flag added (7 lines)",
+    "pipeline_py_changes": "1 method + process() modifications (39 lines)"
+  },
+  "rollback": {
+    "option_a": "git checkout -- pipeline/features.py pipeline/homologation_pipeline.py",
+    "impact": "Zero — no other modules modified, no data persisted"
+  },
+  "regression_check": {
+    "existing_tests_pass": true,
+    "no_new_failures": true,
+    "pipeline_unchanged_when_disabled": true,
+    "layout_detector_untouched": true,
+    "parser_pdf_untouched": true,
+    "classifiers_untouched": true,
+    "special_rules_preserved": true
+  },
+  "verdict": "GO"
+}

@@ -1,0 +1,20 @@
+{
+  "documentos": 186,
+  "lineas_totales": 58924,
+  "lineas_basura": 217,
+  "lineas_basura_pct": 0.37,
+  "falsos_negativos": 0,
+  "falsos_positivos": 0,
+  "correcciones_parser_antiguo": 10,
+  "cuentas_pipeline_revisadas": 6763,
+  "patrones": {
+    "Email": 6,
+    "RUT": 2,
+    "Página/Folio": 7,
+    "Etiqueta admin": 72,
+    "Firma/cargo": 30,
+    "Decorador ----": 71,
+    "Fecha texto": 29
+  },
+  "tiempo_segundos": 111.73
+}

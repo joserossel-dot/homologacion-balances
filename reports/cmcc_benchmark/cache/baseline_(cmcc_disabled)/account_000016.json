@@ -1,0 +1,1 @@
+{"source_file": "", "account_code": "", "account_name": "INSTALACIONES", "nature": "profit", "standard_code": "ANC.01", "final_code": "ANC.01", "confidence": 0.98, "method": "learning_exact", "reason": "Gold Standard (exact) → ANC.01 (matched: Instalaciones)", "cmcc_score": 0.0, "cmcc_code": null, "cmcc_concept": null, "is_unknown": false}

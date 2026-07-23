@@ -1,0 +1,439 @@
+{
+  "timestamp": "2026-07-10T18:25:28.996327+00:00",
+  "configuration": {
+    "baseline": {
+      "ENABLE_CMCC": false,
+      "ENABLE_CMCC_SHADOW": false,
+      "ENABLE_CMCC_PRODUCTION": false,
+      "ENABLE_CMCC_ROLLBACK": false,
+      "CMCC_THRESHOLD": 0.95,
+      "CMCC_REVIEW_THRESHOLD": 0.85
+    },
+    "candidate": {
+      "ENABLE_CMCC": true,
+      "ENABLE_CMCC_SHADOW": false,
+      "ENABLE_CMCC_PRODUCTION": true,
+      "ENABLE_CMCC_ROLLBACK": false,
+      "CMCC_THRESHOLD": 0.95,
+      "CMCC_REVIEW_THRESHOLD": 0.85
+    },
+    "cmcc_threshold": 0.95
+  },
+  "baseline_summary": {
+    "label": "BASELINE (CMCC disabled)",
+    "files": 10,
+    "total_accounts": 1626,
+    "total_classified": 556,
+    "total_unknown": 445,
+    "coverage_pct": 34.19,
+    "unknown_pct": 27.37,
+    "method_distribution": {
+      "unclassified": 445,
+      "learning_exact": 46,
+      "code": 28,
+      "dictionary_exact": 14,
+      "dictionary_fuzzy": 13,
+      "learning_fuzzy": 10
+    },
+    "time_seconds": 88.354
+  },
+  "candidate_summary": {
+    "label": "CANDIDATE (CMCC production)",
+    "files": 10,
+    "total_accounts": 1626,
+    "total_classified": 556,
+    "total_unknown": 186,
+    "coverage_pct": 34.19,
+    "unknown_pct": 11.44,
+    "method_distribution": {
+      "cmcc_variante": 275,
+      "unclassified": 186,
+      "learning_exact": 46,
+      "code": 26,
+      "learning_fuzzy": 10,
+      "dictionary_fuzzy": 10,
+      "cmcc_nombre": 2,
+      "dictionary_exact": 1
+    },
+    "time_seconds": 98.588
+  },
+  "gold_standard": {
+    "entries": 134,
+    "baseline": {
+      "label": "baseline",
+      "eligible": 46,
+      "correct": 46,
+      "incorrect": 0,
+      "accuracy": 1.0,
+      "accuracy_pct": 100.0,
+      "macro_precision": 1.0,
+      "macro_recall": 1.0,
+      "macro_f1": 1.0,
+      "micro_precision": 1.0,
+      "micro_recall": 1.0,
+      "micro_f1": 1.0,
+      "error_distribution": {},
+      "per_label": [
+        {
+          "label": "AC.01",
+          "tp": 1,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        {
+          "label": "AC.03",
+          "tp": 1,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        {
+          "label": "ANC.01",
+          "tp": 6,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        {
+          "label": "ANC.03",
+          "tp": 1,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        {
+          "label": "ER.01",
+          "tp": 3,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        {
+          "label": "ER.04",
+          "tp": 10,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        {
+          "label": "ER.07",
+          "tp": 2,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        {
+          "label": "ER.09",
+          "tp": 4,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        {
+          "label": "ER.12",
+          "tp": 1,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        {
+          "label": "ER.14",
+          "tp": 2,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        {
+          "label": "PAT.01",
+          "tp": 6,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        {
+          "label": "PAT.02",
+          "tp": 1,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        {
+          "label": "PAT.03",
+          "tp": 2,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        {
+          "label": "PC.01",
+          "tp": 1,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        {
+          "label": "PC.05",
+          "tp": 1,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        {
+          "label": "PC.06",
+          "tp": 2,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        {
+          "label": "PC.07",
+          "tp": 1,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        {
+          "label": "PC.08",
+          "tp": 1,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        }
+      ],
+      "errors": []
+    },
+    "candidate": {
+      "label": "candidate",
+      "eligible": 46,
+      "correct": 46,
+      "incorrect": 0,
+      "accuracy": 1.0,
+      "accuracy_pct": 100.0,
+      "macro_precision": 1.0,
+      "macro_recall": 1.0,
+      "macro_f1": 1.0,
+      "micro_precision": 1.0,
+      "micro_recall": 1.0,
+      "micro_f1": 1.0,
+      "error_distribution": {},
+      "per_label": [
+        {
+          "label": "AC.01",
+          "tp": 1,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        {
+          "label": "AC.03",
+          "tp": 1,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        {
+          "label": "ANC.01",
+          "tp": 6,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        {
+          "label": "ANC.03",
+          "tp": 1,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        {
+          "label": "ER.01",
+          "tp": 3,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        {
+          "label": "ER.04",
+          "tp": 10,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        {
+          "label": "ER.07",
+          "tp": 2,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        {
+          "label": "ER.09",
+          "tp": 4,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        {
+          "label": "ER.12",
+          "tp": 1,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        {
+          "label": "ER.14",
+          "tp": 2,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        {
+          "label": "PAT.01",
+          "tp": 6,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        {
+          "label": "PAT.02",
+          "tp": 1,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        {
+          "label": "PAT.03",
+          "tp": 2,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        {
+          "label": "PC.01",
+          "tp": 1,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        {
+          "label": "PC.05",
+          "tp": 1,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        {
+          "label": "PC.06",
+          "tp": 2,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        {
+          "label": "PC.07",
+          "tp": 1,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        {
+          "label": "PC.08",
+          "tp": 1,
+          "fp": 0,
+          "fn": 0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        }
+      ],
+      "errors": []
+    }
+  },
+  "comparison": {
+    "total_accounts": 517,
+    "changed": 242,
+    "unchanged": 275,
+    "change_rate_pct": 46.81,
+    "num_only_baseline": 0,
+    "num_only_candidate": 0
+  },
+  "reports": {
+    "benchmark.xlsx": "reports/cmcc_benchmark/benchmark.xlsx",
+    "metrics.xlsx": "reports/cmcc_benchmark/metrics.xlsx",
+    "confusion_matrix.xlsx": "reports/cmcc_benchmark/confusion_matrix.xlsx",
+    "concept_comparison.xlsx": "reports/cmcc_benchmark/concept_comparison.xlsx",
+    "layout_comparison.xlsx": "reports/cmcc_benchmark/layout_comparison.xlsx",
+    "company_comparison.xlsx": "reports/cmcc_benchmark/company_comparison.xlsx"
+  }
+}

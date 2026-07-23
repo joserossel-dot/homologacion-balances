@@ -1,0 +1,270 @@
+{
+  "metadata": {
+    "title": "Decision Engine v2 Specification",
+    "version": "2.0.0",
+    "date": "2026-07-22",
+    "status": "draft",
+    "adr": "ADR-002-Decision-Engine.md"
+  },
+
+  "classifiers": [
+    {
+      "id": "code",
+      "name": "Código Contable",
+      "source_file": "clasificador_codigo_cuenta.py",
+      "precision": 0.50,
+      "recall": 0.011,
+      "base_weight": 0.50,
+      "priority_tier": 3,
+      "wins_over": ["sm_tier_5", "sm_tier_6"],
+      "loses_to": ["sm_tier_1", "sm_tier_2", "regex_exact", "dict_exact", "gs_exact"],
+      "conditions": {
+        "requires_account_code": true,
+        "weight_modifier": {"1_to_1_mapping": 0.20}
+      }
+    },
+    {
+      "id": "dict_exact",
+      "name": "Diccionario Exacto",
+      "source_file": "diccionario.json",
+      "precision": 0.95,
+      "recall": 0.013,
+      "base_weight": 0.90,
+      "priority_tier": 2,
+      "wins_over": ["sm_tier_4", "sm_tier_5", "sm_tier_6", "dict_fuzzy", "gs_fuzzy", "code"],
+      "loses_to": ["sm_tier_1", "sm_tier_2"],
+      "tie_with": ["regex_exact", "gs_exact"],
+      "conditions": {}
+    },
+    {
+      "id": "dict_fuzzy",
+      "name": "Diccionario Fuzzy",
+      "source_file": "diccionario.json",
+      "precision": 0.80,
+      "recall": 0.010,
+      "base_weight": 0.60,
+      "priority_tier": 3,
+      "wins_over": ["sm_tier_5", "sm_tier_6", "code"],
+      "loses_to": ["sm_tier_1", "sm_tier_2", "regex_exact", "dict_exact", "gs_exact"],
+      "tie_with": ["sm_tier_4", "gs_fuzzy"],
+      "conditions": {
+        "min_fuzzy_score": 90,
+        "weight_per_point_above_90": 0.01,
+        "wins_at_fuzzy_score_ge": 95
+      }
+    },
+    {
+      "id": "sm_tier_1",
+      "name": "SemanticMatcher Tier 1 — Exact Keyword",
+      "source_file": "semantic/matcher.py",
+      "precision": 1.00,
+      "recall": 0.064,
+      "base_weight": 1.00,
+      "priority_tier": 1,
+      "wins_over": ["*"],
+      "loses_to": [],
+      "conditions": {
+        "always_wins": true,
+        "audit_if_contradicted_by_3plus": true
+      }
+    },
+    {
+      "id": "sm_tier_2",
+      "name": "SemanticMatcher Tier 2 — Exact Synonym",
+      "source_file": "semantic/matcher.py",
+      "precision": 0.98,
+      "recall": 0.023,
+      "base_weight": 0.95,
+      "priority_tier": 1,
+      "wins_over": ["*"],
+      "loses_to": ["sm_tier_1"],
+      "conditions": {
+        "always_wins": true
+      }
+    },
+    {
+      "id": "sm_tier_3",
+      "name": "SemanticMatcher Tier 3 — Abbreviation",
+      "source_file": "semantic/matcher.py",
+      "precision": 0.95,
+      "recall": 0.0,
+      "base_weight": 0.90,
+      "priority_tier": 2,
+      "wins_over": ["sm_tier_4", "sm_tier_5", "sm_tier_6", "dict_fuzzy", "gs_fuzzy", "code"],
+      "loses_to": ["sm_tier_1", "sm_tier_2"],
+      "conditions": {}
+    },
+    {
+      "id": "sm_tier_4",
+      "name": "SemanticMatcher Tier 4 — Fuzzy Keyword",
+      "source_file": "semantic/matcher.py",
+      "precision": 0.75,
+      "recall": 0.097,
+      "base_weight": 0.60,
+      "priority_tier": 3,
+      "wins_over": ["sm_tier_5", "sm_tier_6", "code", "gs_fuzzy"],
+      "loses_to": ["sm_tier_1", "sm_tier_2", "regex_exact", "dict_exact", "gs_exact"],
+      "tie_with": ["dict_fuzzy"],
+      "conditions": {
+        "type_bonus": 0.10
+      }
+    },
+    {
+      "id": "sm_tier_5",
+      "name": "SemanticMatcher Tier 5 — Fuzzy Synonym",
+      "source_file": "semantic/matcher.py",
+      "precision": 0.65,
+      "recall": 0.030,
+      "base_weight": 0.50,
+      "priority_tier": 4,
+      "wins_over": ["sm_tier_6", "code"],
+      "loses_to": ["sm_tier_1", "sm_tier_2", "sm_tier_3", "regex_exact", "dict_exact", "dict_fuzzy", "gs_exact"],
+      "tie_with": ["gs_fuzzy"],
+      "conditions": {
+        "type_bonus": 0.10
+      }
+    },
+    {
+      "id": "sm_tier_6",
+      "name": "SemanticMatcher Tier 6 — Root Word",
+      "source_file": "semantic/matcher.py",
+      "precision": 0.45,
+      "recall": 0.139,
+      "base_weight": 0.40,
+      "priority_tier": 5,
+      "wins_over": [],
+      "loses_to": ["*"],
+      "conditions": {
+        "type_bonus": 0.05,
+        "solo_cap": 0.50
+      }
+    },
+    {
+      "id": "regex_exact",
+      "name": "RegexFallback — Audited Rules",
+      "source_file": "pipeline/homologation_pipeline.py",
+      "precision": 1.00,
+      "recall": 0.017,
+      "base_weight": 0.85,
+      "priority_tier": 2,
+      "wins_over": ["sm_tier_4", "sm_tier_5", "sm_tier_6", "dict_fuzzy", "gs_fuzzy", "code"],
+      "loses_to": ["sm_tier_1", "sm_tier_2"],
+      "tie_with": ["dict_exact", "gs_exact"],
+      "conditions": {
+        "multi_word_bonus": 0.10
+      }
+    },
+    {
+      "id": "gs_exact",
+      "name": "LearningEngine Gold Standard — Exact",
+      "source_file": "learning/engine.py",
+      "precision": 0.90,
+      "recall": 0.040,
+      "base_weight": 0.90,
+      "priority_tier": 2,
+      "wins_over": ["sm_tier_4", "sm_tier_5", "sm_tier_6", "dict_fuzzy", "gs_fuzzy", "code"],
+      "loses_to": ["sm_tier_1", "sm_tier_2"],
+      "tie_with": ["regex_exact", "dict_exact"],
+      "conditions": {}
+    },
+    {
+      "id": "gs_fuzzy",
+      "name": "LearningEngine Gold Standard — Fuzzy",
+      "source_file": "learning/engine.py",
+      "precision": 0.70,
+      "recall": 0.007,
+      "base_weight": 0.60,
+      "priority_tier": 4,
+      "wins_over": ["sm_tier_6", "code"],
+      "loses_to": ["sm_tier_1", "sm_tier_2", "sm_tier_3", "regex_exact", "dict_exact", "dict_fuzzy", "gs_exact"],
+      "tie_with": ["sm_tier_5"],
+      "conditions": {
+        "min_fuzzy_score": 92
+      }
+    }
+  ],
+
+  "tie_breaking": {
+    "rules": [
+      {"id": "TB-1", "name": "Score comparison", "description": "Higher numerical score wins. If within 0.05, go to TB-2."},
+      {"id": "TB-2", "name": "Historical precision", "description": "Classifier with higher proven precision wins. Order: regex_exact > dict_exact > gs_exact > code > dict_fuzzy > gs_fuzzy > sm_tier_4 > sm_tier_5 > sm_tier_6"},
+      {"id": "TB-3", "name": "Account type match", "description": "Proposal matching account type wins over proposal that doesn't."},
+      {"id": "TB-4", "name": "Frequency bonus", "description": "More frequent code in gold standard for similar names wins."},
+      {"id": "TB-5", "name": "Human review escalation", "description": "If TB-1 through TB-4 fail to determine a winner."}
+    ]
+  },
+
+  "scoring": {
+    "engine": "weighted_ensemble",
+    "formula": "final_score = sum(weight_i * score_i) / sum(weight_i)",
+    "consensus_bonus": {
+      "two_or_more_agree": "final_score * 1.15 (cap 1.0)",
+      "three_or_more_agree": "final_score * 1.25 (cap 1.0)"
+    },
+    "conflict_penalty": {
+      "different_codes_and_no_consensus_ge_2": "final_score * 0.80"
+    },
+    "solo_penalty": {
+      "single_classifier": "score * 0.90",
+      "sm_tier_6_solo": "min(score * 0.90, 0.50)"
+    },
+    "confidence_labels": [
+      {"min_score": 0.95, "label": "VERY_HIGH", "action": "auto_accept_no_review"},
+      {"min_score": 0.85, "label": "HIGH", "action": "auto_accept_sample_audit"},
+      {"min_score": 0.70, "label": "MEDIUM", "action": "auto_accept_regular_audit"},
+      {"min_score": 0.50, "label": "LOW", "action": "accept_in_production_flag_review"},
+      {"min_score": 0.00, "label": "UNKNOWN", "action": "human_review"}
+    ]
+  },
+
+  "human_review": {
+    "cases": [
+      {"id": "HR-1", "name": "Conflict unresolved", "trigger": "Two+ classifiers propose different codes, tie-breaking fails"},
+      {"id": "HR-2", "name": "All disagree", "trigger": "Every classifier proposes a different code (3+ distinct)"},
+      {"id": "HR-3", "name": "Low confidence consensus", "trigger": "Consensus exists but weighted score < 0.50"},
+      {"id": "HR-4", "name": "SM T1-2 vs all", "trigger": "SM T1/T2 contradicts 3+ other classifiers agreeing on another code"},
+      {"id": "HR-5", "name": "Type filter rejects all", "trigger": "After account type filtering, 0 proposals remain"}
+    ]
+  },
+
+  "decision_rules": [
+    {"id": "R1", "priority": 0, "condition": "SM tier == 1 or SM tier == 2", "action": "accept_sm", "note": "SM T1-2 always wins"},
+    {"id": "R2", "priority": 1, "condition": "count of classifiers agreeing on same code >= 2", "action": "accept_consensus", "note": "Agreement wins"},
+    {"id": "R3", "priority": 2, "condition": "regex_exact exists AND sm_tier >= 4", "action": "accept_regex", "note": "Regex exact beats SM T4+"},
+    {"id": "R4", "priority": 2, "condition": "dict_exact exists AND sm_tier >= 4", "action": "accept_dict_exact", "note": "Dict exact beats SM T4+"},
+    {"id": "R5", "priority": 2, "condition": "gs_exact exists AND sm_tier >= 4", "action": "accept_gs_exact", "note": "GS exact beats SM T4+"},
+    {"id": "R6", "priority": 3, "condition": "regex_exact exists AND dict_fuzzy exists", "action": "accept_regex", "note": "Regex exact beats dict fuzzy"},
+    {"id": "R7", "priority": 3, "condition": "code exists AND sm_tier >= 4", "action": "accept_code", "note": "Code beats SM T4+"},
+    {"id": "R8", "priority": 3, "condition": "dict_fuzzy score >= 95 AND sm_tier == 4", "action": "accept_dict_fuzzy", "note": "High fuzzy beats SM T4"},
+    {"id": "R9", "priority": 4, "condition": "exactly 1 classifier has a proposal", "action": "accept_solo_with_penalty", "note": "Solo classifier"},
+    {"id": "R10", "priority": 5, "condition": "2+ classifiers disagree", "action": "apply_tie_breaking", "note": "Conflict resolution"},
+    {"id": "R11", "priority": 9, "condition": "0 classifiers have a proposal", "action": "human_review", "note": "All unknown"},
+    {"id": "R12", "priority": 9, "condition": "type filter rejects all proposals", "action": "human_review", "note": "Type filter rejects all"}
+  ],
+
+  "audit_metrics": {
+    "per_run": [
+      {"metric": "auto_decision_rate", "description": "% resolved without human review", "target": 95.0},
+      {"metric": "consensus_rate", "description": "% with >=2 classifiers agreeing", "target": 80.0},
+      {"metric": "conflict_rate", "description": "% with classifiers disagreeing", "target": 10.0},
+      {"metric": "human_review_rate", "description": "% routed to human review", "target": 5.0},
+      {"metric": "avg_confidence", "description": "Mean final_score of auto-decisions", "target": 0.85},
+      {"metric": "precision_at_0.95", "description": "Precision of decisions with score >= 0.95", "target": 99.0},
+      {"metric": "recall_at_0.70", "description": "% of accounts resolved at >= 0.70 confidence", "target": 80.0},
+      {"metric": "sm_override_rate", "description": "% where SM is overridden", "target": 5.0},
+      {"metric": "error_cascade_rate", "description": "% wrong auto-decisions corrected post-hoc", "target": 1.0}
+    ],
+    "per_classifier": [
+      {"metric": "contribution_rate", "description": "% of final decisions where this classifier was primary evidence"},
+      {"metric": "override_rate", "description": "% of this classifier's proposals that were overridden"},
+      {"metric": "fp_rate", "description": "False positive rate measured from human review corrections"}
+    ]
+  },
+
+  "migration": {
+    "phase_0": "DecisionEngine v1 — SM vs Regex only, 5 rules",
+    "phase_1": "DecisionEngine v2 parallel run — both v1 and v2 produce decisions, no production impact",
+    "phase_2": "DecisionEngine v2 shadow mode — v2 writes audit trail, v1 still makes final decision",
+    "phase_3": "DecisionEngine v2 production — v2 default, v1 rollback, feature flag ENABLE_DECISION_ENGINE_V2"
+  }
+}

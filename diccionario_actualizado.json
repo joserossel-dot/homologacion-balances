@@ -1965,6 +1965,16 @@
     "fuente": "balances_reales_validado"
   },
   {
+    "cuenta_original": "DEPRECIACION ACUMULADA",
+    "codigo_estandar": "ANC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
+    "cuenta_original": "DEPRECIACIÓN ACUMULADA",
+    "codigo_estandar": "ANC.01",
+    "fuente": "balances_reales_validado"
+  },
+  {
     "cuenta_original": "CREDITO BANCO CORPBANCA",
     "codigo_estandar": "PC.02",
     "fuente": "balances_reales_validado"
