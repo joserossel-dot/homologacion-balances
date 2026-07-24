@@ -227,6 +227,8 @@ class AC01SplitEngine:
             ),
             "confidence_buckets": confidence_buckets,
             "matched_rules": dict(matched_rule_counts.most_common(20)),
+            True: True,
+            False: False,
         }
 
     def compute_coverage(

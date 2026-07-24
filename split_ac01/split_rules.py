@@ -66,15 +66,15 @@ VALOR_NEGOCIABLE_PATTERN = re.compile(
 )
 
 CORTO_PLAZO_PATTERN = re.compile(
-    r"\bcort[o0]\s*plaz[o0]\b", re.IGNORECASE
+    r"\bcort[o0]\s+plaz[o0]\b", re.IGNORECASE
 )
 
 DEPOSITO_PLAZO_PATTERN = re.compile(
-    r"\bdep[o0]sito\w*\s*a?\s*plaz[o0]\w*\b", re.IGNORECASE
+    r"\bdep[oó0]sito\w*\s*a?\s*plaz[o0]\w*\b", re.IGNORECASE
 )
 
 ACCIONES_PATTERN = re.compile(
-    r"\baccion(es|ista)?\b", re.IGNORECASE
+    r"\baccion(?:es|ista)\b", re.IGNORECASE
 )
 
 BONOS_PATTERN = re.compile(r"\bbon[o0]\w*\b", re.IGNORECASE)

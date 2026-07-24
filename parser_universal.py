@@ -374,8 +374,6 @@ PATRON_TOTAL = re.compile(
     re.IGNORECASE
 )
 
-<<<<<<< HEAD
-=======
 # ── Filtro de líneas basura (FASE 24B.2) ─────────────────────────────────
 # Cada patrón matchea la línea COMPLETA para no filtrar substrings dentro
 # de nombres de cuentas contables.
@@ -425,7 +423,6 @@ def _es_linea_basura(linea: str) -> bool:
 # produciendo cosas como "1.1.01,01" o "1,1,08,05". Se detecta un prefijo
 # de 3-5 grupos cortos de dígitos separados por '.' o ',' al inicio de la
 # línea y se normaliza a '.' antes de cualquier otro procesamiento.
->>>>>>> 6f7d24a (Recovery: save all work through Sprint 28.5)
 PATRON_CODIGO_OCR = re.compile(r'^(\d{1,2}[.,]){2,4}\d{1,2}(?=\s)')
 
 
@@ -497,9 +494,6 @@ def parsear_linea(
 
     es_total = bool(PATRON_TOTAL.match(nombre))
 
-<<<<<<< HEAD
-    ULTIMAS_COLS = [OrigenColumna.ACTIVO, OrigenColumna.PASIVO,
-=======
     # Determinar orden de columnas: si ENABLE_DYNAMIC_LAYOUT está activo
     # y se proporcionó un column_order con confianza suficiente, usarlo.
     # Fallback: heurística actual (últimas 4 columnas = Activo/Pasivo/Pérdida/Ganancia).
@@ -507,7 +501,6 @@ def parsear_linea(
         columnas = column_order
     else:
         columnas = [OrigenColumna.ACTIVO, OrigenColumna.PASIVO,
->>>>>>> 6f7d24a (Recovery: save all work through Sprint 28.5)
                     OrigenColumna.PERDIDA, OrigenColumna.GANANCIA]
 
     n_col = len(columnas)
@@ -516,53 +509,6 @@ def parsear_linea(
 
     if montos_tokens:
         n = len(montos_tokens)
-<<<<<<< HEAD
-        
-        if n >= 4:
-            cola = montos_tokens[-4:]
-            for tok, et in zip(cola, ULTIMAS_COLS):
-                val = parsear_monto(tok, separador_miles)
-                if val is not None and val != 0:
-                    monto_principal = val
-                    origen = et
-                    break
-            if monto_principal is None:
-                monto_principal = parsear_monto(cola[0], separador_miles)
-                origen = ULTIMAS_COLS[0]
-                
-        else:
-            for tok in reversed(montos_tokens):
-                val = parsear_monto(tok, separador_miles)
-                if val is not None and val != 0:
-                    monto_principal = val
-                    break
-            if monto_principal is None and montos_tokens:
-                monto_principal = parsear_monto(montos_tokens[-1], separador_miles)
-
-            if codigo:
-                digito_raiz = codigo.replace('.', '').replace('-', '').strip()[0]
-                if digito_raiz == '1':
-                    origen = OrigenColumna.ACTIVO
-                elif digito_raiz == '2':
-                    origen = OrigenColumna.PASIVO
-                elif digito_raiz == '3':
-                    origen = OrigenColumna.PASIVO if 'capital' in nombre.lower() or 'patrimonio' in nombre.lower() else OrigenColumna.PERDIDA
-                elif digito_raiz == '4':
-                    origen = OrigenColumna.PERDIDA
-                elif digito_raiz == '5':
-                    origen = OrigenColumna.GANANCIA
-            
-            if origen == OrigenColumna.DESCONOCIDO:
-                nom_lower = nombre.lower()
-                if any(x in nom_lower for x in ['caja', 'banco', 'clientes', 'iva', 'activo', 'fijo', 'existencias', 'ppm']):
-                    origen = OrigenColumna.ACTIVO
-                elif any(x in nom_lower for x in ['proveedores', 'acreedores', 'capital', 'retenciones', 'pasivo', 'letras por pagar']):
-                    origen = OrigenColumna.PASIVO
-                elif any(x in nom_lower for x in ['gasto', 'costo', 'arriendo', 'remuneraciones', 'perdida', 'patente', 'honorarios']):
-                    origen = OrigenColumna.PERDIDA
-                elif any(x in nom_lower for x in ['venta', 'ingreso', 'ganancia', 'utilidad', 'percibido']):
-                    origen = OrigenColumna.GANANCIA
-=======
         k = min(n_col, n)
         cola = montos_tokens[-k:]
         etiquetas = columnas[-k:]
@@ -577,7 +523,6 @@ def parsear_linea(
         if monto_principal is None:
             monto_principal = parsear_monto(cola[0], separador_miles)
             origen = etiquetas[0]
->>>>>>> 6f7d24a (Recovery: save all work through Sprint 28.5)
 
     return CuentaRaw(
         linea=numero_linea,
@@ -625,8 +570,6 @@ class ParserPDF:
             muestra_montos.extend(PATRON_MONTOS.findall(l))
         separador = detectar_separador_miles(muestra_montos)
 
-<<<<<<< HEAD
-=======
         # 3b. Detectar layout de columnas (solo si ENABLE_DYNAMIC_LAYOUT está activo)
         advertencias = []
         column_order: Optional[list[OrigenColumna]] = None
@@ -661,7 +604,6 @@ class ParserPDF:
                 )
 
         # 4. Parsear todas las líneas
->>>>>>> 6f7d24a (Recovery: save all work through Sprint 28.5)
         confianza = 0.75 if requirio_ocr else 1.0
         cuentas = []
         for i, l in enumerate(lineas):
@@ -670,10 +612,6 @@ class ParserPDF:
             if c:
                 cuentas.append(c)
 
-<<<<<<< HEAD
-        cuadra_ok, totales, alertas_cuadre = verificar_cuadre_balance(cuentas)
-        advertencias.extend(alertas_cuadre)
-=======
         # 4b. Resolver tipo de cuenta (solo si ENABLE_ACCOUNT_TYPE_RESOLVER está activo)
         if ENABLE_ACCOUNT_TYPE_RESOLVER and cuentas:
             from parsers.account_type_resolver import AccountTypeResolver
@@ -692,7 +630,6 @@ class ParserPDF:
                 f"AccountTypeResolver: {len(cuentas)} cuentas resueltas, "
                 f"confianza promedio={prom_conf:.2f}"
             )
->>>>>>> 6f7d24a (Recovery: save all work through Sprint 28.5)
 
         if requirio_ocr:
             advertencias.append(

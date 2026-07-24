@@ -404,32 +404,6 @@ def main():
             st.session_state.resultados.pop(k, None)
             st.session_state.metadata_files.pop(k, None)
 
-<<<<<<< HEAD
-    for archivo in archivos:
-        if archivo.name not in st.session_state.resultados:
-            with st.spinner(f"Clasificando cuentas de {archivo.name}..."):
-                lineas_encabezado = _extraer_lineas_encabezado(archivo)
-                meta_indiv = extraer_metadata(lineas_encabezado)
-                st.session_state.metadata_files[archivo.name] = meta_indiv
-
-                cuentas = _extraer_cuentas(archivo)
-                motor = MotorHibridoLocal(st.session_state.diccionario)
-                filas = []
-                for c in cuentas:
-                    if c.monto is None and not c.codigo: continue
-                    if not c.codigo and PATRON_NO_CUENTA.match(c.nombre.strip()): continue
-                    r = motor.clasificar(c, company_giro_norm)
-                    filas.append({
-                        'linea': c.linea, 'codigo_original': c.codigo or '', 'nombre_original': c.nombre,
-                        'monto': c.monto, 'origen_columna': c.origen_columna.value, 'es_total': c.es_total,
-                        'codigo_clasificado': r['codigo_estandar'] or '', 'metodo': r['metodo'],
-                        'confianza': r['confianza'], 'requiere_revision': r['requiere_revision'],
-                        'nota': r.get('nota_regla_especial', ''), 'confianza_extraccion': c.confianza_extraccion,
-                        'origen_columna_display': c.origen_columna.value,
-                    })
-                df_file = pd.DataFrame(filas)
-                st.session_state.resultados[archivo.name] = df_file
-=======
     # ── Procesar archivos nuevos ──────────────────────────────────────────────
     if USE_LEGACY_ENGINE:
         # LEGACY PIPELINE (MotorHibridoLocal)
@@ -620,7 +594,6 @@ def main():
                             st.session_state.resultados[fname].at[idx, 'requiere_revision'] = False
         propagar_entre_balances()
         st.session_state['propagation_done'] = True
->>>>>>> 6f7d24a (Recovery: save all work through Sprint 28.5)
 
     if 'propagation_done' not in st.session_state:
         def propagar_entre_balances():
@@ -719,18 +692,12 @@ def main():
         with tab_diccionario: _tab_diccionario()
 
 
-<<<<<<< HEAD
-# ─────────────────────────────────────────────────────────────────────────────
-# FUNCIONES AUXILIARES DE INTERFAZ Y PROCESAMIENTO
-# ─────────────────────────────────────────────────────────────────────────────
-=======
         with tab_aprendizaje:
             _tab_aprendizaje()
 
         with tab_analytics:
             st.markdown("Analytics Dashboard (Work in Progress)")
 
->>>>>>> 6f7d24a (Recovery: save all work through Sprint 28.5)
 
 def _visor_documento(archivo):
     import tempfile, base64, io, platform, shutil, subprocess, glob
@@ -974,22 +941,6 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                 st.write(f"Sugerido: **{sugerido or '(ninguno)'}**")
 
             with c3:
-<<<<<<< HEAD
-                default_idx = opciones_codigo.index(sugerido) if sugerido in opciones_codigo else 0
-                seleccion = st.selectbox("Clasificación correcta", opciones_codigo, index=default_idx,
-                                         format_func=lambda c: f"{c} — {catalogo[c]['nombre_estandar']}" if c in catalogo else c, key=f"sel_{idx}")
-                
-                alcance = st.radio("¿Aplicar?", ["Solo este caso", "Agregar al diccionario"], index=1, key=f"alc_{idx}", horizontal=True)
-                if st.button("Confirmar", key=f"btn_{idx}"):
-                    st.session_state.resultados[archivo_nombre].at[idx, 'codigo_clasificado'] = seleccion
-                    st.session_state.resultados[archivo_nombre].at[idx, 'requiere_revision'] = False
-                    if "diccionario" in alcance and seleccion not in ('', '🚫 NO INCLUIR'):
-                        st.session_state.diccionario.append({'cuenta_original': row['nombre_original'], 'codigo_estandar': seleccion, 'fuente': 'manual'})
-                        with open(BASE_DIR / 'diccionario.json', 'w', encoding='utf-8') as f:
-                            json.dump(st.session_state.diccionario, f, ensure_ascii=False, indent=2)
-                    st.session_state.lote_seleccion.discard(idx)
-                    st.rerun()
-=======
                 default_idx = (opciones_codigo.index(sugerido)
                                if sugerido in opciones_codigo else 0)
                 seleccion = st.selectbox(
@@ -1101,7 +1052,6 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                         # PROPAGACIÓN:
                         propagar_clasificacion_resultados(row['nombre_original'], codigo_final, 'validacion_humana_propagada')
                         st.rerun()
->>>>>>> 6f7d24a (Recovery: save all work through Sprint 28.5)
 
 
 def _tab_balance(df: pd.DataFrame, catalogo: dict):

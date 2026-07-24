@@ -16,28 +16,62 @@ _COLUMN_MAP = {
 
 
 class AccountAdapter:
+
     @staticmethod
     def from_cuenta_raw(cuenta_raw: CuentaRaw) -> AccountBalance:
+
         amounts = AccountAmounts()
-        target_field = _COLUMN_MAP.get(cuenta_raw.origen_columna)
+
+        target_field = _COLUMN_MAP.get(
+            cuenta_raw.origen_columna
+        )
+
         if target_field and cuenta_raw.monto is not None:
-            setattr(amounts, target_field, cuenta_raw.monto)
+            setattr(
+                amounts,
+                target_field,
+                cuenta_raw.monto
+            )
+
 
         warnings: list[str] = []
+
         if cuenta_raw.es_total:
-            warnings.append("detected as total/subtotal row")
+            warnings.append(
+                "detected as total/subtotal row"
+            )
+
 
         return AccountBalance(
             account_code=cuenta_raw.codigo or "",
             account_name=cuenta_raw.nombre,
             amounts=amounts,
+
+            # -----------------------------
+            # Trazabilidad del origen
+            # -----------------------------
             source_page=0,
             source_file="",
+            source_line=cuenta_raw.linea,
+            source_column=cuenta_raw.origen_columna.value,
+            raw_text=cuenta_raw.nombre,
+
+            # -----------------------------
+            # Información extracción
+            # -----------------------------
             extractor="parser_universal",
             confidence=cuenta_raw.confianza_extraccion,
+            extraction_confidence=cuenta_raw.confianza_extraccion,
+
             warnings=warnings,
         )
 
+
     @staticmethod
-    def to_account_balance(cuenta_raw: CuentaRaw) -> AccountBalance:
-        return AccountAdapter.from_cuenta_raw(cuenta_raw)
+    def to_account_balance(
+        cuenta_raw: CuentaRaw
+    ) -> AccountBalance:
+
+        return AccountAdapter.from_cuenta_raw(
+            cuenta_raw
+        )
