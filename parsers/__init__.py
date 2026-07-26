@@ -5,6 +5,7 @@ Convivio en paralelo con parser_universal.py.  No lo reemplaza.
 
 from parsers.analyzer import DocumentAnalysis, DocumentAnalyzer
 from parsers.config import ParserConfig, load_config
+from parsers.integration import EnhancedParseResult, parse_with_analysis
 from parsers.hygiene import GARBAGE_PATTERNS, es_linea_basura
 from parsers.format_detector import (
     CodeFormat,
@@ -24,6 +25,7 @@ from parsers.factory import ParserFactory
 
 __all__ = [
     "DocumentAnalysis", "DocumentAnalyzer",
+    "EnhancedParseResult", "parse_with_analysis",
     "ParserConfig", "load_config",
     "GARBAGE_PATTERNS", "es_linea_basura",
     "CodeFormat", "detectar_formato_codigo", "detectar_separador_miles",
