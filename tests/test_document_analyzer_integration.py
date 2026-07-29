@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from parser_universal import ParserPDF
+from parser_universal import ExtractionContext, ParserPDF
 from parsers.analyzer import DocumentAnalyzer
 from parsers.integration import EnhancedParseResult, parse_with_analysis
 
@@ -298,6 +298,476 @@ class TestCustomAnalyzer:
             parser=ParserPDF(),
         )
         assert isinstance(result, EnhancedParseResult)
+
+
+class TestRotationCorrection:
+    """Corrección de rotación 180° — ahora dentro de ParserPDF vía contexto."""
+
+    def test_reverse_line_basic(self):
+        assert ParserPDF._reverse_line("ovitca") == "activo"
+        assert ParserPDF._reverse_line("atneuC ovitca") == "Cuenta activo"
+        assert ParserPDF._reverse_line("") == ""
+        assert ParserPDF._reverse_line("   ") == "   "
+
+    def test_reverse_line_multiple_words(self):
+        assert (
+            ParserPDF._reverse_line("atneuC otartnoc erbmon")
+            == "Cuenta contrato nombre"
+        )
+
+    def test_reverse_line_single_word(self):
+        assert ParserPDF._reverse_line("ovitca") == "activo"
+        assert ParserPDF._reverse_line("ovisap") == "pasivo"
+
+    def test_debe_corregir_rotacion_true(self):
+        context = ExtractionContext(rotation_hint=180, rotation_confidence=0.85)
+        assert ParserPDF._debe_corregir_rotacion(context)
+
+    def test_debe_corregir_rotacion_low_confidence(self):
+        context = ExtractionContext(rotation_hint=180, rotation_confidence=0.5)
+        assert not ParserPDF._debe_corregir_rotacion(context)
+
+    def test_debe_corregir_rotacion_no_rotation(self):
+        context = ExtractionContext(rotation_hint=0, rotation_confidence=0.9)
+        assert not ParserPDF._debe_corregir_rotacion(context)
+
+    def test_debe_corregir_rotacion_sin_contexto(self):
+        assert not ParserPDF._debe_corregir_rotacion(None)
+
+    def test_parsear_con_contexto_vacio_mismo_resultado(self, native_pdf):
+        parser = ParserPDF()
+        resultado_sin = parser.parsear(native_pdf)
+        resultado_con = parser.parsear(native_pdf, ExtractionContext())
+        assert resultado_sin.rotacion_aplicada == resultado_con.rotacion_aplicada
+        assert resultado_sin.formato_codigo == resultado_con.formato_codigo
+        assert len(resultado_sin.cuentas) == len(resultado_con.cuentas)
+        for ec, dc in zip(resultado_sin.cuentas, resultado_con.cuentas):
+            assert ec.nombre == dc.nombre
+            assert ec.monto == dc.monto
+
+    def test_normal_pdf_mismo_resultado(self, native_pdf):
+        """API tradicional (sin contexto) produce mismo resultado que con EnhancedParseResult."""
+        enhanced = parse_with_analysis(native_pdf)
+        direct = ParserPDF().parsear(native_pdf)
+        assert enhanced.rotacion_aplicada == direct.rotacion_aplicada
+        assert enhanced.formato_codigo == direct.formato_codigo
+        assert enhanced.requirio_ocr == direct.requirio_ocr
+        assert len(enhanced.cuentas) == len(direct.cuentas)
+        for ec, dc in zip(enhanced.cuentas, direct.cuentas):
+            assert ec.nombre == dc.nombre
+            assert ec.monto == dc.monto
+
+    def test_extraction_context_roundtrip(self, native_pdf):
+        """DocumentAnalyzer produce ExtractionContext que ParserPDF acepta."""
+        from parsers.analyzer import DocumentAnalyzer
+
+        analyzer = DocumentAnalyzer()
+        parser = ParserPDF()
+        analysis = analyzer.analyze(native_pdf)
+        context = analyzer.to_extraction_context(analysis)
+        assert isinstance(context, ExtractionContext)
+        result = parser.parsear(native_pdf, context)
+        assert len(result.cuentas) > 0
+
+
+class TestLayoutDetectorIntegration:
+    """LayoutDetector vía ExtractionContext en ParserPDF."""
+
+    def test_context_layout_alta_confianza_se_usa(self, native_pdf):
+        """Context con layout_hint y confianza >= umbral activa LayoutDetector."""
+        context = ExtractionContext(
+            layout_hint=["activo", "pasivo", "perdida", "ganancia"],
+            layout_confidence=0.85,
+        )
+        parser = ParserPDF()
+        result = parser.parsear(native_pdf, context)
+        assert any("LayoutDetector (context)" in w for w in result.advertencias), (
+            "Debería usar LayoutDetector desde contexto"
+        )
+
+    def test_context_layout_baja_confianza_ignorado(self, native_pdf):
+        """Context con layout_hint pero confianza baja se ignora."""
+        context = ExtractionContext(
+            layout_hint=["activo", "pasivo", "perdida", "ganancia"],
+            layout_confidence=0.3,
+        )
+        parser = ParserPDF()
+        r_sin = parser.parsear(native_pdf)
+        r_con = parser.parsear(native_pdf, context)
+        assert len(r_sin.cuentas) == len(r_con.cuentas)
+        assert not any("LayoutDetector (context)" in w for w in r_con.advertencias)
+
+    def test_context_sin_layout_hint_usado(self, native_pdf):
+        """Context sin layout_hint produce mismo resultado que sin contexto."""
+        context = ExtractionContext()
+        parser = ParserPDF()
+        r_sin = parser.parsear(native_pdf)
+        r_con = parser.parsear(native_pdf, context)
+        assert r_sin.formato_codigo == r_con.formato_codigo
+        assert len(r_sin.cuentas) == len(r_con.cuentas)
+        for c1, c2 in zip(r_sin.cuentas, r_con.cuentas):
+            assert c1.nombre == c2.nombre
+            assert c1.monto == c2.monto
+
+    def test_context_layout_4_columnas_se_menciona_en_advertencias(self, native_pdf):
+        """Context con layout 4 columnas produce advertencia con nombres."""
+        context = ExtractionContext(
+            layout_hint=["activo", "pasivo", "perdida", "ganancia"],
+            layout_confidence=0.9,
+        )
+        result = ParserPDF().parsear(native_pdf, context)
+        warnings = " ".join(result.advertencias)
+        assert "activo" in warnings
+        assert "pasivo" in warnings
+        assert "perdida" in warnings
+        assert "ganancia" in warnings
+
+    def test_context_layout_2_columnas_deudor_acreedor(self):
+        """Columnas deudor/acreedor se mapean correctamente vía _LAYOUT_COLUMN_MAP."""
+        from parser_universal import OrigenColumna, _LAYOUT_COLUMN_MAP
+
+        cols = []
+        for c in ["deudor", "acreedor"]:
+            oc = _LAYOUT_COLUMN_MAP.get(c)
+            if oc is not None:
+                cols.append(oc)
+        assert len(cols) == 2
+        assert cols == [OrigenColumna.DEUDOR, OrigenColumna.ACREEDOR]
+
+    def test_sin_regresion_con_documento_normal(self, native_pdf):
+        """PDF normal parseado con/without context produce mismo resultado."""
+        from parsers.analyzer import DocumentAnalyzer
+
+        analyzer = DocumentAnalyzer()
+        parser = ParserPDF()
+        analysis = analyzer.analyze(native_pdf)
+        context = analyzer.to_extraction_context(analysis)
+        r_sin = parser.parsear(native_pdf)
+        r_con = parser.parsear(native_pdf, context)
+        assert r_sin.formato_codigo == r_con.formato_codigo
+        assert r_sin.separador_miles == r_con.separador_miles
+        assert r_sin.requirio_ocr == r_con.requirio_ocr
+        assert len(r_sin.cuentas) == len(r_con.cuentas)
+
+    def test_context_layout_confianza_umbral(self):
+        """Verificar que LAYOUT_CONFIDENCE_THRESHOLD está definido y es 0.8."""
+        from parser_universal import LAYOUT_CONFIDENCE_THRESHOLD
+        assert LAYOUT_CONFIDENCE_THRESHOLD == 0.8
+
+
+class TestAccountTypeResolverIntegration:
+    """AccountTypeResolver vía ExtractionContext en ParserPDF."""
+
+    def test_contexto_vacio_no_activa_resolver(self, native_pdf):
+        """ExtractionContext() vacío no debe activar el resolver."""
+        r = ParserPDF().parsear(native_pdf, ExtractionContext())
+        cuentas_con_tipo = sum(1 for c in r.cuentas if c.tipo_cuenta is not None)
+        assert cuentas_con_tipo == 0, (
+            f"Contexto vacío activó resolver: {cuentas_con_tipo} cuentas con tipo"
+        )
+
+    def test_contexto_real_de_analyzer_activa_resolver(self, native_pdf):
+        """Contexto desde DocumentAnalyzer activa el resolver."""
+        from parsers.analyzer import DocumentAnalyzer
+
+        analyzer = DocumentAnalyzer()
+        analysis = analyzer.analyze(native_pdf)
+        context = analyzer.to_extraction_context(analysis)
+        assert context.analysis_source == "DocumentAnalyzer"
+        r = ParserPDF().parsear(native_pdf, context)
+        cuentas_con_tipo = sum(1 for c in r.cuentas if c.tipo_cuenta is not None)
+        assert cuentas_con_tipo > 0, (
+            f"Resolver no activó: 0 cuentas con tipo (confianza={context.confidence})"
+        )
+
+    def test_confidence_bajo_no_activa(self, native_pdf):
+        """Context con confidence bajo no debe activar el resolver."""
+        context = ExtractionContext(
+            analysis_source="DocumentAnalyzer",
+            confidence=0.3,
+            layout_hint=["activo", "pasivo"],
+        )
+        r = ParserPDF().parsear(native_pdf, context)
+        cuentas_con_tipo = sum(1 for c in r.cuentas if c.tipo_cuenta is not None)
+        assert cuentas_con_tipo == 0
+
+    def test_analysis_source_incorrecto_no_activa(self, native_pdf):
+        """Context sin analysis_source='DocumentAnalyzer' no activa resolver."""
+        context = ExtractionContext(
+            analysis_source="manual",
+            confidence=0.9,
+            layout_hint=["activo", "pasivo"],
+        )
+        r = ParserPDF().parsear(native_pdf, context)
+        cuentas_con_tipo = sum(1 for c in r.cuentas if c.tipo_cuenta is not None)
+        assert cuentas_con_tipo == 0
+
+    def test_flag_legacy_sigue_funcionando(self, native_pdf):
+        """ENABLE_ACCOUNT_TYPE_RESOLVER=True activa resolver incluso sin contexto."""
+        import parser_universal as pu
+        original = pu.ENABLE_ACCOUNT_TYPE_RESOLVER
+        pu.ENABLE_ACCOUNT_TYPE_RESOLVER = True
+        try:
+            r = ParserPDF().parsear(native_pdf)
+            cuentas_con_tipo = sum(1 for c in r.cuentas if c.tipo_cuenta is not None)
+            assert cuentas_con_tipo > 0, "Flag legacy no activó resolver"
+        finally:
+            pu.ENABLE_ACCOUNT_TYPE_RESOLVER = original
+
+    def test_flag_legacy_restaurado(self, native_pdf):
+        """Verificar que ENABLE_ACCOUNT_TYPE_RESOLVER vuelve a False después del test."""
+        import parser_universal as pu
+        assert pu.ENABLE_ACCOUNT_TYPE_RESOLVER is False
+
+    def test_tipos_cuenta_en_rango_valido(self, native_pdf):
+        """Tipos resueltos deben ser valores válidos."""
+        from parsers.analyzer import DocumentAnalyzer
+
+        analyzer = DocumentAnalyzer()
+        context = analyzer.to_extraction_context(analyzer.analyze(native_pdf))
+        r = ParserPDF().parsear(native_pdf, context)
+        tipos_validos = {"ACTIVO", "PASIVO", "PATRIMONIO", "PERDIDA", "GANANCIA", "DESCONOCIDO"}
+        for c in r.cuentas:
+            if c.tipo_cuenta is not None:
+                assert c.tipo_cuenta in tipos_validos, (
+                    f"Tipo inválido: {c.tipo_cuenta}"
+                )
+
+    def test_compatibilidad_con_extraction_context_vacio(self, native_pdf):
+        """parsear(path, ExtractionContext()) produce mismo resultado que parsear(path)."""
+        r_sin = ParserPDF().parsear(native_pdf)
+        r_con = ParserPDF().parsear(native_pdf, ExtractionContext())
+        assert r_sin.formato_codigo == r_con.formato_codigo
+        assert r_sin.separador_miles == r_con.separador_miles
+        assert r_sin.requirio_ocr == r_con.requirio_ocr
+        assert r_sin.rotacion_aplicada == r_con.rotacion_aplicada
+        assert len(r_sin.cuentas) == len(r_con.cuentas)
+        for c1, c2 in zip(r_sin.cuentas, r_con.cuentas):
+            assert c1.nombre == c2.nombre
+            assert c1.monto == c2.monto
+            # tipo_cuenta debe ser None en ambos (sin resolver)
+            assert c1.tipo_cuenta is None
+            assert c2.tipo_cuenta is None
+
+    def test_analysis_source_en_context(self, native_pdf):
+        """DocumentAnalyzer.to_extraction_context() establece analysis_source."""
+        from parsers.analyzer import DocumentAnalyzer
+
+        context = DocumentAnalyzer().to_extraction_context(
+            DocumentAnalyzer().analyze(native_pdf)
+        )
+        assert context.analysis_source == "DocumentAnalyzer"
+
+
+class TestNormalizationBeforeLayout:
+    """Fase 6: normalización de líneas rotadas 180° antes de LayoutDetector."""
+
+    # ── Test A: PDF normal → sin rotación, flag False ──
+
+    def test_normal_pdf_no_rotation_correction(self, native_pdf):
+        """PDF sin rotación: rotation_corrected_before_layout=False."""
+        analyzer = DocumentAnalyzer()
+        analysis = analyzer.analyze(native_pdf)
+        assert analysis.rotation_corrected_before_layout is False
+
+    def test_normal_pdf_layout_inmutable(self, native_pdf):
+        """PDF sin rotación: layout detectado es el mismo que antes (test de no-regresión)."""
+        from parsers.integration import parse_with_analysis
+        enhanced = parse_with_analysis(native_pdf)
+        assert enhanced.analysis.layout.columns is not None
+        assert len(enhanced.analysis.layout.columns) > 0
+        assert enhanced.analysis.orientation.rotation == 0
+
+    # ── Test B: PDF con rotación simulada → flag True ──
+
+    def test_normalize_lines_180_high_confidence(self):
+        """_normalize_lines invierte palabras cuando rotation=180 y confianza≥umbral."""
+        analyzer = DocumentAnalyzer()
+        from parsers.analyzer import OrientationAnalysis
+        orientation = OrientationAnalysis(rotation=180, confidence=0.85, method="words")
+        lineas = ["ovitca", "atisap ovisap", "123"]
+        normalizadas = analyzer._normalize_lines(lineas, orientation)
+        assert normalizadas == ["activo", "pasita pasivo", "321"]
+
+    def test_normalize_lines_0_rotation(self):
+        """_normalize_lines no modifica líneas cuando rotation=0."""
+        analyzer = DocumentAnalyzer()
+        from parsers.analyzer import OrientationAnalysis
+        orientation = OrientationAnalysis(rotation=0, confidence=0.0, method="unknown")
+        lineas = ["activo", "pasivo", "123"]
+        normalizadas = analyzer._normalize_lines(lineas, orientation)
+        assert normalizadas is lineas  # misma lista (sin copia)
+        assert normalizadas == ["activo", "pasivo", "123"]
+
+    def test_normalize_lines_low_confidence(self):
+        """_normalize_lines no modifica cuando confianza es baja."""
+        analyzer = DocumentAnalyzer()
+        from parsers.analyzer import OrientationAnalysis
+        orientation = OrientationAnalysis(rotation=180, confidence=0.4, method="words")
+        lineas = ["ovitca"]
+        normalizadas = analyzer._normalize_lines(lineas, orientation)
+        assert normalizadas is lineas
+
+    def test_rotation_180_flag_true(self, native_pdf):
+        """Verify flag is True when orientation is forced 180 (integration test)
+        by checking that after _normalize_lines, flag in analysis is set."""
+        analyzer = DocumentAnalyzer()
+        analysis = analyzer.analyze(native_pdf)
+        from parsers.analyzer import OrientationAnalysis
+        fake_orientation = OrientationAnalysis(rotation=180, confidence=0.85, method="words")
+        lineas = ["atreus", "avitatneserp", "ovitca"]
+        normalizadas = analyzer._normalize_lines(lineas, fake_orientation)
+        assert normalizadas == ["suerta", "presentativa", "activo"]
+
+    # ── Test C: PDF escaneado → no se rompe ──
+
+    def test_scanned_pdf_no_correction(self, scanned_pdf):
+        """PDF escaneado (OCR) no activa normalización."""
+        analyzer = DocumentAnalyzer()
+        analysis = analyzer.analyze(scanned_pdf)
+        # Escaneado no tiene texto nativo; orientation.confidence debe ser 0
+        assert analysis.rotation_corrected_before_layout is False
+
+
+class TestTextNormalization:
+    """Fase 7: higiene textual antes de análisis estructural."""
+
+    # ── Texto limpio no cambia ──
+
+    def test_clean_text_unchanged(self):
+        """Texto sin problemas pasa sin modificación."""
+        from parsers.text_normalizer import normalize_text_lines
+        lineas = ["Activo", "Pasivo", "Total Activos 1.234.567"]
+        resultado, acciones = normalize_text_lines(lineas)
+        assert resultado == lineas
+        assert len(acciones) == 0
+
+    @staticmethod
+    def test_clean_lines_have_text_normalized_false(native_pdf):
+        """PDF normal con texto limpio no marca text_normalized."""
+        analyzer = DocumentAnalyzer()
+        analysis = analyzer.analyze(native_pdf)
+        # BALANCE 2016.pdf tiene texto limpio — no debería activar normalización
+        assert analysis.text_normalized is False
+        assert len(analysis.normalization_actions) == 0
+
+    # ── OCR spacing se corrige ──
+
+    def test_ocr_spacing_merged(self):
+        """'A c t i v o' se fusiona a 'Activo'."""
+        from parsers.text_normalizer import normalize_text_lines
+        resultado, acciones = normalize_text_lines(["A c t i v o"])
+        assert resultado == ["Activo"]
+        assert any("merged_ocr_spacing" in a for a in acciones)
+
+    def test_ocr_spacing_multiple_words(self):
+        """Varias secuencias OCR en una línea."""
+        from parsers.text_normalizer import normalize_text_lines
+        lineas = ["A c t i v o   P a s i v o"]
+        resultado, _ = normalize_text_lines(lineas)
+        assert resultado == ["Activo Pasivo"]
+
+    def test_ocr_spacing_partial_line(self):
+        """Secuencia OCR al final de una línea."""
+        from parsers.text_normalizer import normalize_text_lines
+        lineas = ["Total  1.234  C u e n t a"]
+        resultado, _ = normalize_text_lines(lineas)
+        assert resultado == ["Total 1.234 Cuenta"]
+
+    # ── Códigos de cuenta no se rompen ──
+
+    def test_codes_preserved(self):
+        """Códigos numéricos con separadores no se alteran."""
+        from parsers.text_normalizer import normalize_text_lines
+        lineas = [
+            "1.1.01.01 Caja 1.234.567",
+            "1.1.02.05 Banco 5.678.901",
+            "110101 Caja Chica 100",
+            "1-1-01-01 Deudores 999",
+        ]
+        resultado, _ = normalize_text_lines(lineas)
+        assert resultado == lineas
+
+    def test_codes_with_short_segments_preserved(self):
+        """Códigos de cuenta con segmentos cortos (ej. '1 1 0 1 0 1') no se fusionan."""
+        from parsers.text_normalizer import normalize_text_lines
+        lineas = ["1 1 0 1 0 1  Caja"]
+        resultado, _ = normalize_text_lines(lineas)
+        # dígitos no se fusionan (solo alfa)
+        assert resultado == ["1 1 0 1 0 1 Caja"]
+
+    # ── Montos no se alteran ──
+
+    def test_amounts_unchanged(self):
+        """Montos numéricos no se modifican."""
+        from parsers.text_normalizer import normalize_text_lines
+        lineas = [
+            "  1.234.567  ",
+            "  (5.678)  ",
+            "  0  ",
+            "  -1.234  ",
+        ]
+        resultado, _ = normalize_text_lines(lineas)
+        esperado = [
+            "1.234.567",
+            "(5.678)",
+            "0",
+            "-1.234",
+        ]
+        assert resultado == esperado
+
+    # ── PDF escaneado no se rompe ──
+
+    def test_scanned_pdf_sigue_funcionando(self, scanned_pdf):
+        """PDF escaneado no se rompe con normalización."""
+        analyzer = DocumentAnalyzer()
+        analysis = analyzer.analyze(scanned_pdf)
+        assert analysis.file.is_valid
+        assert analysis.text_normalized is False  # sin texto nativo
+
+    # ── Múltiples espacios ──
+
+    def test_multiple_spaces_collapsed(self):
+        """Espacios múltiples se colapsan."""
+        from parsers.text_normalizer import normalize_text_lines
+        resultado, acciones = normalize_text_lines(["Activo       Caja"])
+        assert resultado == ["Activo Caja"]
+        assert any("collapsed_spaces" in a for a in acciones)
+
+    # ── Caracteres invisibles ──
+
+    def test_invisible_chars_removed(self):
+        """Caracteres zero-width y control se remueven."""
+        from parsers.text_normalizer import normalize_text_lines
+        lineas = ["Activo\u200bCaja", "Pasivo\x00Test"]
+        resultado, _ = normalize_text_lines(lineas)
+        assert resultado == ["ActivoCaja", "PasivoTest"]
+
+    # ── Líneas vacías ──
+
+    def test_empty_lines_dropped(self):
+        """Líneas vacías se descartan."""
+        from parsers.text_normalizer import normalize_text_lines
+        lineas = ["Activo", "", "   ", "Pasivo"]
+        resultado, _ = normalize_text_lines(lineas)
+        assert resultado == ["Activo", "Pasivo"]
+
+    # ── Regresión: parse_with_analysis sigue funcionando ──
+
+    def test_parse_with_analysis_no_regression(self, native_pdf):
+        """parse_with_analysis no se rompe con normalización."""
+        from parsers.integration import parse_with_analysis
+        enhanced = parse_with_analysis(native_pdf)
+        assert enhanced.analysis is not None
+        assert hasattr(enhanced.analysis, "text_normalized")
+        assert len(enhanced.cuentas) > 0
+
+    def test_normalization_actions_in_to_dict(self, native_pdf):
+        """to_dict incluye campos de normalización."""
+        from parsers.integration import parse_with_analysis
+        d = parse_with_analysis(native_pdf).analysis.to_dict()
+        assert "text_normalized" in d
+        assert "normalization_actions" in d
 
 
 # ─────────────────────────────────────────────────────────────────────

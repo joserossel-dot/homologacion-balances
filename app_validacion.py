@@ -22,6 +22,7 @@ Funcionalidad:
 
 import json
 import re
+import time
 from pathlib import Path
 
 import pandas as pd
@@ -32,9 +33,8 @@ from clasificador_codigo_cuenta import ClasificadorCodigo
 from gold_standard.builder import GoldBuilder
 from gold_standard.models import GoldRecord
 from reglas_especiales import ProcesadorReglasEspeciales, calcular_patrimonio_efectivo
-from analytics.dashboard import AnalyticsDashboard
-from parser_universal import ParserPDF, CuentaRaw, OrigenColumna
-from src.db_repository import RepositorioDiccionario
+from config.regex_rules import REGLAS_REGEX, REGLAS_COMPILADAS
+from parser_universal import ParserPDF, CuentaRaw, OrigenColumna, parsear_excel
 from extractor_metadata import extraer_metadata, MetadataEmpresa
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -72,47 +72,6 @@ def cargar_diccionario_base() -> list[dict]:
 # ─────────────────────────────────────────────────────────────────────────────
 # REGLAS REGEX (patrones de mayor cobertura)
 # ─────────────────────────────────────────────────────────────────────────────
-
-REGLAS_REGEX = [
-    (r"\b(caja\s*chica|caja\s*y\s*banco|efectivo\s*y\s*equiv|disponible|caja|banco|cuenta\s*corriente\s*banco|cuenta\s*vista)\b", "AC.01", 0.90),
-    (r"\b(inversion(es)?\s*(corto\s*plazo|cp)|fondos?\s*mutuos?|dep[oó]sito(s)?\s*a\s*plazo|pacto(s)?)\b", "AC.02", 0.92),
-    (r"\b(clientes?|deudore(s)?\s*por\s*venta|cuentas?\s*por\s*cobrar\s*(clientes?)?)\b", "AC.03", 0.90),
-    (r"\b(documento(s)?\s*por\s*cobrar|letras?\s*(por|a)\s*cobrar|pagare(s)?\s*por\s*cobrar|cheques?\s*por\s*cobrar)\b", "AC.04", 0.92),
-    (r"\b(inventario(s)?|existencia(s)?|mercader[ií]a(s)?|stock|materia(s)?\s*prima(s)?|productos?\s*(terminado|en\s*proceso))\b", "AC.05", 0.92),
-    (r"\b(relacionada(s)?\s*(cp|corriente)|cuenta\s*corriente\s*relacionad)\b", "AC.06", 0.88),
-    (r"(cuenta\s+(particular|corriente)\s+(socio|accionista))|(cta\.?\s*(cte|particular)\s+(socio|accionista))|retiro(s)?\s+(de\s+)?socio|dividendo(s)?\s+(provisorio|anticipado)", "AC.06S", 0.93),
-    (r"\b(iva\s*(credito|cf)|ppm|impuesto(s)?\s*por\s*recuperar|anticipo(s)?\s*(a\s*)?proveedor|gasto(s)?\s*anticipado(s)?|deudore(s)?\s*varios|fondos?\s*por\s*rendir)\b", "AC.07", 0.88),
-    (r"\b(activo\s*fijo|propiedad(es)?\s*planta|maquinaria(s)?|veh[ií]culo(s)?|terreno(s)?|construccion(es)?|mueble(s)?\s*y\s*[uú]til(es)?|equipos?\s*(de\s*)?computacion)\b", "ANC.01", 0.90),
-    (r"\b(intangible(s)?|goodwill|marca(s)?|patente(s)?|licencia(s)?|software|llave\s*de\s*negocio)\b", "ANC.03", 0.90),
-    (r"\b(inversion(es)?\s*(permanente(s)?|lp|largo\s*plazo)|accione(s)?\s*en\s*sociedad|participacion(es)?\s*(en\s*)?soci)\b", "ANC.04", 0.90),
-    (r"\b(relacionada(s)?\s*(lp|largo\s*plazo))\b", "ANC.05", 0.88),
-    (r"\b(proveedor(es)?|acreedore(s)?\s*comercial|facturas?\s*por\s*pagar|cuentas?\s*por\s*pagar\s*proveedor)\b", "PC.01", 0.90),
-    (r"\b(obligaciones?\s*bancarias?\s*(cp|corto)?|credito(s)?\s*banc|prestamo(s)?\s*banc|linea\s*de\s*credito|sobregiro)\b", "PC.02", 0.88),
-    (r"\bleasing\s*(cp|corriente|corto)?\b", "PC.03", 0.90),
-    (r"\bfactoring\b", "PC.04", 0.94),
-    (r"\b(iva\s*(debito|df)|impuesto(s)?\s*por\s*pagar|provision\s*impuesto|impuesto\s*(a\s*la\s*)?renta|primera\s*categoria|impuesto\s*unico|ppm\s*por\s*pagar|impt?o\s*por\s*pagar)\b", "PC.05", 0.88),
-    (r"\b(remuneracion(es)?|sueldo(s)?|vacaciones?|honorario(s)?\s*por\s*pagar|gratificacion(es)?|imposicion(es)?|afp|isapre|leyes\s*sociales|finiquito(s)?|indemnizacion)\b", "PC.06", 0.86),
-    (r"\b(relacionada(s)?\s*(cp|corriente)\s*pasivo|cta\s*cte\s*socios?\s*\(?en\s*pasivo)\b", "PC.07", 0.86),
-    (r"\b(anticipo(s)?\s*de\s*cliente(s)?|ingreso(s)?\s*(percibido|recibido).*(adelantado|anticipado)|otros?\s*pasivos?\s*(corrientes?|circulantes?)|provision(es)?\s*varia(s)?|acreedore(s)?\s*vario(s)?)\b", "PC.08", 0.85),
-    (r"\b(obligaciones?\s*bancarias?\s*(lp|largo)|credito(s)?\s*banc.*largo|prestamo(s)?\s*banc.*largo|mutuo(s)?\s*hipotecario(s)?)\b", "PNC.01", 0.88),
-    (r"\bleasing\s*(lp|largo)\b", "PNC.02", 0.90),
-    (r"\b(bono(s)?|debenture(s)?)\b", "PNC.03", 0.90),
-    (r"\b(relacionada(s)?\s*(lp|largo)\s*pasivo)\b", "PNC.04", 0.86),
-    (r"\b(indemnizacion(es)?\s*(por\s*)?a[ñn]os?\s*(de\s*)?servicio|provision(es)?\s*lp|impuesto(s)?\s*diferido(s)?\s*lp)\b", "PNC.05", 0.85),
-    (r"\b(capital\s*(pagado|suscrito|social|propio)?|aporte(s)?\s*(de\s*)?(capital|socios?))\b", "PAT.01", 0.90),
-    (r"\b(reserva(s)?(\s*legal)?|prima\s*de\s*emision)\b", "PAT.02", 0.88),
-    (r"\b(utilidad(es)?\s*(acumulada(s)?|retenida(s)?)|resultado(s)?\s*acumulado(s)?|p[eé]rdida(s)?\s*acumulada(s)?)\b", "PAT.03", 0.90),
-    (r"\butilidad\s*del\s*(ejercicio|periodo|a[ñn]o)|resultado\s*del\s*(ejercicio|periodo)|p[eé]rdida\s*del\s*(ejercicio|periodo)|utilidad\s*[/(]?\s*p[eé]rdida\b", "PAT.04", 0.92),
-    (r"\b(venta(s)?|ingreso(s)?\s*(por\s*venta|operacional|del\s*giro)|facturacion)\b", "ER.01", 0.90),
-    (r"\bcosto(s)?\s*(de\s*)?(venta(s)?|explotacion|produccion|mercader[ií]a)\b", "ER.02", 0.92),
-    (r"\bgasto(s)?\s*(de\s*)?(administracion|general(es)?|gestion)\b", "ER.04", 0.88),
-    (r"\bgasto(s)?\s*(de\s*)?(venta(s)?|comercial(es)?|marketing|distribucion)\b", "ER.05", 0.88),
-    (r"\b(depreciacion|amortizacion)\b", "ER.07", 0.90),
-    (r"\bgasto(s)?\s*financiero(s)?|intere(s|ses)?\s*(pagado|bancario|leasing|factoring)|comision(es)?\s*bancaria(s)?", "ER.09", 0.90),
-    (r"\bimpuesto\s*(a\s*la\s*renta|primera\s*categoria)\b", "ER.10", 0.90),
-    (r"\butilidad\s*neta|resultado\s*neto|net\s*income|ganancia\s*neta", "ER.11", 0.92),
-]
-REGLAS_COMPILADAS = [(re.compile(p, re.IGNORECASE | re.UNICODE), c, conf) for p, c, conf in REGLAS_REGEX]
 
 PATRON_NO_CUENTA = re.compile(
     r'^(comprendido|periodo|per[ií]odo|desde|hasta|rut|r\.u\.t|balance|'
@@ -260,29 +219,6 @@ class MotorHibridoLocal:
             return None
 
         return None
-
-
-def parsear_excel(file) -> list[CuentaRaw]:
-    df = pd.read_excel(file, header=None)
-    cuentas = []
-    for i, row in df.iterrows():
-        vals = [v for v in row.tolist() if pd.notna(v)]
-        if not vals: continue
-        textos = [v for v in vals if isinstance(v, str)]
-        numeros = [v for v in vals if isinstance(v, (int, float))]
-        if not textos: continue
-        nombre = max(textos, key=len)
-        if len(nombre) < 3: continue
-        codigo = None
-        primer = str(vals[0])
-        if re.match(r'^[\d.\-]+$', primer) and primer != nombre:
-            codigo = primer
-        monto = numeros[-1] if numeros else None
-        cuentas.append(CuentaRaw(
-            linea=i, codigo=codigo, nombre=nombre, monto=monto,
-            origen_columna=OrigenColumna.DESCONOCIDO, confianza_extraccion=0.9
-        ))
-    return cuentas
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -579,33 +515,6 @@ def main():
                     norm = normalizar_nombre(nombre)
                     name_map.setdefault(norm, []).append((fname, idx, row['codigo_clasificado']))
             # Propagar si existe alguna clasificación
-            for norm, entries in name_map.items():
-                classified_code = None
-                for fname, idx, cod in entries:
-                    if cod and cod not in ('', '__EXCLUIR__'):
-                        classified_code = cod
-                        break
-                if classified_code:
-                    for fname, idx, cod in entries:
-                        if not cod or cod == '':
-                            st.session_state.resultados[fname].at[idx, 'codigo_clasificado'] = classified_code
-                            st.session_state.resultados[fname].at[idx, 'metodo'] = 'propagado_automático'
-                            st.session_state.resultados[fname].at[idx, 'confianza'] = 1.0
-                            st.session_state.resultados[fname].at[idx, 'requiere_revision'] = False
-        propagar_entre_balances()
-        st.session_state['propagation_done'] = True
-
-    if 'propagation_done' not in st.session_state:
-        def propagar_entre_balances():
-            name_map = {}
-            resultados = getattr(st.session_state, "resultados", {})
-            for fname, df in resultados.items():
-                for idx, row in df.iterrows():
-                    nombre = row['nombre_original']
-                    if not nombre: continue
-                    norm = normalizar_nombre(nombre)
-                    name_map.setdefault(norm, []).append((fname, idx, row['codigo_clasificado']))
-            
             for norm, entries in name_map.items():
                 classified_code = None
                 for fname, idx, cod in entries:

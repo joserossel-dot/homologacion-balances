@@ -33,6 +33,8 @@ from parser_universal import (
     PATRON_GUION,
     PATRON_MONTOS,
     PATRON_PUNTO,
+    ROTATION_CORRECTION_THRESHOLD,
+    ExtractionContext,
     FormatoCodigo,
     detectar_formato_codigo as _detectar_formato_codigo,
     detectar_separador_miles as _detectar_separador_miles,
@@ -40,6 +42,7 @@ from parser_universal import (
 )
 from parsers.layout_detector import DetectedLayout, LayoutDetector
 from parsers.orientation_detector import OrientationResult, detectar_orientacion_words
+from parsers.text_normalizer import normalize_text_lines
 
 
 @dataclass
@@ -142,6 +145,9 @@ class DocumentAnalysis:
     overall_confidence: float = 0.0
     warnings: list[str] = field(default_factory=list)
     analysis_time_ms: float = 0.0
+    rotation_corrected_before_layout: bool = False
+    text_normalized: bool = False
+    normalization_actions: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -188,6 +194,9 @@ class DocumentAnalysis:
             "overall_confidence": self.overall_confidence,
             "warnings": self.warnings,
             "analysis_time_ms": self.analysis_time_ms,
+            "rotation_corrected_before_layout": self.rotation_corrected_before_layout,
+            "text_normalized": self.text_normalized,
+            "normalization_actions": self.normalization_actions[:5],
         }
 
 
@@ -239,6 +248,28 @@ class DocumentAnalyzer:
         result.analysis_time_ms = round((time.perf_counter() - inicio) * 1000, 1)
         return result
 
+    def to_extraction_context(self, analysis: DocumentAnalysis) -> ExtractionContext:
+        """Convierte un DocumentAnalysis a ExtractionContext para ParserPDF.
+
+        Extrae las pistas más relevantes del análisis estructural
+        para que ParserPDF pueda adaptar su estrategia de extracción
+        sin tener que re-analizar el documento.
+        """
+        return ExtractionContext(
+            rotation_hint=analysis.orientation.rotation,
+            rotation_confidence=analysis.orientation.confidence,
+            needs_ocr=analysis.needs_ocr if analysis.needs_ocr else None,
+            layout_hint=list(analysis.layout.columns) if analysis.layout.confidence >= 0.5 else None,
+            layout_confidence=analysis.layout.confidence,
+            format_hint=(
+                FormatoCodigo(analysis.code.code_format)
+                if analysis.code.code_format
+                else None
+            ),
+            confidence=analysis.overall_confidence,
+            analysis_source="DocumentAnalyzer",
+        )
+
     # ------------------------------------------------------------------
     # File analysis
     # ------------------------------------------------------------------
@@ -281,26 +312,45 @@ class DocumentAnalyzer:
                     tables = page.extract_tables() or []
                     tabla_info.append(len(tables) > 0)
 
-                # 2a. Text analysis
-                self._analyze_text(result, todas_lineas)
+                # 2a. Text hygiene — normalizar líneas antes de cualquier análisis
+                #     para que LayoutDetector y demás analizadores reciban texto
+                #     más limpio (OCR spacing, espacios múltiples, invisibles).
+                lineas_normalizadas, norm_actions = normalize_text_lines(
+                    todas_lineas,
+                )
+                result.text_normalized = len(lineas_normalizadas) != len(todas_lineas) or \
+                    lineas_normalizadas != todas_lineas
+                result.normalization_actions = norm_actions
 
-                # 2b. Orientation (native text)
+                # 2b. Text analysis (sobre líneas normalizadas)
+                self._analyze_text(result, lineas_normalizadas)
+
+                # 2c. Orientation (native text — original words, no afectado por normalización)
                 self._analyze_orientation_native(result, todas_words)
 
-                # 2c. Tables
+                # 2d. Rotation normalization — si hay rotación 180° con suficiente
+                #     confianza, corregir líneas ANTES de layout/códigos/separador.
+                lineas_analisis = self._normalize_lines(
+                    lineas_normalizadas, result.orientation,
+                )
+                result.rotation_corrected_before_layout = (
+                    lineas_analisis is not lineas_normalizadas
+                )
+
+                # 2e. Tables
                 self._analyze_tables(result, tabla_info)
 
-                # 2d. Code format
-                self._analyze_code_format(result, todas_lineas)
+                # 2f. Code format (sobre líneas normalizadas + rotación)
+                self._analyze_code_format(result, lineas_analisis)
 
-                # 2e. Separator
-                self._analyze_separator(result, todas_lineas)
+                # 2g. Separator (sobre líneas normalizadas + rotación)
+                self._analyze_separator(result, lineas_analisis)
 
-                # 2f. Layout
-                self._analyze_layout(result, todas_lineas)
+                # 2h. Layout (sobre líneas normalizadas + rotación)
+                self._analyze_layout(result, lineas_analisis)
 
-                # 2g. OCR necessity
-                self._analyze_ocr_necessity(result, todas_lineas, n_paginas)
+                # 2i. OCR necessity
+                self._analyze_ocr_necessity(result, lineas_analisis, n_paginas)
 
         except Exception as e:
             result.warnings.append(f"Error analizando PDF: {e}")
@@ -345,6 +395,38 @@ class DocumentAnalyzer:
             result.warnings.append("pandas no disponible para análisis Excel")
         except Exception as e:
             result.warnings.append(f"Error analizando Excel: {e}")
+
+    # ------------------------------------------------------------------
+    # Normalization
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _normalize_lines(
+        lineas: list[str],
+        orientation: OrientationAnalysis,
+    ) -> list[str]:
+        """Normaliza líneas para análisis si hay rotación 180°.
+
+        Cuando un PDF está rotado 180°, pdfplumber extrae palabras con
+        caracteres invertidos (e.g. "ovitca" → "activo"). Esta función
+        revierte cada palabra para que LayoutDetector y demás analizadores
+        reciban texto con orientación correcta.
+
+        Si no hay rotación o la confianza es insuficiente, retorna las
+        líneas originales sin modificar.
+
+        Returns:
+            (lineas_normalizadas, fue_corregido)
+        """
+        if (
+            orientation.rotation == 180
+            and orientation.confidence >= ROTATION_CORRECTION_THRESHOLD
+        ):
+            return [
+                " ".join(w[::-1] for w in l.split())
+                for l in lineas
+            ]
+        return lineas
 
     # ------------------------------------------------------------------
     # Analysis dimensions

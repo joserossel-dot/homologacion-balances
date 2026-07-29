@@ -1,0 +1,11 @@
+document_intelligence: true
+structure_engine: true
+knowledge_base: true
+decision_engine: true
+coverage_engine: true
+self_qa_engine: true
+validation: true
+review_workspace: true
+export_excel: true
+export_markdown: true
+export_json: true

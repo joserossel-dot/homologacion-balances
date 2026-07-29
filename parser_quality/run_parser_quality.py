@@ -115,7 +115,7 @@ def _process_pdf(fpath: Path, gatekeeper: ParserGatekeeper) -> None:
 
 def _process_excel(fpath: Path, gatekeeper: ParserGatekeeper) -> None:
     try:
-        from app_validacion import parsear_excel
+        from parser_universal import parsear_excel
         cuentas = parsear_excel(fpath)
         for i, c in enumerate(cuentas):
             line_str = f"{c.codigo or ''} {c.nombre} {c.monto or ''}"

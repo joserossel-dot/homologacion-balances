@@ -47,3 +47,49 @@ test_ocr/
 
 # Tessdata (muy pesado, se instala con brew)
 tessdata/
+
+# Cobertura
+.coverage
+*.cover
+*,cover
+
+# Bases de datos
+*.db
+*.db-shm
+*.db-wal
+
+# Cachés
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Resultados temporales
+runs/
+review_workspace/
+
+# Backups
+*.save
+*.bak
+
+# Reportes generados
+reports/**/cache/
+reports/**/*_cache.json
+reports/**/*.pkl
+reports/**/generated_*
+reports/**/checkpoint*
+reports/**/metrics*.json
+reports/**/benchmark*.json
+reports/**/scientific_validation.*
+reports/**/validation*/
+reports/**/shadow*/
+reports/**/evidence*/
+reports/**/audit*/
+reports/**/review*/
+
+# Datasets
+datasets/**/*.pdf
+datasets/**/*.xlsx
+datasets/**/*.xls
+
+# Entorno
+.env.*

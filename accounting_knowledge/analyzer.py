@@ -21,8 +21,7 @@ from typing import Any
 import pandas as pd
 
 from validation.dataset_manager import DatasetManager
-from parser_universal import ParserPDF
-from app_validacion import parsear_excel
+from parser_universal import ParserPDF, parsear_excel
 
 
 class AccountingKnowledgeBase:

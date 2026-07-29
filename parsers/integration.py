@@ -26,7 +26,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
-from parser_universal import CuentaRaw, FormatoCodigo, ParserPDF, ResultadoParseo
+from parser_universal import (
+    CuentaRaw,
+    FormatoCodigo,
+    ParserPDF,
+    ResultadoParseo,
+)
 from parsers.analyzer import DocumentAnalysis, DocumentAnalyzer
 
 
@@ -178,10 +183,15 @@ def parse_with_analysis(
 ) -> EnhancedParseResult:
     """Analiza y parsea un documento.
 
-    1. DocumentAnalyzer analiza la estructura del documento
-    2. ParserPDF.parsear() extrae las cuentas
-    3. Las advertencias del análisis se agregan al resultado del parser
-    4. Se retorna un EnhancedParseResult con ambos conjuntos de datos
+    Flujo unificado:
+      1. DocumentAnalyzer analiza la estructura del documento
+      2. Produce ExtractionContext con las pistas del análisis
+      3. ParserPDF.parsear() recibe el contexto y adapta su extracción
+      4. Las advertencias del análisis se agregan al resultado del parser
+      5. Se retorna un EnhancedParseResult con ambos conjuntos de datos
+
+    La corrección de rotación 180° ocurre internamente en ParserPDF
+    cuando el contexto lo indica con suficiente confianza.
 
     Args:
         path: Ruta al archivo (PDF o Excel).
@@ -196,7 +206,8 @@ def parse_with_analysis(
     _parser = parser or ParserPDF()
 
     analysis = _analyzer.analyze(path)
-    resultado = _parser.parsear(path)
+    context = _analyzer.to_extraction_context(analysis)
+    resultado = _parser.parsear(path, context)
 
     _merge_warnings(resultado, analysis)
 

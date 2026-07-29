@@ -23,6 +23,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Optional
 
+import pandas as pd
 import pdfplumber
 from PIL import Image
 
@@ -35,6 +36,21 @@ ENABLE_DYNAMIC_LAYOUT = False
 # Feature flag: cuando está en False, no se ejecuta AccountTypeResolver.
 # Cuando está en True, cada cuenta se resuelve a AccountType después del parseo.
 ENABLE_ACCOUNT_TYPE_RESOLVER = False
+
+# Umbral de confianza para aplicar corrección de rotación 180°
+# sobre texto nativo. Por debajo de este umbral se usa el flujo normal.
+ROTATION_CORRECTION_THRESHOLD = 0.7
+
+# Umbral de confianza para usar LayoutDetector desde ExtractionContext.
+# Si la confianza del layout detectado por DocumentAnalyzer supera este
+# umbral, ParserPDF usa el orden de columnas del contexto en lugar de la
+# heurística estándar (ULTIMAS_COLS).
+LAYOUT_CONFIDENCE_THRESHOLD = 0.8
+
+# Umbral de confianza para activar AccountTypeResolver desde ExtractionContext.
+# Solo se activa si el contexto fue producido por DocumentAnalyzer,
+# tiene confianza suficiente, y contiene hints de layout o formato.
+ACCOUNT_TYPE_CONFIDENCE_THRESHOLD = 0.7
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -94,6 +110,30 @@ class ResultadoParseo:
     rotacion_aplicada: int           # 0 o 90
     cuentas: list[CuentaRaw] = field(default_factory=list)
     advertencias: list[str] = field(default_factory=list)
+
+
+@dataclass
+class ExtractionContext:
+    """Contexto de extracción producido por DocumentAnalyzer.
+
+    Contiene pistas estructurales sobre el documento que ParserPDF
+    puede usar para adaptar su estrategia de extracción.
+
+    rotation_hint:   rotación detectada por DocumentAnalyzer (0, 90, 180)
+    rotation_confidence: confianza de la detección de rotación
+    needs_ocr:       si el documento requiere OCR (None = dejar que ParserPDF decida)
+    layout_hint:     orden de columnas detectado por LayoutDetector
+    format_hint:     formato de código detectado
+    confidence:      confianza general del análisis
+    """
+    rotation_hint: int = 0
+    rotation_confidence: float = 0.0
+    needs_ocr: Optional[bool] = None
+    layout_hint: Optional[list[str]] = None
+    layout_confidence: float = 0.0
+    format_hint: Optional[FormatoCodigo] = None
+    confidence: float = 1.0
+    analysis_source: Optional[str] = None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -541,7 +581,11 @@ def parsear_linea(
 
 class ParserPDF:
 
-    def parsear(self, path: Path) -> ResultadoParseo:
+    def parsear(
+        self,
+        path: Path,
+        context: Optional[ExtractionContext] = None,
+    ) -> ResultadoParseo:
         ok, msg = validar_archivo(path)
         if not ok:
             return ResultadoParseo(
@@ -550,7 +594,7 @@ class ParserPDF:
                 advertencias=[f"VALIDACIÓN FALLIDA: {msg}"]
             )
 
-        lineas, requirio_ocr, rotacion = self._extraer_lineas(path)
+        lineas, requirio_ocr, rotacion = self._extraer_lineas(path, context)
 
         if not lineas:
             return ResultadoParseo(
@@ -570,11 +614,34 @@ class ParserPDF:
             muestra_montos.extend(PATRON_MONTOS.findall(l))
         separador = detectar_separador_miles(muestra_montos)
 
-        # 3b. Detectar layout de columnas (solo si ENABLE_DYNAMIC_LAYOUT está activo)
+        # 3b. Detectar layout de columnas
+        # Prioridad: 1) ExtractionContext (de DocumentAnalyzer) si confianza suficiente
+        #            2) LayoutDetector interno (solo si ENABLE_DYNAMIC_LAYOUT)
+        #            3) Heurística estándar (ULTIMAS_COLS) por defecto
         advertencias = []
         column_order: Optional[list[OrigenColumna]] = None
         layout_columns: Optional[list[str]] = None
-        if ENABLE_DYNAMIC_LAYOUT:
+
+        if context and context.layout_hint and context.layout_confidence >= LAYOUT_CONFIDENCE_THRESHOLD:
+            layout_columns = list(context.layout_hint)
+            cols = []
+            for c in layout_columns:
+                oc = _LAYOUT_COLUMN_MAP.get(c)
+                if oc is not None:
+                    cols.append(oc)
+            if len(cols) >= 2:
+                column_order = cols
+                advertencias.append(
+                    f"LayoutDetector (context): {len(cols)} columnas "
+                    f"({', '.join(c.value for c in cols)}), "
+                    f"confianza={context.layout_confidence:.2f}"
+                )
+            else:
+                advertencias.append(
+                    "LayoutDetector detectó columnas en contexto pero ninguna "
+                    "fue reconocida — usando heurística estándar."
+                )
+        elif ENABLE_DYNAMIC_LAYOUT:
             from parsers.layout_detector import LayoutDetector
             detector = LayoutDetector()
             layout = detector.detect(lineas)
@@ -612,8 +679,19 @@ class ParserPDF:
             if c:
                 cuentas.append(c)
 
-        # 4b. Resolver tipo de cuenta (solo si ENABLE_ACCOUNT_TYPE_RESOLVER está activo)
-        if ENABLE_ACCOUNT_TYPE_RESOLVER and cuentas:
+        # 4b. Resolver tipo de cuenta
+        # Activación:
+        #   1) ENABLE_ACCOUNT_TYPE_RESOLVER (flag legacy, False por defecto)
+        #   2) ExtractionContext desde DocumentAnalyzer con confianza suficiente + hints
+        if cuentas and (
+            ENABLE_ACCOUNT_TYPE_RESOLVER
+            or (
+                context is not None
+                and context.analysis_source == "DocumentAnalyzer"
+                and context.confidence >= ACCOUNT_TYPE_CONFIDENCE_THRESHOLD
+                and (context.layout_hint is not None or context.format_hint is not None)
+            )
+        ):
             from parsers.account_type_resolver import AccountTypeResolver
             resolver = AccountTypeResolver()
             suma_conf = 0.0
@@ -637,6 +715,12 @@ class ParserPDF:
                 "Confianza de extracción reducida a 0.75 — recomendar revisión humana."
             )
 
+        if not requirio_ocr and rotacion == 180 and context and context.rotation_confidence >= ROTATION_CORRECTION_THRESHOLD:
+            advertencias.append(
+                f"Documento corregido desde rotación 180° "
+                f"(confianza={context.rotation_confidence:.2f})"
+            )
+
         return ResultadoParseo(
             archivo=path.name,
             formato_codigo=formato_codigo,
@@ -647,7 +731,11 @@ class ParserPDF:
             advertencias=advertencias,
         )
 
-    def _extraer_lineas(self, path: Path) -> tuple[list[str], bool, int]:
+    def _extraer_lineas(
+        self,
+        path: Path,
+        context: Optional[ExtractionContext] = None,
+    ) -> tuple[list[str], bool, int]:
         lineas: list[str] = []
 
         with pdfplumber.open(path) as pdf:
@@ -658,9 +746,27 @@ class ParserPDF:
                     lineas.extend(texto.split('\n'))
 
         if lineas:
+            if self._debe_corregir_rotacion(context):
+                lineas = [ParserPDF._reverse_line(l) for l in lineas]
+                return lineas, False, 180
             return lineas, False, 0
 
         return self._ocr_documento(path, n_paginas)
+
+    @staticmethod
+    def _debe_corregir_rotacion(context: Optional[ExtractionContext]) -> bool:
+        if not context:
+            return False
+        return (
+            context.rotation_hint == 180
+            and context.rotation_confidence >= ROTATION_CORRECTION_THRESHOLD
+        )
+
+    @staticmethod
+    def _reverse_line(linea: str) -> str:
+        if not linea.strip():
+            return linea
+        return " ".join(w[::-1] for w in linea.split())
 
     def _ocr_documento(self, path: Path, n_paginas: int) -> tuple[list[str], bool, int]:
         lineas: list[str] = []
@@ -694,6 +800,33 @@ class ParserPDF:
                 lineas.extend(texto.split('\n'))
 
         return lineas, True, rotacion_global or 0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EXCEL PARSER (extraído de app_validacion para eliminar import circular)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def parsear_excel(file) -> list[CuentaRaw]:
+    df = pd.read_excel(file, header=None)
+    cuentas = []
+    for i, row in df.iterrows():
+        vals = [v for v in row.tolist() if pd.notna(v)]
+        if not vals: continue
+        textos = [v for v in vals if isinstance(v, str)]
+        numeros = [v for v in vals if isinstance(v, (int, float))]
+        if not textos: continue
+        nombre = max(textos, key=len)
+        if len(nombre) < 3: continue
+        codigo = None
+        primer = str(vals[0])
+        if re.match(r'^[\d.\-]+$', primer) and primer != nombre:
+            codigo = primer
+        monto = numeros[-1] if numeros else None
+        cuentas.append(CuentaRaw(
+            linea=i, codigo=codigo, nombre=nombre, monto=monto,
+            origen_columna=OrigenColumna.DESCONOCIDO, confianza_extraccion=0.9
+        ))
+    return cuentas
 
 
 # ─────────────────────────────────────────────────────────────────────────────

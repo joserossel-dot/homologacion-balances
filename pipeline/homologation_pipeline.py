@@ -10,8 +10,9 @@ from typing import Any
 from rapidfuzz import fuzz
 
 from adapters.account_adapter import AccountAdapter
-from app_validacion import REGLAS_REGEX, parsear_excel
 from clasificador_codigo_cuenta import ClasificadorCodigo
+from config.regex_rules import REGLAS_REGEX
+from parser_universal import parsear_excel
 from interpreters.balance_interpreter import BalanceInterpreter
 from learning.engine import LearningEngine
 from models.account_balance import AccountBalance

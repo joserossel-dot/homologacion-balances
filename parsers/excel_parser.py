@@ -1,6 +1,6 @@
 """Parser de archivos Excel.
 
-Envuelve app_validacion.parsear_excel().
+Envuelve parser_universal.parsear_excel().
 """
 
 from __future__ import annotations
@@ -8,8 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from app_validacion import parsear_excel as _parsear_excel
-from parser_universal import CuentaRaw
+from parser_universal import CuentaRaw, parsear_excel as _parsear_excel
 
 from parsers.line_parser import RawAccount, _cuenta_raw_to_account
 
