@@ -330,27 +330,6 @@ class TestPipelineRunner:
         ctx = runner.run()
         assert len(runner.stages) == 0
 
-    def test_run_tests_stage_no_fail(self):
-        """Run tests via subprocess, expect results."""
-        runner = PipelineRunner()
-        runner.config = {
-            "stages": {
-                "run_tests": True,
-                "parser_validation": False,
-                "scientific_validation": False,
-                "knowledge_evolution": False,
-                "quality_snapshot": False,
-                "drift_detection": False,
-                "regression_detection": False,
-                "deployment_decision": False,
-            }
-        }
-        ctx = runner.run()
-        assert len(runner.stages) == 1
-        s = runner.stages[0]
-        assert s.status in (StageStatus.PASS, StageStatus.FAIL)
-        assert ctx.tests_passed >= 0
-
     def test_parser_validation_stage(self):
         runner = PipelineRunner()
         runner.config = {
@@ -884,8 +863,15 @@ class TestCoverageGaps:
         finally:
             builtins.__import__ = original_import
 
-    def test_runner_tests_with_parse_failure(self):
-        """Subprocess succeeds but output cannot be parsed."""
+    def test_run_tests_stage_no_fail(self):
+        """
+        Valida _stage_run_tests con subprocess exitoso.
+
+        Nota: No se ejecuta pytest real. La ejecución real de toda la suite
+        tarda ~44 min y no corresponde a un test unitario. El comportamiento
+        se valida mediante mock de subprocess.run, lo que evita depender del
+        tiempo de ejecución de toda la suite.
+        """
         runner = PipelineRunner()
         runner.config = {"stages": {"run_tests": True, "parser_validation": False,
                                     "scientific_validation": False, "knowledge_evolution": False,

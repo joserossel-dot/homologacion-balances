@@ -70,7 +70,7 @@ CORTO_PLAZO_PATTERN = re.compile(
 )
 
 DEPOSITO_PLAZO_PATTERN = re.compile(
-    r"\bdep[oó0]sito\w*\s*a?\s*plaz[o0]\w*\b", re.IGNORECASE
+    r"(?:\bdep[oó0]sito\w*\s*a?\s*plaz[o0]\w*\b|\bdep\.\s*a\s*plaz[o0]\w*\b)", re.IGNORECASE
 )
 
 ACCIONES_PATTERN = re.compile(

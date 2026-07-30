@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from dataclasses import dataclass, field
 from collections import Counter
@@ -51,9 +52,9 @@ class AC01SplitEngine:
         scores: dict[str, float] = {}
         matched_rules: dict[str, list[str]] = {}
 
-        self._test_equivalentes(normalized, scores, matched_rules)
-        self._test_bancos(normalized, scores, matched_rules)
-        self._test_caja(normalized, scores, matched_rules)
+        self._test_equivalentes(variant, normalized, scores, matched_rules)
+        self._test_bancos(variant, normalized, scores, matched_rules)
+        self._test_caja(variant, normalized, scores, matched_rules)
 
         if not scores:
             return result
@@ -85,19 +86,27 @@ class AC01SplitEngine:
 
         return result
 
+    @staticmethod
+    def _match_any(text: str, ntext: str, *patterns: re.Pattern) -> bool:
+        for p in patterns:
+            if p.search(text) or p.search(ntext):
+                return True
+        return False
+
     def _test_caja(
         self,
         text: str,
+        ntext: str,
         scores: dict[str, float],
         matched_rules: dict[str, list[str]],
     ) -> None:
         score = 0.0
         rules: list[str] = []
 
-        if CAJA_NEGATE_PATTERN.search(text):
+        if self._match_any(text, ntext, CAJA_NEGATE_PATTERN):
             return
 
-        if CAJA_DIRECT_PATTERN.search(text):
+        if self._match_any(text, ntext, CAJA_DIRECT_PATTERN):
             score += 1.0
             rules.append("caja_direct")
 
@@ -110,7 +119,7 @@ class AC01SplitEngine:
             (DIVISA_PATTERN, "divisa"),
             (BILLETE_PATTERN, "billete"),
         ]:
-            if pattern.search(text):
+            if self._match_any(text, ntext, pattern):
                 score += 0.8
                 rules.append(name)
 
@@ -121,36 +130,37 @@ class AC01SplitEngine:
     def _test_bancos(
         self,
         text: str,
+        ntext: str,
         scores: dict[str, float],
         matched_rules: dict[str, list[str]],
     ) -> None:
         score = 0.0
         rules: list[str] = []
 
-        if BANCO_NEGATE_PATTERN.search(text):
+        if self._match_any(text, ntext, BANCO_NEGATE_PATTERN):
             non_negated_tokens = has_any_token(
-                text, BANK_TOKEN_MAP.get("ac01_02", set())
+                ntext, BANK_TOKEN_MAP.get("ac01_02", set())
             )
             if not non_negated_tokens:
                 return
 
-        if CTA_PATTERN.search(text):
+        if self._match_any(text, ntext, CTA_PATTERN):
             score += 1.0
             rules.append("cta_corriente")
 
-        if CHEQUE_PATTERN.search(text):
+        if self._match_any(text, ntext, CHEQUE_PATTERN):
             score += 0.8
             rules.append("cheque")
 
-        if SOBREGIRO_PATTERN.search(text):
+        if self._match_any(text, ntext, SOBREGIRO_PATTERN):
             score += 0.8
             rules.append("sobregiro")
 
-        if LINEA_CREDITO_PATTERN.search(text):
+        if self._match_any(text, ntext, LINEA_CREDITO_PATTERN):
             score += 0.8
             rules.append("linea_credito")
 
-        matched = has_any_token(text, BANK_TOKEN_MAP.get("ac01_02", set()))
+        matched = has_any_token(ntext, BANK_TOKEN_MAP.get("ac01_02", set()))
         if matched:
             score += 0.8 * len(matched)
             rules.append(f"bank_name:{','.join(sorted(matched))}")
@@ -162,6 +172,7 @@ class AC01SplitEngine:
     def _test_equivalentes(
         self,
         text: str,
+        ntext: str,
         scores: dict[str, float],
         matched_rules: dict[str, list[str]],
     ) -> None:
@@ -177,7 +188,7 @@ class AC01SplitEngine:
             (BONOS_PATTERN, "bonos", 0.8),
             (INVERSION_PATTERN, "inversion", 0.7),
         ]:
-            if pattern.search(text):
+            if self._match_any(text, ntext, pattern):
                 score += weight
                 rules.append(name)
 

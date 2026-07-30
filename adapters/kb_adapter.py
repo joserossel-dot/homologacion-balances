@@ -48,6 +48,33 @@ class KBAdapter:
         ctx.set_custom("ignored", ignored)
         ctx.set_custom("kb_elapsed", round(elapsed, 3))
 
+        learning_exact = sum(1 for c in classified_filtered if c.get("method") == "learning_exact")
+        learning_fuzzy = sum(1 for c in classified_filtered if c.get("method") == "learning_fuzzy")
+        fallback_classifier = sum(
+            1 for c in classified_filtered
+            if not c.get("method", "").startswith("learning_")
+        )
+        accounts_without_dictionary_match = sum(1 for c in classified_filtered if c.get("standard_code") is None)
+        cmcc_shadow_hits = sum(1 for c in classified_filtered if c.get("cmcc_shadow") is not None)
+        cmcc_production_hits = sum(1 for c in classified_filtered if c.get("cmcc_decision") is not None)
+
+        v1_result = {
+            "source_file": Path(ctx.source_file).name,
+            "accounts_total": len(classified_filtered) + len(ignored),
+            "accounts_classified": len(classified_filtered),
+            "accounts_ignored": len(ignored),
+            "accounts_without_dictionary_match": accounts_without_dictionary_match,
+            "learning_hits": len(learning_hits_list),
+            "learning_exact": learning_exact,
+            "learning_fuzzy": learning_fuzzy,
+            "fallback_classifier": fallback_classifier,
+            "cmcc_shadow_hits": cmcc_shadow_hits,
+            "cmcc_production_hits": cmcc_production_hits,
+            "classified": classified_filtered,
+            "ignored": ignored,
+        }
+        ctx.set_custom("pipeline_v1_result", v1_result)
+
         return ctx
 
     def _classify_accounts(self, ctx: DocumentContext, raw_accounts: list[Any]) -> list[dict[str, Any]]:

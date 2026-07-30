@@ -439,8 +439,11 @@ def register_existing_files(db_path: str | Path = DATASET_DB) -> int:
         "stress": STRESS,
         "pilot": PILOT,
     }
+    root = DATASET_ROOT.resolve()
+    overridden = {k: v for k, v in existing_folders.items() if root not in v.resolve().parents}
+    folders_to_scan = overridden if overridden else existing_folders
     registered = 0
-    for status, folder in existing_folders.items():
+    for status, folder in folders_to_scan.items():
         if not folder.exists():
             continue
         for entry in sorted(folder.iterdir()):

@@ -23,23 +23,23 @@ def generate_reports(
     paths: dict[str, Path] = {}
 
     variant_mapping_path = _write_variant_mapping(results, output_dir)
-    paths["variant_mapping"] = variant_mapping_path
+    paths["variant_mapping.xlsx"] = variant_mapping_path
 
     split_stats_path = _write_split_statistics(statistics, coverage, output_dir)
-    paths["split_statistics"] = split_stats_path
+    paths["split_statistics.xlsx"] = split_stats_path
 
     coverage_path = _write_coverage_before_after(
         statistics, coverage, results, output_dir
     )
-    paths["coverage_before_after"] = coverage_path
+    paths["coverage_before_after.xlsx"] = coverage_path
 
     review_needed_path = _write_review_needed(results, output_dir)
-    paths["review_needed"] = review_needed_path
+    paths["review_needed.xlsx"] = review_needed_path
 
     report_md_path = _write_split_report(
         statistics, coverage, results, output_dir
     )
-    paths["split_report"] = report_md_path
+    paths["split_report.md"] = report_md_path
 
     return paths
 
@@ -152,6 +152,7 @@ def _write_review_needed(
             "best_guess_code": r.target_code or "UNCLASSIFIED",
             "best_guess_name": r.target_name or "Sin clasificar",
             "confidence": r.confidence,
+            "needs_review": "SI",
             "matched_rules": "; ".join(r.matched_rules) if r.matched_rules else "",
             "review_reason": _review_reason(r),
         })
@@ -214,7 +215,7 @@ def _write_split_report(
     lines.append("## Riesgos")
     lines.append("")
     lines.append("1. **Precisión de reglas léxicas:** Las reglas pueden generar falsos positivos en variantes que contengan palabras clave en contextos no financieros (ej. 'Caja de Compensación').")
-    lines.append(f"2. **Ruido OCR:** {statistics['needs_review']} variantes ({round(statistics['needs_review']/statistics['total_variants']*100, 1)}%) no pudieron clasificarse automáticamente, probablemente debido a ruido OCR o datos mal clasificados en AC.01 original.")
+    lines.append(f"2. **Ruido OCR:** {statistics['needs_review']} variantes ({round(statistics['needs_review']/statistics['total_variants']*100, 1) if statistics['total_variants'] else 0}%) no pudieron clasificarse automáticamente, probablemente debido a ruido OCR o datos mal clasificados en AC.01 original.")
     lines.append("3. **Ambigüedad semántica:** Variantes con palabras clave de múltiples sub-conceptos (ej. 'Dep. a Plazo Bancos' tiene tanto 'plazo' como 'banco').")
     lines.append("4. **Compatibilidad v1:** AC.01 sigue existiendo como padre. No se modificaron IDs ni datos existentes. Los pipelines que referencian AC.01 continúan funcionando.")
     lines.append("")
