@@ -1,0 +1,350 @@
+{
+  "generado_at": "2026-08-01T17:01:34+00:00",
+  "n_cuentas": 61,
+  "duplicados": [
+    {
+      "nombre": "relacionadas cp",
+      "codigos": [
+        "AC.06",
+        "PC.07"
+      ]
+    },
+    {
+      "nombre": "relacionadas lp",
+      "codigos": [
+        "ANC.05",
+        "PNC.04"
+      ]
+    }
+  ],
+  "equivalentes": [
+    {
+      "a": "AC.06",
+      "b": "PC.07",
+      "comunes": [
+        "cuentas con relacionadas",
+        "eerr",
+        "partes relacionadas",
+        "relacionadas cp"
+      ],
+      "nombre_a": "Relacionadas CP",
+      "nombre_b": "Relacionadas CP"
+    },
+    {
+      "a": "AC.06S",
+      "b": "PAT.10",
+      "comunes": [
+        "cps",
+        "cuenta corriente accionistas",
+        "cuenta corriente socios",
+        "cuenta particular socios",
+        "giros de socios",
+        "prestamos a socios",
+        "retiros de socios"
+      ],
+      "nombre_a": "Cta. Cte. Socios / Retiros (Activo)",
+      "nombre_b": "Cuenta Particular Socios"
+    },
+    {
+      "a": "ANC.05",
+      "b": "PNC.04",
+      "comunes": [
+        "eerr lp",
+        "empresas relacionadas lp",
+        "rel. lp",
+        "relacionadas lp"
+      ],
+      "nombre_a": "Relacionadas LP",
+      "nombre_b": "Relacionadas LP"
+    },
+    {
+      "a": "ER.10",
+      "b": "PC.05",
+      "comunes": [
+        "impuesto a la renta",
+        "impuesto unico"
+      ],
+      "nombre_a": "Impuesto a la Renta",
+      "nombre_b": "Impuestos por Pagar"
+    },
+    {
+      "a": "ER.11",
+      "b": "PAT.04",
+      "comunes": [
+        "rdc",
+        "resultado del ejercicio",
+        "resultado neto",
+        "resultado neto del ejercicio",
+        "utilidad del ejercicio"
+      ],
+      "nombre_a": "Utilidad Neta",
+      "nombre_b": "Resultado del Ejercicio"
+    },
+    {
+      "a": "PAT.03",
+      "b": "PAT.09",
+      "comunes": [
+        "utilidades acumuladas",
+        "utilidades de ejercicios anteriores"
+      ],
+      "nombre_a": "Utilidades Retenidas",
+      "nombre_b": "Utilidades Ejercicios Anteriores"
+    },
+    {
+      "a": "PAT.05",
+      "b": "PAT.11",
+      "comunes": [
+        "interes minoritario",
+        "intereses minoritarios",
+        "minoritarios",
+        "participacion minoritaria",
+        "participacion no controladora"
+      ],
+      "nombre_a": "Participaciones No Controladoras",
+      "nombre_b": "Interés Minoritario"
+    },
+    {
+      "a": "PC.02",
+      "b": "PNC.01",
+      "comunes": [
+        "mutuos hipotecarios",
+        "obligaciones bancarias"
+      ],
+      "nombre_a": "Obligaciones Bancarias CP",
+      "nombre_b": "Obligaciones Bancarias LP"
+    }
+  ],
+  "genericos": [
+    {
+      "codigo": "AC.03",
+      "nombre": "Clientes"
+    },
+    {
+      "codigo": "AC.05",
+      "nombre": "Inventarios"
+    },
+    {
+      "codigo": "AC.07",
+      "nombre": "Otras Cuentas por Cobrar CP"
+    },
+    {
+      "codigo": "AC.08",
+      "nombre": "Otros Activos Corrientes"
+    },
+    {
+      "codigo": "ANC.03",
+      "nombre": "Intangibles"
+    },
+    {
+      "codigo": "ANC.06",
+      "nombre": "Otros Activos No Corrientes"
+    },
+    {
+      "codigo": "PC.01",
+      "nombre": "Proveedores"
+    },
+    {
+      "codigo": "PC.04",
+      "nombre": "Factoring"
+    },
+    {
+      "codigo": "PC.08",
+      "nombre": "Otros Pasivos Corrientes"
+    },
+    {
+      "codigo": "PNC.03",
+      "nombre": "Bonos"
+    },
+    {
+      "codigo": "PNC.05",
+      "nombre": "Otros Pasivos LP"
+    },
+    {
+      "codigo": "PAT.01",
+      "nombre": "Capital"
+    },
+    {
+      "codigo": "PAT.02",
+      "nombre": "Reservas"
+    },
+    {
+      "codigo": "ER.01",
+      "nombre": "Ventas"
+    },
+    {
+      "codigo": "ER.06",
+      "nombre": "EBITDA"
+    },
+    {
+      "codigo": "ER.13",
+      "nombre": "Otras Ganancias y Pérdidas"
+    },
+    {
+      "codigo": "ER.17",
+      "nombre": "Otros Ingresos"
+    },
+    {
+      "codigo": "ER.18",
+      "nombre": "Otros Egresos"
+    }
+  ],
+  "campos_faltantes": [],
+  "categorias_invalidas": [],
+  "naturalezas_invalidas": [],
+  "grupos_invalidos": [],
+  "inconsistencias_categoria_grupo": [
+    "ER.01",
+    "ER.02",
+    "ER.03",
+    "ER.04",
+    "ER.05",
+    "ER.06",
+    "ER.07",
+    "ER.08",
+    "ER.09",
+    "ER.10",
+    "ER.11",
+    "ER.12",
+    "ER.13",
+    "ER.14",
+    "ER.15",
+    "ER.16",
+    "ER.17",
+    "ER.18",
+    "ER.19"
+  ],
+  "claves_sin_sinonimos": [],
+  "sin_uso": [
+    {
+      "codigo": "AC.02",
+      "nombre": "Inversiones Corto Plazo",
+      "regla_especial": false,
+      "en_gold": false
+    },
+    {
+      "codigo": "AC.04",
+      "nombre": "Documentos por Cobrar",
+      "regla_especial": false,
+      "en_gold": false
+    },
+    {
+      "codigo": "AC.08",
+      "nombre": "Otros Activos Corrientes",
+      "regla_especial": false,
+      "en_gold": false
+    },
+    {
+      "codigo": "ANC.04",
+      "nombre": "Inversiones Permanentes",
+      "regla_especial": false,
+      "en_gold": false
+    },
+    {
+      "codigo": "ANC.05",
+      "nombre": "Relacionadas LP",
+      "regla_especial": false,
+      "en_gold": false
+    },
+    {
+      "codigo": "ER.02",
+      "nombre": "Costo de Ventas",
+      "regla_especial": false,
+      "en_gold": false
+    },
+    {
+      "codigo": "ER.05",
+      "nombre": "Gastos de Venta",
+      "regla_especial": false,
+      "en_gold": false
+    },
+    {
+      "codigo": "ER.10",
+      "nombre": "Impuesto a la Renta",
+      "regla_especial": false,
+      "en_gold": false
+    },
+    {
+      "codigo": "ER.15",
+      "nombre": "Diferencias de Cambio",
+      "regla_especial": false,
+      "en_gold": false
+    },
+    {
+      "codigo": "ER.16",
+      "nombre": "Resultado Método Participación",
+      "regla_especial": false,
+      "en_gold": false
+    },
+    {
+      "codigo": "ER.17",
+      "nombre": "Otros Ingresos",
+      "regla_especial": false,
+      "en_gold": false
+    },
+    {
+      "codigo": "ER.18",
+      "nombre": "Otros Egresos",
+      "regla_especial": false,
+      "en_gold": false
+    },
+    {
+      "codigo": "PAT.06",
+      "nombre": "Capital Suscrito",
+      "regla_especial": false,
+      "en_gold": false
+    },
+    {
+      "codigo": "PAT.07",
+      "nombre": "Capital por Enterar",
+      "regla_especial": false,
+      "en_gold": false
+    },
+    {
+      "codigo": "PAT.09",
+      "nombre": "Utilidades Ejercicios Anteriores",
+      "regla_especial": false,
+      "en_gold": false
+    },
+    {
+      "codigo": "PNC.02",
+      "nombre": "Leasing LP",
+      "regla_especial": false,
+      "en_gold": false
+    },
+    {
+      "codigo": "PNC.03",
+      "nombre": "Bonos",
+      "regla_especial": false,
+      "en_gold": false
+    },
+    {
+      "codigo": "PNC.05",
+      "nombre": "Otros Pasivos LP",
+      "regla_especial": false,
+      "en_gold": false
+    }
+  ],
+  "gold": {
+    "ok": true,
+    "n_records": 30,
+    "codigos_gold_ausentes_catalogo": []
+  },
+  "reglas_especiales": {
+    "n_reglas": 13,
+    "codigos_con_regla": [
+      "AC.09",
+      "ANC.01",
+      "ANC.02",
+      "ANC.03",
+      "ANC.08",
+      "PAT.05",
+      "PAT.08",
+      "PAT.10",
+      "PAT.11",
+      "PC.02",
+      "PC.03",
+      "PC.04",
+      "PC.07"
+    ]
+  }
+}
