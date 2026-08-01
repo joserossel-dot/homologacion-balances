@@ -1,0 +1,149 @@
+{
+  "family_id": "cluster_19adadba25",
+  "family_name": "dic agr tuqui",
+  "layout": "HORIZONTAL",
+  "document_type": "BALANCE",
+  "code_pattern": "COMPACTO",
+  "numeric_pattern": "ENTERO",
+  "header_rows": 2,
+  "table_start_row": 2,
+  "table_end_row": 164,
+  "columns": [
+    {
+      "key": "CODIGO",
+      "label": "Código",
+      "side": "left",
+      "position": 0,
+      "detection_rate": 1.0,
+      "docs": 1
+    },
+    {
+      "key": "NOMBRE",
+      "label": "Nombre",
+      "side": "left",
+      "position": 1,
+      "detection_rate": 1.0,
+      "docs": 1
+    },
+    {
+      "key": "PASIVO",
+      "label": "Pasivo",
+      "side": "right",
+      "position": 3,
+      "detection_rate": 1.0,
+      "docs": 1
+    },
+    {
+      "key": "PERDIDA",
+      "label": "Pérdidas",
+      "side": "right",
+      "position": 2,
+      "detection_rate": 1.0,
+      "docs": 1
+    },
+    {
+      "key": "GANANCIA",
+      "label": "Ganancias",
+      "side": "right",
+      "position": 1,
+      "detection_rate": 1.0,
+      "docs": 1
+    }
+  ],
+  "code_column": {
+    "key": "CODIGO",
+    "label": "Código",
+    "side": "left",
+    "position": 0,
+    "detection_rate": 1.0,
+    "docs": 1
+  },
+  "name_column": {
+    "key": "NOMBRE",
+    "label": "Nombre",
+    "side": "left",
+    "position": 1,
+    "detection_rate": 1.0,
+    "docs": 1
+  },
+  "amount_columns": [
+    {
+      "key": "PASIVO",
+      "label": "Pasivo",
+      "side": "right",
+      "position": 3,
+      "detection_rate": 1.0,
+      "docs": 1
+    },
+    {
+      "key": "PERDIDA",
+      "label": "Pérdidas",
+      "side": "right",
+      "position": 2,
+      "detection_rate": 1.0,
+      "docs": 1
+    },
+    {
+      "key": "GANANCIA",
+      "label": "Ganancias",
+      "side": "right",
+      "position": 1,
+      "detection_rate": 1.0,
+      "docs": 1
+    }
+  ],
+  "totals_pattern": "bottom:3col",
+  "total_keywords": [
+    "total"
+  ],
+  "summary_position": "BOTTOM",
+  "confidence": 0.8417,
+  "n_documents": 1,
+  "docs_total": 2,
+  "docs_outliers": 1,
+  "header": {
+    "rows": 2,
+    "row_counts": {
+      "2": 1
+    },
+    "keywords": [
+      "agricola",
+      "tuqui",
+      "ocho",
+      "columnas",
+      "pesos",
+      "fecha",
+      "contabilidad",
+      "hora"
+    ]
+  },
+  "footer": {
+    "trailing_rows": 0,
+    "totals_position": "BOTTOM",
+    "total_keywords": [
+      "total"
+    ],
+    "keywords": [
+      "cambio",
+      "leasing",
+      "forware",
+      "total",
+      "acumulado",
+      "perdida"
+    ]
+  },
+  "validation": {
+    "docs_validated": 2,
+    "docs_with_rows": 2,
+    "coverage": 1.0,
+    "precision": 0.7546,
+    "columns_rate": 1.0,
+    "columns_detected": 5.0,
+    "columns_expected": 5,
+    "total_account_rows": 246,
+    "total_rows_in_table": 246,
+    "total_rows_lost": 0,
+    "header_match_rate": 1.0
+  },
+  "generated_at": ""
+}

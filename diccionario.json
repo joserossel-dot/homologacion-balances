@@ -4128,5 +4128,145 @@
     "cuenta_original": "Créditos Bancarios L/P",
     "codigo_estandar": "PNC.01",
     "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Caja",
+    "codigo_estandar": "AC.01",
+    "fuente": "validacion_humana_lote"
+  },
+  {
+    "cuenta_original": "Security",
+    "codigo_estandar": "AC.01",
+    "fuente": "validacion_humana_lote"
+  },
+  {
+    "cuenta_original": "Safra National Bank of N. York",
+    "codigo_estandar": "AC.01",
+    "fuente": "validacion_humana_lote"
+  },
+  {
+    "cuenta_original": "Fondo de Inversiones",
+    "codigo_estandar": "AC.02",
+    "fuente": "validacion_humana_lote"
+  },
+  {
+    "cuenta_original": "Fondo de Inversion Cap.12 USD",
+    "codigo_estandar": "AC.02",
+    "fuente": "validacion_humana_lote"
+  },
+  {
+    "cuenta_original": "101.1101 Anticipo Proveedores",
+    "codigo_estandar": "AC.08",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Impuesto Unico Trabajadores",
+    "codigo_estandar": "PC.05",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Corrección monetaria",
+    "codigo_estandar": "ER.14",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "4.02,1201 Diferencias de cambio Perdida s72",
+    "codigo_estandar": "ER.15",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "IMPUESTO UNICO TRABAJADORES",
+    "codigo_estandar": "PC.05",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "PATENTES Y CONTRIBUCIONES",
+    "codigo_estandar": "ER.04",
+    "fuente": "validacion_humana_lote"
+  },
+  {
+    "cuenta_original": "MULTAS Y COSTAS",
+    "codigo_estandar": "ER.04",
+    "fuente": "validacion_humana_lote"
+  },
+  {
+    "cuenta_original": "PATENTES Y CONTRIBUCIONES",
+    "codigo_estandar": "ER.04",
+    "fuente": "validacion_humana_lote"
+  },
+  {
+    "cuenta_original": "IVA NO RECUPERABLE",
+    "codigo_estandar": "ER.04",
+    "fuente": "validacion_humana_lote"
+  },
+  {
+    "cuenta_original": "IVA NO RECUPERABLE",
+    "codigo_estandar": "ER.04",
+    "fuente": "validacion_humana_lote"
+  },
+  {
+    "cuenta_original": "INGRESO POR DONACIONES",
+    "codigo_estandar": "ER.13",
+    "fuente": "validacion_humana_lote"
+  },
+  {
+    "cuenta_original": "APORTE NESTLE",
+    "codigo_estandar": "ER.13",
+    "fuente": "validacion_humana_lote"
+  },
+  {
+    "cuenta_original": "AUSPICIOS",
+    "codigo_estandar": "ER.13",
+    "fuente": "validacion_humana_lote"
+  },
+  {
+    "cuenta_original": "GASTOS POR DEPRECIACION",
+    "codigo_estandar": "ER.07",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "ITAU",
+    "codigo_estandar": "AC.01",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Iva Crédito Fiscal",
+    "codigo_estandar": "AC.08",
+    "fuente": "validacion_humana_lote"
+  },
+  {
+    "cuenta_original": "Remanente Crédito Fiscal",
+    "codigo_estandar": "AC.08",
+    "fuente": "validacion_humana_lote"
+  },
+  {
+    "cuenta_original": "Iva Débito Fiscal",
+    "codigo_estandar": "PC.05",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Instituto Prevision Social",
+    "codigo_estandar": "PC.06",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Revalorización Capital Propio",
+    "codigo_estandar": "PAT.02",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "É 1.02.04,03 — Herramientas en Consignacion",
+    "codigo_estandar": "ANC.01",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Corrección monetaria",
+    "codigo_estandar": "ER.14",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Impuesto Unico Trabajadores",
+    "codigo_estandar": "PC.05",
+    "fuente": "validacion_humana"
   }
 ]

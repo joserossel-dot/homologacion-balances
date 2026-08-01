@@ -1,0 +1,237 @@
+{
+  "family_id": "cluster_2fe677d346",
+  "family_name": "Familia Inv.JIM",
+  "layout": "VERTICAL",
+  "document_type": "BALANCE",
+  "code_pattern": "PUNTO",
+  "numeric_pattern": "ENTERO",
+  "header_rows": 4,
+  "table_start_row": 4,
+  "table_end_row": 33,
+  "columns": [
+    {
+      "key": "CODIGO",
+      "label": "Código",
+      "side": "left",
+      "position": 0,
+      "detection_rate": 1.0,
+      "docs": 11
+    },
+    {
+      "key": "NOMBRE",
+      "label": "Nombre",
+      "side": "left",
+      "position": 1,
+      "detection_rate": 1.0,
+      "docs": 11
+    },
+    {
+      "key": "ACTIVO",
+      "label": "Activo",
+      "side": "right",
+      "position": 8,
+      "detection_rate": 1.0,
+      "docs": 11
+    },
+    {
+      "key": "PASIVO",
+      "label": "Pasivo",
+      "side": "right",
+      "position": 7,
+      "detection_rate": 1.0,
+      "docs": 11
+    },
+    {
+      "key": "PERDIDA",
+      "label": "Pérdidas",
+      "side": "right",
+      "position": 6,
+      "detection_rate": 1.0,
+      "docs": 11
+    },
+    {
+      "key": "GANANCIA",
+      "label": "Ganancias",
+      "side": "right",
+      "position": 5,
+      "detection_rate": 1.0,
+      "docs": 11
+    },
+    {
+      "key": "MONTO",
+      "label": "Monto",
+      "side": "right",
+      "position": 4,
+      "detection_rate": 1.0,
+      "docs": 11
+    },
+    {
+      "key": "MONTO",
+      "label": "Monto",
+      "side": "right",
+      "position": 3,
+      "detection_rate": 1.0,
+      "docs": 11
+    },
+    {
+      "key": "MONTO",
+      "label": "Monto",
+      "side": "right",
+      "position": 2,
+      "detection_rate": 1.0,
+      "docs": 11
+    },
+    {
+      "key": "MONTO",
+      "label": "Monto",
+      "side": "right",
+      "position": 1,
+      "detection_rate": 1.0,
+      "docs": 11
+    }
+  ],
+  "code_column": {
+    "key": "CODIGO",
+    "label": "Código",
+    "side": "left",
+    "position": 0,
+    "detection_rate": 1.0,
+    "docs": 11
+  },
+  "name_column": {
+    "key": "NOMBRE",
+    "label": "Nombre",
+    "side": "left",
+    "position": 1,
+    "detection_rate": 1.0,
+    "docs": 11
+  },
+  "amount_columns": [
+    {
+      "key": "ACTIVO",
+      "label": "Activo",
+      "side": "right",
+      "position": 8,
+      "detection_rate": 1.0,
+      "docs": 11
+    },
+    {
+      "key": "PASIVO",
+      "label": "Pasivo",
+      "side": "right",
+      "position": 7,
+      "detection_rate": 1.0,
+      "docs": 11
+    },
+    {
+      "key": "PERDIDA",
+      "label": "Pérdidas",
+      "side": "right",
+      "position": 6,
+      "detection_rate": 1.0,
+      "docs": 11
+    },
+    {
+      "key": "GANANCIA",
+      "label": "Ganancias",
+      "side": "right",
+      "position": 5,
+      "detection_rate": 1.0,
+      "docs": 11
+    },
+    {
+      "key": "MONTO",
+      "label": "Monto",
+      "side": "right",
+      "position": 4,
+      "detection_rate": 1.0,
+      "docs": 11
+    },
+    {
+      "key": "MONTO",
+      "label": "Monto",
+      "side": "right",
+      "position": 3,
+      "detection_rate": 1.0,
+      "docs": 11
+    },
+    {
+      "key": "MONTO",
+      "label": "Monto",
+      "side": "right",
+      "position": 2,
+      "detection_rate": 1.0,
+      "docs": 11
+    },
+    {
+      "key": "MONTO",
+      "label": "Monto",
+      "side": "right",
+      "position": 1,
+      "detection_rate": 1.0,
+      "docs": 11
+    }
+  ],
+  "totals_pattern": "bottom:8col",
+  "total_keywords": [
+    "total",
+    "utilidad",
+    "sub-totales"
+  ],
+  "summary_position": "BOTTOM",
+  "confidence": 0.8258,
+  "n_documents": 11,
+  "docs_total": 48,
+  "docs_outliers": 37,
+  "header": {
+    "rows": 4,
+    "row_counts": {
+      "4": 5,
+      "1": 5,
+      "2": 1
+    },
+    "keywords": [
+      "fecha",
+      "modelo",
+      "libros",
+      "legales",
+      "cuenta",
+      "nombre",
+      "hora",
+      "enero"
+    ]
+  },
+  "footer": {
+    "trailing_rows": 1,
+    "totals_position": "BOTTOM",
+    "total_keywords": [
+      "total",
+      "utilidad",
+      "sub-totales"
+    ],
+    "keywords": [
+      "total",
+      "utilidad",
+      "perdida",
+      "gastos",
+      "financieros",
+      "totales",
+      "depreciacion",
+      "ejercicio"
+    ]
+  },
+  "validation": {
+    "docs_validated": 48,
+    "docs_with_rows": 48,
+    "coverage": 0.6597,
+    "precision": 0.7382,
+    "columns_rate": 0.675,
+    "columns_detected": 6.75,
+    "columns_expected": 10,
+    "total_account_rows": 2843,
+    "total_rows_in_table": 1063,
+    "total_rows_lost": 1780,
+    "header_match_rate": 0.125
+  },
+  "generated_at": ""
+}

@@ -1,0 +1,133 @@
+{
+  "family_id": "cluster_881f5681cb",
+  "family_name": "JGTc",
+  "layout": "VERTICAL",
+  "document_type": "ESTADO_PATRIMONIO",
+  "code_pattern": "COMPACTO",
+  "numeric_pattern": "ENTERO",
+  "header_rows": 2,
+  "table_start_row": 2,
+  "table_end_row": 144,
+  "columns": [
+    {
+      "key": "CODIGO",
+      "label": "Código",
+      "side": "left",
+      "position": 0,
+      "detection_rate": 1.0,
+      "docs": 2
+    },
+    {
+      "key": "NOMBRE",
+      "label": "Nombre",
+      "side": "left",
+      "position": 1,
+      "detection_rate": 1.0,
+      "docs": 2
+    },
+    {
+      "key": "PERDIDA",
+      "label": "Pérdidas",
+      "side": "right",
+      "position": 2,
+      "detection_rate": 1.0,
+      "docs": 2
+    },
+    {
+      "key": "GANANCIA",
+      "label": "Ganancias",
+      "side": "right",
+      "position": 1,
+      "detection_rate": 1.0,
+      "docs": 2
+    }
+  ],
+  "code_column": {
+    "key": "CODIGO",
+    "label": "Código",
+    "side": "left",
+    "position": 0,
+    "detection_rate": 1.0,
+    "docs": 2
+  },
+  "name_column": {
+    "key": "NOMBRE",
+    "label": "Nombre",
+    "side": "left",
+    "position": 1,
+    "detection_rate": 1.0,
+    "docs": 2
+  },
+  "amount_columns": [
+    {
+      "key": "PERDIDA",
+      "label": "Pérdidas",
+      "side": "right",
+      "position": 2,
+      "detection_rate": 1.0,
+      "docs": 2
+    },
+    {
+      "key": "GANANCIA",
+      "label": "Ganancias",
+      "side": "right",
+      "position": 1,
+      "detection_rate": 1.0,
+      "docs": 2
+    }
+  ],
+  "totals_pattern": "top:2col",
+  "total_keywords": [
+    "total",
+    "utilidad",
+    "resultado"
+  ],
+  "summary_position": "TOP",
+  "confidence": 0.7833,
+  "n_documents": 2,
+  "docs_total": 4,
+  "docs_outliers": 2,
+  "header": {
+    "rows": 2,
+    "row_counts": {
+      "2": 2
+    },
+    "keywords": [
+      "joaquin",
+      "garcia",
+      "tagle",
+      "diciembre",
+      "reajustado",
+      "activos",
+      "pasivos",
+      "activo"
+    ]
+  },
+  "footer": {
+    "trailing_rows": 0,
+    "totals_position": "TOP",
+    "total_keywords": [
+      "total",
+      "utilidad",
+      "resultado"
+    ],
+    "keywords": [
+      "impto",
+      "pagar"
+    ]
+  },
+  "validation": {
+    "docs_validated": 4,
+    "docs_with_rows": 4,
+    "coverage": 0.875,
+    "precision": 0.4528,
+    "columns_rate": 0.75,
+    "columns_detected": 3.0,
+    "columns_expected": 4,
+    "total_account_rows": 262,
+    "total_rows_in_table": 259,
+    "total_rows_lost": 3,
+    "header_match_rate": 0.5
+  },
+  "generated_at": ""
+}

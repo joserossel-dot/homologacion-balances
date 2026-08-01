@@ -13,13 +13,13 @@ class BalanceInterpreter:
     @property
     def nature(self) -> AccountNature:
         a = self._account.amounts
-        if a.assets and a.assets > 0:
+        if a.assets is not None:
             return AccountNature.ASSET
-        if a.liabilities and a.liabilities > 0:
+        if a.liabilities is not None:
             return AccountNature.LIABILITY
-        if a.losses and a.losses > 0:
+        if a.losses is not None:
             return AccountNature.LOSS
-        if a.profits and a.profits > 0:
+        if a.profits is not None:
             return AccountNature.PROFIT
         return AccountNature.UNKNOWN
 

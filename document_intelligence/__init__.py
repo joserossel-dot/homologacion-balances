@@ -10,6 +10,14 @@ Uso básico:
     engine = DocumentIntelligence()
     report = engine.analyze("ruta/al/documento.pdf")
     print(report.summary())
+
+Sprint 30 — Nueva capa de detección de formato:
+
+    from document_intelligence import FormatAnalyzer
+
+    analyzer = FormatAnalyzer()
+    sig = analyzer.analyze_text(text)
+    print(sig.summary())
 """
 
 from __future__ import annotations
@@ -17,11 +25,73 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from .analyzer import FormatAnalyzer
+from .context import DocumentProcessingContext, analyze_document_preview
+from .detector import (
+    BaseDetector,
+    CodePatternDetector,
+    ColumnDetector,
+    DocumentTypeDetector,
+    HeaderDetector,
+    LayoutDetector,
+    NumericPatternDetector,
+)
+from .factory import ExtractorFactory, ExtractorType
+from .metrics import DetectionMetrics, MetricsCollector
+from .knowledge import (
+    Cluster,
+    DocumentFingerprint,
+    DocumentKnowledgeBase,
+    MatchResult,
+    Matcher,
+    build_centroid,
+    cluster_fingerprints,
+    compute_similarity,
+    compute_statistics,
+)
+from .mining import (
+    DocumentFamily,
+    DocumentRecord,
+    Representative,
+    SimilarityMatrix,
+    build_similarity_matrix,
+    coverage_by_top_families,
+    detect_families,
+    detect_quality_issues,
+    fingerprint_similarity,
+    recommend_extractors,
+    run_mining_analysis,
+    select_representatives,
+    write_csvs,
+    write_dashboard_report,
+)
+from .extractors import (
+    ExtractorResult,
+    SpecializedExtractor,
+    SpecializedExtractorFactory,
+    UniversalExtractor,
+    get_extractor,
+    get_extractor_for_family,
+    instantiate,
+    list_extractors,
+    register_extractor,
+    register_extractor_class,
+)
 from .models import (
-    DocumentType, Family, Complexity, Recommendation, ParserName,
-    DocumentProfile, DocumentClassification, FamilyClassification,
-    TemplatePrediction, ParserRecommendation, ValidationRecommendation,
-    ConfidencePrediction, CoveragePrediction, ProcessingRecommendation,
+    DocumentType,
+    Family,
+    Complexity,
+    Recommendation,
+    ParserName,
+    DocumentProfile,
+    DocumentClassification,
+    FamilyClassification,
+    TemplatePrediction,
+    ParserRecommendation,
+    ValidationRecommendation,
+    ConfidencePrediction,
+    CoveragePrediction,
+    ProcessingRecommendation,
     IntelligenceReport,
 )
 from .document_classifier import DocumentClassifier
@@ -31,16 +101,92 @@ from .parser_selector import ParserSelector
 from .validation_selector import ValidationSelector
 from .confidence_predictor import ConfidencePredictor
 from .recommendation_engine import RecommendationEngine
+from .repository import FormatRepository
+from .signature import (
+    CodePattern,
+    ColumnType,
+    FormatSignature,
+    LayoutType,
+    NumericPattern,
+)
 from .statistics import DocumentIntelligenceStats
 
 __all__ = [
     "DocumentIntelligence",
     "DocumentIntelligenceStats",
-    # Models
-    "DocumentType", "Family", "Complexity", "Recommendation", "ParserName",
-    "DocumentProfile", "DocumentClassification", "FamilyClassification",
-    "TemplatePrediction", "ParserRecommendation", "ValidationRecommendation",
-    "ConfidencePrediction", "CoveragePrediction", "ProcessingRecommendation",
+    # Sprint 30
+    "FormatAnalyzer",
+    "FormatSignature",
+    "FormatRepository",
+    "ExtractorFactory",
+    "ExtractorType",
+    "DetectionMetrics",
+    "MetricsCollector",
+    # Sprint 31
+    "DocumentProcessingContext",
+    "analyze_document_preview",
+    # Sprint 32 — Document Knowledge Base
+    "DocumentFingerprint",
+    "Matcher",
+    "MatchResult",
+    "compute_similarity",
+    "Cluster",
+    "build_centroid",
+    "cluster_fingerprints",
+    "DocumentKnowledgeBase",
+    "compute_statistics",
+    # Sprint 33 — Data Mining del DKB
+    "DocumentRecord",
+    "DocumentFamily",
+    "Representative",
+    "SimilarityMatrix",
+    "fingerprint_similarity",
+    "build_similarity_matrix",
+    "detect_families",
+    "select_representatives",
+    "coverage_by_top_families",
+    "detect_quality_issues",
+    "recommend_extractors",
+    "run_mining_analysis",
+    "write_csvs",
+    "write_dashboard_report",
+    # Sprint 34 — Extractores especializados (arquitectura)
+    "ExtractorResult",
+    "SpecializedExtractor",
+    "SpecializedExtractorFactory",
+    "UniversalExtractor",
+    "register_extractor",
+    "register_extractor_class",
+    "get_extractor",
+    "get_extractor_for_family",
+    "list_extractors",
+    "instantiate",
+    "BaseDetector",
+    "HeaderDetector",
+    "LayoutDetector",
+    "ColumnDetector",
+    "CodePatternDetector",
+    "NumericPatternDetector",
+    "DocumentTypeDetector",
+    "CodePattern",
+    "ColumnType",
+    "LayoutType",
+    "NumericPattern",
+    # Legacy models
+    "DocumentType",
+    "Family",
+    "Complexity",
+    "Recommendation",
+    "ParserName",
+    "DocumentProfile",
+    "DocumentClassification",
+    "FamilyClassification",
+    "TemplatePrediction",
+    "ParserRecommendation",
+    "ValidationRecommendation",
+    "ConfidencePrediction",
+    "CoveragePrediction",
+    "ProcessingRecommendation",
     "IntelligenceReport",
 ]
 

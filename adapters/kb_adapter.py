@@ -97,7 +97,7 @@ class KBAdapter:
             if hasattr(account_tipo, "value"):
                 account_tipo = account_tipo.value
 
-            if classification_amount is None or classification_amount == 0:
+            if classification_amount is None:
                 classified.append({
                     "account_code": ab.account_code,
                     "account_name": ab.account_name,

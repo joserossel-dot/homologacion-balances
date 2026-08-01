@@ -1,0 +1,145 @@
+{
+  "family_id": "cluster_8bfff49a7e",
+  "family_name": "Familia Pre VFCH Dic v31.03",
+  "layout": "VERTICAL",
+  "document_type": "BALANCE",
+  "code_pattern": "COMPACTO",
+  "numeric_pattern": "CHILENO",
+  "header_rows": 3,
+  "table_start_row": 3,
+  "table_end_row": 39,
+  "columns": [
+    {
+      "key": "NOMBRE",
+      "label": "Nombre",
+      "side": "left",
+      "position": 0,
+      "detection_rate": 1.0,
+      "docs": 4
+    },
+    {
+      "key": "PASIVO",
+      "label": "Pasivo",
+      "side": "right",
+      "position": 3,
+      "detection_rate": 1.0,
+      "docs": 4
+    },
+    {
+      "key": "PERDIDA",
+      "label": "Pérdidas",
+      "side": "right",
+      "position": 2,
+      "detection_rate": 1.0,
+      "docs": 4
+    },
+    {
+      "key": "GANANCIA",
+      "label": "Ganancias",
+      "side": "right",
+      "position": 1,
+      "detection_rate": 1.0,
+      "docs": 4
+    }
+  ],
+  "code_column": null,
+  "name_column": {
+    "key": "NOMBRE",
+    "label": "Nombre",
+    "side": "left",
+    "position": 0,
+    "detection_rate": 1.0,
+    "docs": 4
+  },
+  "amount_columns": [
+    {
+      "key": "PASIVO",
+      "label": "Pasivo",
+      "side": "right",
+      "position": 3,
+      "detection_rate": 1.0,
+      "docs": 4
+    },
+    {
+      "key": "PERDIDA",
+      "label": "Pérdidas",
+      "side": "right",
+      "position": 2,
+      "detection_rate": 1.0,
+      "docs": 4
+    },
+    {
+      "key": "GANANCIA",
+      "label": "Ganancias",
+      "side": "right",
+      "position": 1,
+      "detection_rate": 1.0,
+      "docs": 4
+    }
+  ],
+  "totals_pattern": "bottom:3col",
+  "total_keywords": [
+    "utilidad",
+    "subtotales",
+    "sumas iguales",
+    "total",
+    "resultado"
+  ],
+  "summary_position": "BOTTOM",
+  "confidence": 0.7778,
+  "n_documents": 4,
+  "docs_total": 23,
+  "docs_outliers": 19,
+  "header": {
+    "rows": 3,
+    "row_counts": {
+      "3": 2,
+      "1": 2
+    },
+    "keywords": [
+      "inversiones",
+      "dalmacia",
+      "borgoño",
+      "piso",
+      "ejercicio",
+      "comprendido",
+      "entre",
+      "contable"
+    ]
+  },
+  "footer": {
+    "trailing_rows": 0,
+    "totals_position": "BOTTOM",
+    "total_keywords": [
+      "utilidad",
+      "subtotales",
+      "sumas iguales",
+      "total",
+      "resultado"
+    ],
+    "keywords": [
+      "oscar",
+      "rojas",
+      "firma",
+      "contador",
+      "auditor",
+      "legal",
+      "dalmacia",
+      "segunda"
+    ]
+  },
+  "validation": {
+    "docs_validated": 23,
+    "docs_with_rows": 23,
+    "coverage": 0.5547,
+    "precision": 0.7156,
+    "columns_rate": 0.9565,
+    "columns_detected": 3.83,
+    "columns_expected": 4,
+    "total_account_rows": 1918,
+    "total_rows_in_table": 609,
+    "total_rows_lost": 1309,
+    "header_match_rate": 0.2609
+  },
+  "generated_at": ""
+}

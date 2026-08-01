@@ -430,7 +430,9 @@ class HomologationPipeline:
             )
             account_tipo = tipo_result.account_type.value
 
-            if classification_amount is None or classification_amount == 0:
+            # None significa ausencia de información.
+            # Un saldo 0.0 puede tener cuenta válida y debe clasificarse.
+            if classification_amount is None:
                 ignored.append({
                     "account_code": ab.account_code,
                     "account_name": ab.account_name,

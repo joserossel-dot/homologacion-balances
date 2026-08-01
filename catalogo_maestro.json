@@ -9,7 +9,9 @@
     "es_deuda_financiera": false,
     "es_activo_liquido": true,
     "afecta_ebitda": false,
-    "descripcion": "Efectivo disponible en caja física y saldos en cuentas corrientes, cuentas vista y depósitos a la vista en bancos."
+    "descripcion": "Efectivo disponible en caja física y saldos en cuentas corrientes, cuentas vista y depósitos a la vista en bancos.",
+    "clasificable": true,
+    "grupo_presentacion": "Activos"
   },
   "AC.02": {
     "codigo_estandar": "AC.02",
@@ -21,7 +23,9 @@
     "es_deuda_financiera": false,
     "es_activo_liquido": true,
     "afecta_ebitda": false,
-    "descripcion": "Instrumentos financieros de alta liquidez con vencimiento menor a 90 días: DAP, fondos mutuos, pactos de retrocompra."
+    "descripcion": "Instrumentos financieros de alta liquidez con vencimiento menor a 90 días: DAP, fondos mutuos, pactos de retrocompra.",
+    "clasificable": true,
+    "grupo_presentacion": "Activos"
   },
   "AC.03": {
     "codigo_estandar": "AC.03",
@@ -33,7 +37,9 @@
     "es_deuda_financiera": false,
     "es_activo_liquido": false,
     "afecta_ebitda": false,
-    "descripcion": "Derechos de cobro por ventas del giro. Incluye facturas emitidas pendientes de cobro, neto de provisión incobrables."
+    "descripcion": "Derechos de cobro por ventas del giro. Incluye facturas emitidas pendientes de cobro, neto de provisión incobrables.",
+    "clasificable": true,
+    "grupo_presentacion": "Activos"
   },
   "AC.04": {
     "codigo_estandar": "AC.04",
@@ -45,7 +51,9 @@
     "es_deuda_financiera": false,
     "es_activo_liquido": false,
     "afecta_ebitda": false,
-    "descripcion": "Instrumentos de crédito documentados: letras, pagarés, cheques a fecha emitidos por clientes con vencimiento < 12 meses."
+    "descripcion": "Instrumentos de crédito documentados: letras, pagarés, cheques a fecha emitidos por clientes con vencimiento < 12 meses.",
+    "clasificable": true,
+    "grupo_presentacion": "Activos"
   },
   "AC.05": {
     "codigo_estandar": "AC.05",
@@ -57,7 +65,9 @@
     "es_deuda_financiera": false,
     "es_activo_liquido": false,
     "afecta_ebitda": false,
-    "descripcion": "Bienes físicos destinados a la venta o producción: mercaderías, materias primas, productos en proceso y terminados."
+    "descripcion": "Bienes físicos destinados a la venta o producción: mercaderías, materias primas, productos en proceso y terminados.",
+    "clasificable": true,
+    "grupo_presentacion": "Activos"
   },
   "AC.06": {
     "codigo_estandar": "AC.06",
@@ -69,7 +79,9 @@
     "es_deuda_financiera": false,
     "es_activo_liquido": false,
     "afecta_ebitda": false,
-    "descripcion": "Derechos de cobro a empresas del mismo grupo económico con vencimiento dentro de 12 meses."
+    "descripcion": "Derechos de cobro a empresas del mismo grupo económico con vencimiento dentro de 12 meses.",
+    "clasificable": true,
+    "grupo_presentacion": "Activos"
   },
   "AC.06S": {
     "codigo_estandar": "AC.06S",
@@ -81,7 +93,9 @@
     "es_deuda_financiera": false,
     "es_activo_liquido": false,
     "afecta_ebitda": false,
-    "descripcion": "Cta. Cte. de socios en el activo: retiros, dividendos anticipados, distribuciones. CRITERIO CONSERVADOR: se descuenta del patrimonio para calcular ROE y endeudamiento."
+    "descripcion": "Cta. Cte. de socios en el activo: retiros, dividendos anticipados, distribuciones. CRITERIO CONSERVADOR: se descuenta del patrimonio para calcular ROE y endeudamiento.",
+    "clasificable": true,
+    "grupo_presentacion": "Activos"
   },
   "AC.07": {
     "codigo_estandar": "AC.07",
@@ -93,7 +107,9 @@
     "es_deuda_financiera": false,
     "es_activo_liquido": false,
     "afecta_ebitda": false,
-    "descripcion": "Otros activos corrientes: IVA crédito fiscal, PPM por recuperar, anticipos a proveedores, fondos por rendir, seguros anticipados."
+    "descripcion": "Otros activos corrientes: IVA crédito fiscal, PPM por recuperar, anticipos a proveedores, fondos por rendir, seguros anticipados.",
+    "clasificable": true,
+    "grupo_presentacion": "Activos"
   },
   "AC.08": {
     "codigo_estandar": "AC.08",
@@ -105,7 +121,9 @@
     "es_deuda_financiera": false,
     "es_activo_liquido": false,
     "afecta_ebitda": false,
-    "descripcion": "Activos corrientes no clasificados en categorías anteriores: impuesto diferido corriente, activos para la venta."
+    "descripcion": "Activos corrientes no clasificados en categorías anteriores: impuesto diferido corriente, activos para la venta.",
+    "clasificable": true,
+    "grupo_presentacion": "Activos"
   },
   "ANC.01": {
     "codigo_estandar": "ANC.01",
@@ -117,7 +135,9 @@
     "es_deuda_financiera": false,
     "es_activo_liquido": false,
     "afecta_ebitda": false,
-    "descripcion": "Bienes tangibles de uso duradero: terrenos, construcciones, maquinarias, vehículos, equipos. Se presenta neto de depreciación acumulada."
+    "descripcion": "Bienes tangibles de uso duradero: terrenos, construcciones, maquinarias, vehículos, equipos. Se presenta neto de depreciación acumulada.",
+    "clasificable": true,
+    "grupo_presentacion": "Activos"
   },
   "ANC.02": {
     "codigo_estandar": "ANC.02",
@@ -129,7 +149,9 @@
     "es_deuda_financiera": false,
     "es_activo_liquido": false,
     "afecta_ebitda": false,
-    "descripcion": "Bienes raíces mantenidos para obtener rentas de arrendamiento o plusvalía, no para uso propio ni venta normal."
+    "descripcion": "Bienes raíces mantenidos para obtener rentas de arrendamiento o plusvalía, no para uso propio ni venta normal.",
+    "clasificable": true,
+    "grupo_presentacion": "Activos"
   },
   "ANC.03": {
     "codigo_estandar": "ANC.03",
@@ -141,7 +163,9 @@
     "es_deuda_financiera": false,
     "es_activo_liquido": false,
     "afecta_ebitda": false,
-    "descripcion": "Activos sin sustancia física: marcas, patentes, licencias, software, derechos de llave, concesiones. Neto de amortización acumulada."
+    "descripcion": "Activos sin sustancia física: marcas, patentes, licencias, software, derechos de llave, concesiones. Neto de amortización acumulada.",
+    "clasificable": true,
+    "grupo_presentacion": "Activos"
   },
   "ANC.04": {
     "codigo_estandar": "ANC.04",
@@ -153,7 +177,9 @@
     "es_deuda_financiera": false,
     "es_activo_liquido": false,
     "afecta_ebitda": false,
-    "descripcion": "Participaciones en sociedades (no relacionadas) mantenidas con carácter permanente: acciones, cuotas de fondos."
+    "descripcion": "Participaciones en sociedades (no relacionadas) mantenidas con carácter permanente: acciones, cuotas de fondos.",
+    "clasificable": true,
+    "grupo_presentacion": "Activos"
   },
   "ANC.05": {
     "codigo_estandar": "ANC.05",
@@ -165,7 +191,9 @@
     "es_deuda_financiera": false,
     "es_activo_liquido": false,
     "afecta_ebitda": false,
-    "descripcion": "Derechos de cobro a empresas del mismo grupo económico con vencimiento mayor a 12 meses."
+    "descripcion": "Derechos de cobro a empresas del mismo grupo económico con vencimiento mayor a 12 meses.",
+    "clasificable": true,
+    "grupo_presentacion": "Activos"
   },
   "ANC.06": {
     "codigo_estandar": "ANC.06",
@@ -177,7 +205,9 @@
     "es_deuda_financiera": false,
     "es_activo_liquido": false,
     "afecta_ebitda": false,
-    "descripcion": "Activos no corrientes varios: impuesto diferido LP, depósitos en garantía, gastos pagados por anticipado LP."
+    "descripcion": "Activos no corrientes varios: impuesto diferido LP, depósitos en garantía, gastos pagados por anticipado LP.",
+    "clasificable": true,
+    "grupo_presentacion": "Activos"
   },
   "PC.01": {
     "codigo_estandar": "PC.01",
@@ -189,7 +219,9 @@
     "es_deuda_financiera": false,
     "es_activo_liquido": false,
     "afecta_ebitda": false,
-    "descripcion": "Obligaciones comerciales con proveedores del giro: facturas recibidas pendientes de pago, letras por pagar."
+    "descripcion": "Obligaciones comerciales con proveedores del giro: facturas recibidas pendientes de pago, letras por pagar.",
+    "clasificable": true,
+    "grupo_presentacion": "Pasivos"
   },
   "PC.02": {
     "codigo_estandar": "PC.02",
@@ -201,7 +233,9 @@
     "es_deuda_financiera": true,
     "es_activo_liquido": false,
     "afecta_ebitda": false,
-    "descripcion": "Deudas financieras con bancos e instituciones con vencimiento < 12 meses: créditos CP, líneas de crédito, sobregiros."
+    "descripcion": "Deudas financieras con bancos e instituciones con vencimiento < 12 meses: créditos CP, líneas de crédito, sobregiros.",
+    "clasificable": true,
+    "grupo_presentacion": "Pasivos"
   },
   "PC.03": {
     "codigo_estandar": "PC.03",
@@ -213,7 +247,9 @@
     "es_deuda_financiera": true,
     "es_activo_liquido": false,
     "afecta_ebitda": false,
-    "descripcion": "Cuotas de arrendamiento financiero (leasing) con vencimiento dentro de 12 meses."
+    "descripcion": "Cuotas de arrendamiento financiero (leasing) con vencimiento dentro de 12 meses.",
+    "clasificable": true,
+    "grupo_presentacion": "Pasivos"
   },
   "PC.04": {
     "codigo_estandar": "PC.04",
@@ -225,7 +261,9 @@
     "es_deuda_financiera": true,
     "es_activo_liquido": false,
     "afecta_ebitda": false,
-    "descripcion": "Obligaciones por cesión de facturas a empresas de factoring: anticipos recibidos por facturas descontadas."
+    "descripcion": "Obligaciones por cesión de facturas a empresas de factoring: anticipos recibidos por facturas descontadas.",
+    "clasificable": true,
+    "grupo_presentacion": "Pasivos"
   },
   "PC.05": {
     "codigo_estandar": "PC.05",
@@ -237,7 +275,9 @@
     "es_deuda_financiera": false,
     "es_activo_liquido": false,
     "afecta_ebitda": false,
-    "descripcion": "Obligaciones tributarias corrientes: IVA débito, impuesto a la renta, retenciones de segunda categoría, IUT."
+    "descripcion": "Obligaciones tributarias corrientes: IVA débito, impuesto a la renta, retenciones de segunda categoría, IUT.",
+    "clasificable": true,
+    "grupo_presentacion": "Pasivos"
   },
   "PC.06": {
     "codigo_estandar": "PC.06",
@@ -249,7 +289,9 @@
     "es_deuda_financiera": false,
     "es_activo_liquido": false,
     "afecta_ebitda": false,
-    "descripcion": "Obligaciones con trabajadores: sueldos, vacaciones, AFP, isapres, leyes sociales, finiquitos, indemnizaciones CP."
+    "descripcion": "Obligaciones con trabajadores: sueldos, vacaciones, AFP, isapres, leyes sociales, finiquitos, indemnizaciones CP.",
+    "clasificable": true,
+    "grupo_presentacion": "Pasivos"
   },
   "PC.07": {
     "codigo_estandar": "PC.07",
@@ -261,7 +303,9 @@
     "es_deuda_financiera": false,
     "es_activo_liquido": false,
     "afecta_ebitda": false,
-    "descripcion": "Obligaciones con empresas del mismo grupo económico con vencimiento dentro de 12 meses."
+    "descripcion": "Obligaciones con empresas del mismo grupo económico con vencimiento dentro de 12 meses.",
+    "clasificable": true,
+    "grupo_presentacion": "Pasivos"
   },
   "PC.08": {
     "codigo_estandar": "PC.08",
@@ -273,7 +317,9 @@
     "es_deuda_financiera": false,
     "es_activo_liquido": false,
     "afecta_ebitda": false,
-    "descripcion": "Pasivos corrientes varios: anticipos de clientes, ingresos diferidos, provisiones, garantías recibidas."
+    "descripcion": "Pasivos corrientes varios: anticipos de clientes, ingresos diferidos, provisiones, garantías recibidas.",
+    "clasificable": true,
+    "grupo_presentacion": "Pasivos"
   },
   "PNC.01": {
     "codigo_estandar": "PNC.01",
@@ -285,7 +331,9 @@
     "es_deuda_financiera": true,
     "es_activo_liquido": false,
     "afecta_ebitda": false,
-    "descripcion": "Deudas financieras con bancos e instituciones con vencimiento mayor a 12 meses, neto de la porción corriente."
+    "descripcion": "Deudas financieras con bancos e instituciones con vencimiento mayor a 12 meses, neto de la porción corriente.",
+    "clasificable": true,
+    "grupo_presentacion": "Pasivos"
   },
   "PNC.02": {
     "codigo_estandar": "PNC.02",
@@ -297,7 +345,9 @@
     "es_deuda_financiera": true,
     "es_activo_liquido": false,
     "afecta_ebitda": false,
-    "descripcion": "Cuotas de arrendamiento financiero (leasing) con vencimiento mayor a 12 meses. Forma parte de la deuda financiera total."
+    "descripcion": "Cuotas de arrendamiento financiero (leasing) con vencimiento mayor a 12 meses. Forma parte de la deuda financiera total.",
+    "clasificable": true,
+    "grupo_presentacion": "Pasivos"
   },
   "PNC.03": {
     "codigo_estandar": "PNC.03",
@@ -309,7 +359,9 @@
     "es_deuda_financiera": true,
     "es_activo_liquido": false,
     "afecta_ebitda": false,
-    "descripcion": "Instrumentos de deuda emitidos en el mercado de capitales: bonos corporativos, bonos bancarios, efectos de comercio LP."
+    "descripcion": "Instrumentos de deuda emitidos en el mercado de capitales: bonos corporativos, bonos bancarios, efectos de comercio LP.",
+    "clasificable": true,
+    "grupo_presentacion": "Pasivos"
   },
   "PNC.04": {
     "codigo_estandar": "PNC.04",
@@ -321,7 +373,9 @@
     "es_deuda_financiera": false,
     "es_activo_liquido": false,
     "afecta_ebitda": false,
-    "descripcion": "Obligaciones con empresas del mismo grupo económico con vencimiento mayor a 12 meses."
+    "descripcion": "Obligaciones con empresas del mismo grupo económico con vencimiento mayor a 12 meses.",
+    "clasificable": true,
+    "grupo_presentacion": "Pasivos"
   },
   "PNC.05": {
     "codigo_estandar": "PNC.05",
@@ -333,7 +387,9 @@
     "es_deuda_financiera": false,
     "es_activo_liquido": false,
     "afecta_ebitda": false,
-    "descripcion": "Pasivos no corrientes varios: indemnización años de servicio (actuarial), impuesto diferido LP, otros LP."
+    "descripcion": "Pasivos no corrientes varios: indemnización años de servicio (actuarial), impuesto diferido LP, otros LP.",
+    "clasificable": true,
+    "grupo_presentacion": "Pasivos"
   },
   "PAT.01": {
     "codigo_estandar": "PAT.01",
@@ -345,7 +401,9 @@
     "es_deuda_financiera": false,
     "es_activo_liquido": false,
     "afecta_ebitda": false,
-    "descripcion": "Capital aportado por socios o accionistas: capital pagado, suscrito y pagado, aportes. Puede incluir revalorización del capital propio."
+    "descripcion": "Capital aportado por socios o accionistas: capital pagado, suscrito y pagado, aportes. Puede incluir revalorización del capital propio.",
+    "clasificable": true,
+    "grupo_presentacion": "Patrimonio"
   },
   "PAT.02": {
     "codigo_estandar": "PAT.02",
@@ -357,7 +415,9 @@
     "es_deuda_financiera": false,
     "es_activo_liquido": false,
     "afecta_ebitda": false,
-    "descripcion": "Reservas de utilidades: reserva legal (10%), reservas voluntarias, prima de emisión, revalorizaciones técnicas, ajustes IFRS."
+    "descripcion": "Reservas de utilidades: reserva legal (10%), reservas voluntarias, prima de emisión, revalorizaciones técnicas, ajustes IFRS.",
+    "clasificable": true,
+    "grupo_presentacion": "Patrimonio"
   },
   "PAT.03": {
     "codigo_estandar": "PAT.03",
@@ -369,7 +429,9 @@
     "es_deuda_financiera": false,
     "es_activo_liquido": false,
     "afecta_ebitda": false,
-    "descripcion": "Utilidades de ejercicios anteriores no distribuidas, incluyendo pérdidas acumuladas de años anteriores."
+    "descripcion": "Utilidades de ejercicios anteriores no distribuidas, incluyendo pérdidas acumuladas de años anteriores.",
+    "clasificable": true,
+    "grupo_presentacion": "Patrimonio"
   },
   "PAT.04": {
     "codigo_estandar": "PAT.04",
@@ -381,7 +443,9 @@
     "es_deuda_financiera": false,
     "es_activo_liquido": false,
     "afecta_ebitda": false,
-    "descripcion": "Resultado generado en el período actual antes de su distribución. Puede ser utilidad o pérdida."
+    "descripcion": "Resultado generado en el período actual antes de su distribución. Puede ser utilidad o pérdida.",
+    "clasificable": false,
+    "grupo_presentacion": "Patrimonio"
   },
   "ER.01": {
     "codigo_estandar": "ER.01",
@@ -393,7 +457,9 @@
     "es_deuda_financiera": false,
     "es_activo_liquido": false,
     "afecta_ebitda": true,
-    "descripcion": "Ingresos ordinarios por ventas de bienes o prestación de servicios del giro. Neto de devoluciones y descuentos."
+    "descripcion": "Ingresos ordinarios por ventas de bienes o prestación de servicios del giro. Neto de devoluciones y descuentos.",
+    "clasificable": true,
+    "grupo_presentacion": "Ingresos"
   },
   "ER.02": {
     "codigo_estandar": "ER.02",
@@ -405,7 +471,9 @@
     "es_deuda_financiera": false,
     "es_activo_liquido": false,
     "afecta_ebitda": true,
-    "descripcion": "Costo directo de los bienes vendidos o servicios prestados: materias primas, mano de obra directa, costos de producción."
+    "descripcion": "Costo directo de los bienes vendidos o servicios prestados: materias primas, mano de obra directa, costos de producción.",
+    "clasificable": true,
+    "grupo_presentacion": "Costos"
   },
   "ER.03": {
     "codigo_estandar": "ER.03",
@@ -417,7 +485,9 @@
     "es_deuda_financiera": false,
     "es_activo_liquido": false,
     "afecta_ebitda": false,
-    "descripcion": "Diferencia entre ventas y costo de ventas. Indica la rentabilidad bruta del negocio antes de gastos operacionales."
+    "descripcion": "Diferencia entre ventas y costo de ventas. Indica la rentabilidad bruta del negocio antes de gastos operacionales.",
+    "clasificable": false,
+    "grupo_presentacion": "Ingresos"
   },
   "ER.04": {
     "codigo_estandar": "ER.04",
@@ -429,7 +499,9 @@
     "es_deuda_financiera": false,
     "es_activo_liquido": false,
     "afecta_ebitda": true,
-    "descripcion": "Gastos del período vinculados a la gestión general: remuneraciones administrativas, arriendos, seguros, servicios de oficina."
+    "descripcion": "Gastos del período vinculados a la gestión general: remuneraciones administrativas, arriendos, seguros, servicios de oficina.",
+    "clasificable": true,
+    "grupo_presentacion": "Gastos"
   },
   "ER.05": {
     "codigo_estandar": "ER.05",
@@ -441,7 +513,9 @@
     "es_deuda_financiera": false,
     "es_activo_liquido": false,
     "afecta_ebitda": true,
-    "descripcion": "Gastos directamente vinculados a la comercialización: comisiones de venta, publicidad, marketing, flete de ventas."
+    "descripcion": "Gastos directamente vinculados a la comercialización: comisiones de venta, publicidad, marketing, flete de ventas.",
+    "clasificable": true,
+    "grupo_presentacion": "Gastos"
   },
   "ER.06": {
     "codigo_estandar": "ER.06",
@@ -453,7 +527,9 @@
     "es_deuda_financiera": false,
     "es_activo_liquido": false,
     "afecta_ebitda": false,
-    "descripcion": "Resultado antes de intereses, impuestos, depreciación y amortización. Indicador clave de generación de caja operacional."
+    "descripcion": "Resultado antes de intereses, impuestos, depreciación y amortización. Indicador clave de generación de caja operacional.",
+    "clasificable": false,
+    "grupo_presentacion": "Gastos"
   },
   "ER.07": {
     "codigo_estandar": "ER.07",
@@ -465,7 +541,9 @@
     "es_deuda_financiera": false,
     "es_activo_liquido": false,
     "afecta_ebitda": false,
-    "descripcion": "Cargo del período por depreciación de activo fijo y amortización de intangibles. No representa salida de caja."
+    "descripcion": "Cargo del período por depreciación de activo fijo y amortización de intangibles. No representa salida de caja.",
+    "clasificable": true,
+    "grupo_presentacion": "Gastos"
   },
   "ER.08": {
     "codigo_estandar": "ER.08",
@@ -477,7 +555,9 @@
     "es_deuda_financiera": false,
     "es_activo_liquido": false,
     "afecta_ebitda": false,
-    "descripcion": "Utilidad o pérdida generada exclusivamente por la operación del negocio, antes de gastos financieros e impuestos. EBIT."
+    "descripcion": "Utilidad o pérdida generada exclusivamente por la operación del negocio, antes de gastos financieros e impuestos. EBIT.",
+    "clasificable": false,
+    "grupo_presentacion": "Gastos"
   },
   "ER.09": {
     "codigo_estandar": "ER.09",
@@ -489,7 +569,9 @@
     "es_deuda_financiera": false,
     "es_activo_liquido": false,
     "afecta_ebitda": false,
-    "descripcion": "Costos financieros del período: intereses pagados por créditos bancarios, leasing, bonos y factoring. Excluido del EBITDA."
+    "descripcion": "Costos financieros del período: intereses pagados por créditos bancarios, leasing, bonos y factoring. Excluido del EBITDA.",
+    "clasificable": true,
+    "grupo_presentacion": "Gastos"
   },
   "ER.10": {
     "codigo_estandar": "ER.10",
@@ -501,7 +583,9 @@
     "es_deuda_financiera": false,
     "es_activo_liquido": false,
     "afecta_ebitda": false,
-    "descripcion": "Cargo por impuesto a la renta (primera categoría) del período, corriente y diferido."
+    "descripcion": "Cargo por impuesto a la renta (primera categoría) del período, corriente y diferido.",
+    "clasificable": true,
+    "grupo_presentacion": "Gastos"
   },
   "ER.11": {
     "codigo_estandar": "ER.11",
@@ -513,7 +597,9 @@
     "es_deuda_financiera": false,
     "es_activo_liquido": false,
     "afecta_ebitda": false,
-    "descripcion": "Resultado final del período después de todos los ingresos, costos, gastos e impuestos."
+    "descripcion": "Resultado final del período después de todos los ingresos, costos, gastos e impuestos.",
+    "clasificable": false,
+    "grupo_presentacion": "Patrimonio"
   },
   "AC.09": {
     "codigo_estandar": "AC.09",
@@ -525,7 +611,9 @@
     "es_deuda_financiera": false,
     "es_activo_liquido": false,
     "afecta_ebitda": false,
-    "descripcion": "Activos biológicos de realización dentro de 12 meses (plantas, animales). Valorados a valor razonable según IFRS. No equivale a inventario para efectos crediticios."
+    "descripcion": "Activos biológicos de realización dentro de 12 meses (plantas, animales). Valorados a valor razonable según IFRS. No equivale a inventario para efectos crediticios.",
+    "clasificable": true,
+    "grupo_presentacion": "Activos"
   },
   "ANC.07": {
     "codigo_estandar": "ANC.07",
@@ -537,7 +625,9 @@
     "es_deuda_financiera": false,
     "es_activo_liquido": false,
     "afecta_ebitda": false,
-    "descripcion": "Activos biológicos de largo plazo: plantaciones, viñedos, bosques, ganado reproductor. Valor razonable IFRS."
+    "descripcion": "Activos biológicos de largo plazo: plantaciones, viñedos, bosques, ganado reproductor. Valor razonable IFRS.",
+    "clasificable": true,
+    "grupo_presentacion": "Activos"
   },
   "ANC.08": {
     "codigo_estandar": "ANC.08",
@@ -549,7 +639,9 @@
     "es_deuda_financiera": false,
     "es_activo_liquido": false,
     "afecta_ebitda": false,
-    "descripcion": "Plusvalía surgida en combinaciones de negocios. No se amortiza; se testea por deterioro anual. Muchos bancos la descuentan del patrimonio tangible."
+    "descripcion": "Plusvalía surgida en combinaciones de negocios. No se amortiza; se testea por deterioro anual. Muchos bancos la descuentan del patrimonio tangible.",
+    "clasificable": true,
+    "grupo_presentacion": "Activos"
   },
   "PAT.05": {
     "codigo_estandar": "PAT.05",
@@ -561,7 +653,9 @@
     "es_deuda_financiera": false,
     "es_activo_liquido": false,
     "afecta_ebitda": false,
-    "descripcion": "Porción del patrimonio de subsidiarias consolidadas que no pertenece a la controladora. Solo en balances consolidados."
+    "descripcion": "Porción del patrimonio de subsidiarias consolidadas que no pertenece a la controladora. Solo en balances consolidados.",
+    "clasificable": true,
+    "grupo_presentacion": "Patrimonio"
   },
   "ER.12": {
     "codigo_estandar": "ER.12",
@@ -573,7 +667,9 @@
     "es_deuda_financiera": false,
     "es_activo_liquido": false,
     "afecta_ebitda": false,
-    "descripcion": "Ingresos por intereses de depósitos, inversiones financieras y cuentas por cobrar. Excluido del EBITDA por ser no operacional."
+    "descripcion": "Ingresos por intereses de depósitos, inversiones financieras y cuentas por cobrar. Excluido del EBITDA por ser no operacional.",
+    "clasificable": true,
+    "grupo_presentacion": "Otros ingresos"
   },
   "ER.13": {
     "codigo_estandar": "ER.13",
@@ -585,7 +681,9 @@
     "es_deuda_financiera": false,
     "es_activo_liquido": false,
     "afecta_ebitda": false,
-    "descripcion": "Resultados no operacionales varios: utilidad/pérdida por venta de activo fijo, castigos, recuperaciones, multas. Excluido del EBITDA."
+    "descripcion": "Resultados no operacionales varios: utilidad/pérdida por venta de activo fijo, castigos, recuperaciones, multas. Excluido del EBITDA.",
+    "clasificable": true,
+    "grupo_presentacion": "Otros ingresos"
   },
   "ER.14": {
     "codigo_estandar": "ER.14",
@@ -597,7 +695,9 @@
     "es_deuda_financiera": false,
     "es_activo_liquido": false,
     "afecta_ebitda": false,
-    "descripcion": "Corrección monetaria (revalorización capital propio) y unidades de reajuste (UF, UTM). Puede ser positivo o negativo. Excluido del EBITDA."
+    "descripcion": "Corrección monetaria (revalorización capital propio) y unidades de reajuste (UF, UTM). Puede ser positivo o negativo. Excluido del EBITDA.",
+    "clasificable": true,
+    "grupo_presentacion": "Otros egresos"
   },
   "ER.15": {
     "codigo_estandar": "ER.15",
@@ -609,7 +709,9 @@
     "es_deuda_financiera": false,
     "es_activo_liquido": false,
     "afecta_ebitda": false,
-    "descripcion": "Resultado por variación del tipo de cambio sobre activos y pasivos en moneda extranjera. Excluido del EBITDA por ser volátil y no operacional."
+    "descripcion": "Resultado por variación del tipo de cambio sobre activos y pasivos en moneda extranjera. Excluido del EBITDA por ser volátil y no operacional.",
+    "clasificable": true,
+    "grupo_presentacion": "Otros egresos"
   },
   "ER.16": {
     "codigo_estandar": "ER.16",
@@ -621,6 +723,134 @@
     "es_deuda_financiera": false,
     "es_activo_liquido": false,
     "afecta_ebitda": false,
-    "descripcion": "Participación proporcional en el resultado de empresas asociadas contabilizadas por el método de la participación. Excluido del EBITDA."
+    "descripcion": "Participación proporcional en el resultado de empresas asociadas contabilizadas por el método de la participación. Excluido del EBITDA.",
+    "clasificable": true,
+    "grupo_presentacion": "Otros ingresos"
+  },
+  "PAT.06": {
+    "codigo_estandar": "PAT.06",
+    "nombre_estandar": "Capital Suscrito",
+    "categoria": "patrimonio",
+    "tipo_estado": "balance",
+    "naturaleza": "acreedora",
+    "signo_normal": 1,
+    "es_deuda_financiera": false,
+    "es_activo_liquido": false,
+    "afecta_ebitda": false,
+    "descripcion": "Capital total comprometido por los accionistas según la escritura de constitución.",
+    "clasificable": true,
+    "grupo_presentacion": "Patrimonio"
+  },
+  "PAT.07": {
+    "codigo_estandar": "PAT.07",
+    "nombre_estandar": "Capital por Enterar",
+    "categoria": "patrimonio",
+    "tipo_estado": "balance",
+    "naturaleza": "deudora",
+    "signo_normal": 1,
+    "es_deuda_financiera": false,
+    "es_activo_liquido": false,
+    "afecta_ebitda": false,
+    "descripcion": "Porción del capital suscrito aún no pagada por los accionistas (contra el capital).",
+    "clasificable": true,
+    "grupo_presentacion": "Patrimonio"
+  },
+  "PAT.08": {
+    "codigo_estandar": "PAT.08",
+    "nombre_estandar": "Reserva Técnica Revalorización Activo Fijo",
+    "categoria": "patrimonio",
+    "tipo_estado": "balance",
+    "naturaleza": "acreedora",
+    "signo_normal": 1,
+    "es_deuda_financiera": false,
+    "es_activo_liquido": false,
+    "afecta_ebitda": false,
+    "descripcion": "Reserva de patrimonio originada por la revalorización técnica del activo fijo.",
+    "clasificable": true,
+    "grupo_presentacion": "Patrimonio"
+  },
+  "PAT.09": {
+    "codigo_estandar": "PAT.09",
+    "nombre_estandar": "Utilidades Ejercicios Anteriores",
+    "categoria": "patrimonio",
+    "tipo_estado": "balance",
+    "naturaleza": "acreedora",
+    "signo_normal": 1,
+    "es_deuda_financiera": false,
+    "es_activo_liquido": false,
+    "afecta_ebitda": false,
+    "descripcion": "Resultados acumulados de ejercicios anteriores no distribuidos ni capitalizados.",
+    "clasificable": true,
+    "grupo_presentacion": "Patrimonio"
+  },
+  "PAT.10": {
+    "codigo_estandar": "PAT.10",
+    "nombre_estandar": "Cuenta Particular Socios",
+    "categoria": "patrimonio",
+    "tipo_estado": "balance",
+    "naturaleza": "deudora",
+    "signo_normal": 1,
+    "es_deuda_financiera": false,
+    "es_activo_liquido": false,
+    "afecta_ebitda": false,
+    "descripcion": "Cuenta corriente con socios o accionistas: retiros, anticipos, préstamos y giros.",
+    "clasificable": true,
+    "grupo_presentacion": "Patrimonio"
+  },
+  "PAT.11": {
+    "codigo_estandar": "PAT.11",
+    "nombre_estandar": "Interés Minoritario",
+    "categoria": "patrimonio",
+    "tipo_estado": "balance",
+    "naturaleza": "acreedora",
+    "signo_normal": 1,
+    "es_deuda_financiera": false,
+    "es_activo_liquido": false,
+    "afecta_ebitda": false,
+    "descripcion": "Participación de accionistas minoritarios en el patrimonio de la sociedad controlada (IFRS: Participación No Controladora).",
+    "clasificable": true,
+    "grupo_presentacion": "Patrimonio"
+  },
+  "ER.17": {
+    "codigo_estandar": "ER.17",
+    "nombre_estandar": "Otros Ingresos",
+    "categoria": "resultado",
+    "tipo_estado": "resultados",
+    "naturaleza": "acreedora",
+    "signo_normal": 1,
+    "es_deuda_financiera": false,
+    "es_activo_liquido": false,
+    "afecta_ebitda": false,
+    "descripcion": "Ingresos distintos de las ventas del giro principal del negocio.",
+    "clasificable": true,
+    "grupo_presentacion": "Otros ingresos"
+  },
+  "ER.18": {
+    "codigo_estandar": "ER.18",
+    "nombre_estandar": "Otros Egresos",
+    "categoria": "resultado",
+    "tipo_estado": "resultados",
+    "naturaleza": "deudora",
+    "signo_normal": 1,
+    "es_deuda_financiera": false,
+    "es_activo_liquido": false,
+    "afecta_ebitda": false,
+    "descripcion": "Egresos y pérdidas distintos de los costos y gastos del giro principal.",
+    "clasificable": true,
+    "grupo_presentacion": "Otros egresos"
+  },
+  "ER.19": {
+    "codigo_estandar": "ER.19",
+    "nombre_estandar": "Resultado Antes de Impuestos",
+    "categoria": "resultado",
+    "tipo_estado": "resultados",
+    "naturaleza": "acreedora",
+    "signo_normal": 1,
+    "es_deuda_financiera": false,
+    "es_activo_liquido": false,
+    "afecta_ebitda": false,
+    "descripcion": "Subtotal del estado de resultados previo a la provisión de impuesto a la renta. Cuenta de cálculo, no seleccionable.",
+    "clasificable": false,
+    "grupo_presentacion": "Gastos"
   }
 }

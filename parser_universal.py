@@ -13,6 +13,7 @@ Pipeline:
      y columna de origen (activo/pasivo/pérdida/ganancia) cuando exista
 """
 
+import logging
 import re
 import shutil
 import subprocess
@@ -21,11 +22,14 @@ import zipfile
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import pandas as pd
 import pdfplumber
 from PIL import Image
+
+
+logger = logging.getLogger("parser_universal")
 
 
 # Feature flag: cuando está en False, se usa la heurística fija ULTIMAS_COLS.
@@ -110,6 +114,13 @@ class ResultadoParseo:
     rotacion_aplicada: int           # 0 o 90
     cuentas: list[CuentaRaw] = field(default_factory=list)
     advertencias: list[str] = field(default_factory=list)
+    # Sprint 31: contexto del análisis documental previo al parseo.
+    # None cuando no se ejecutó (Excel) o cuando el análisis falló.
+    document_context: Optional[Any] = None
+    # Sprint 34: SOLO anotación de qué extractor se seleccionó (id, familia,
+    # confidence, fallback, tiempo). NO cambia la extracción: None cuando no
+    # hubo análisis documental o cuando el análisis de extractor falló.
+    extractor_info: Optional[dict] = None
 
 
 @dataclass
@@ -594,6 +605,26 @@ class ParserPDF:
                 advertencias=[f"VALIDACIÓN FALLIDA: {msg}"]
             )
 
+        # Sprint 31 — Análisis documental ANTES del parseo.
+        # Lee solo las primeras páginas, produce un FormatSignature y decide
+        # extractor vía ExtractorFactory. NO cambia la extracción: si el
+        # análisis falla, se continúa exactamente como antes (backward
+        # compatibility).
+        advertencias_iniciales: list[str] = []
+        try:
+            documento_ctx = self._analizar_documento(path)
+        except Exception as exc:  # noqa: BLE001 — backward compatibility
+            logger.debug(
+                "Análisis documental falló (%s); usando flujo clásico.",
+                exc, exc_info=True,
+            )
+            documento_ctx = None
+        if documento_ctx is not None:
+            logger.info("\n" + documento_ctx.to_log_block())
+            for w in documento_ctx.warnings:
+                if w not in advertencias_iniciales:
+                    advertencias_iniciales.append(w)
+
         lineas, requirio_ocr, rotacion = self._extraer_lineas(path, context)
 
         if not lineas:
@@ -601,7 +632,8 @@ class ParserPDF:
                 archivo=path.name, formato_codigo=FormatoCodigo.SIN_CODIGO,
                 separador_miles='.', requirio_ocr=requirio_ocr,
                 rotacion_aplicada=rotacion,
-                advertencias=["No se pudo extraer texto (ni nativo ni OCR)"]
+                advertencias=["No se pudo extraer texto (ni nativo ni OCR)"],
+                document_context=documento_ctx,
             )
 
         lineas = [normalizar_codigo_ocr(l) for l in lineas]
@@ -615,12 +647,32 @@ class ParserPDF:
         separador = detectar_separador_miles(muestra_montos)
 
         # 3b. Detectar layout de columnas
-        # Prioridad: 1) ExtractionContext (de DocumentAnalyzer) si confianza suficiente
-        #            2) LayoutDetector interno (solo si ENABLE_DYNAMIC_LAYOUT)
-        #            3) Heurística estándar (ULTIMAS_COLS) por defecto
-        advertencias = []
+        # Prioridad:
+        #   1) ExtractionContext (de DocumentAnalyzer) si confianza suficiente
+        #   2) Perfil de familia aprendido (Sprint 36, solo si ENABLE_DYNAMIC_LAYOUT)
+        #   3) LayoutDetector interno (solo si ENABLE_DYNAMIC_LAYOUT)
+        #   4) Heurística estándar (ULTIMAS_COLS) por defecto
+        advertencias = list(advertencias_iniciales)
         column_order: Optional[list[OrigenColumna]] = None
         layout_columns: Optional[list[str]] = None
+
+        # Sprint 36 — detección anticipada de familia/extractor (se reutiliza
+        # en _anotar_extractor para no detectar dos veces). Gated por
+        # ENABLE_DYNAMIC_LAYOUT: si falla, todo continúa como antes.
+        detectado_extractor: Optional[dict] = None
+        if ENABLE_DYNAMIC_LAYOUT and documento_ctx is not None:
+            try:
+                from document_intelligence.extractors.factory import (
+                    SpecializedExtractorFactory,
+                )
+                detectado_extractor = SpecializedExtractorFactory().detect(
+                    path, documento_ctx,
+                )
+            except Exception as exc:  # noqa: BLE001 — fallback deliberado
+                logger.debug(
+                    "Detección anticipada de extractor falló; "
+                    "se sigue con heurística estándar: %s", exc,
+                )
 
         if context and context.layout_hint and context.layout_confidence >= LAYOUT_CONFIDENCE_THRESHOLD:
             layout_columns = list(context.layout_hint)
@@ -640,6 +692,53 @@ class ParserPDF:
                 advertencias.append(
                     "LayoutDetector detectó columnas en contexto pero ninguna "
                     "fue reconocida — usando heurística estándar."
+                )
+        elif detectado_extractor is not None and detectado_extractor.get(
+            "family_id"
+        ) not in (None, "", "DESCONOCIDO"):
+            # Perfil de familia aprendido (Sprint 36): el orden de columnas
+            # proviene del training (Sprint 35) para la familia detectada.
+            # Se aplica con cualquier familia match de confianza, tenga o no
+            # extractor registrado (los perfiles existen para las 23 familias).
+            try:
+                from document_intelligence.extractors.profile_driven import (
+                    profile_layout_hint,
+                )
+                hint = profile_layout_hint(
+                    path, documento_ctx,
+                    family_id=detectado_extractor.get("family_id", ""),
+                    lines=lineas,
+                )
+            except Exception as exc:  # noqa: BLE001 — fallback deliberado
+                hint = None
+                logger.debug(
+                    "Perfil de familia no aplicable (%s); heurística estándar.",
+                    exc,
+                )
+            if hint:
+                cols = []
+                for c in hint:
+                    oc = _LAYOUT_COLUMN_MAP.get(c)
+                    if oc is not None:
+                        cols.append(oc)
+                if len(cols) >= 2:
+                    column_order = cols
+                    layout_columns = list(hint)
+                    advertencias.append(
+                        f"Perfil de familia "
+                        f"({detectado_extractor.get('family_id', '')}): "
+                        f"{len(cols)} columnas "
+                        f"({', '.join(c.value for c in cols)})"
+                    )
+                else:
+                    advertencias.append(
+                        "Perfil de familia sin columnas aprovechables — "
+                        "usando heurística estándar."
+                    )
+            else:
+                advertencias.append(
+                    "Perfil de familia no aplicable o sin cobertura — "
+                    "usando heurística estándar."
                 )
         elif ENABLE_DYNAMIC_LAYOUT:
             from parsers.layout_detector import LayoutDetector
@@ -721,7 +820,7 @@ class ParserPDF:
                 f"(confianza={context.rotation_confidence:.2f})"
             )
 
-        return ResultadoParseo(
+        resultado = ResultadoParseo(
             archivo=path.name,
             formato_codigo=formato_codigo,
             separador_miles=separador,
@@ -729,7 +828,56 @@ class ParserPDF:
             rotacion_aplicada=rotacion,
             cuentas=cuentas,
             advertencias=advertencias,
+            document_context=documento_ctx,
         )
+        self._anotar_extractor(resultado, detectado_extractor)
+        return resultado
+
+    def _anotar_extractor(
+        self,
+        resultado: ResultadoParseo,
+        detectado: Optional[dict] = None,
+    ) -> None:
+        """Sprint 34 — anota `extractor_info` SIN cambiar la extracción.
+
+        `detectado` es el resultado de la detección anticipada del Sprint 36
+        (si ENABLE_DYNAMIC_LAYOUT la computó antes del bucle de parseo);
+        si viene None se detecta aquí. Si la factory falla, `extractor_info`
+        queda en None y el parseo continúa exactamente igual (backward
+        compatibility / fallback obligatorio).
+        """
+        if resultado.document_context is None:
+            return
+        try:
+            if detectado is None:
+                from document_intelligence.extractors.factory import (
+                    SpecializedExtractorFactory,
+                )
+                detectado = SpecializedExtractorFactory().detect(
+                    resultado.document_context.pdf_path,
+                    resultado.document_context,
+                )
+            resultado.extractor_info = detectado
+        except Exception as exc:  # noqa: BLE001 — fallback deliberado
+            logger.debug(
+                "Anotación de extractor falló; se omite: %s", exc, exc_info=True,
+            )
+
+    def _analizar_documento(self, path: Path) -> Optional[Any]:
+        """Sprint 31 — análisis documental previo al parseo.
+
+        Nunca lanza excepción: si el análisis falla retorna None y el flujo
+        continúa exactamente como antes (backward compatibility).
+        """
+        try:
+            from document_intelligence.context import analyze_document_preview
+            return analyze_document_preview(path)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(
+                "Document Intelligence no disponible (%s); "
+                "usando flujo clásico.", exc, exc_info=True,
+            )
+            return None
 
     def _extraer_lineas(
         self,

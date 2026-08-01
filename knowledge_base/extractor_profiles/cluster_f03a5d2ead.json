@@ -1,0 +1,114 @@
+{
+  "family_id": "cluster_f03a5d2ead",
+  "family_name": "Familia Alto Pelarco",
+  "layout": "VERTICAL",
+  "document_type": "ESTADO_RESULTADOS",
+  "code_pattern": "COMPACTO",
+  "numeric_pattern": "CHILENO",
+  "header_rows": 4,
+  "table_start_row": 4,
+  "table_end_row": 59,
+  "columns": [
+    {
+      "key": "NOMBRE",
+      "label": "Nombre",
+      "side": "left",
+      "position": 0,
+      "detection_rate": 1.0,
+      "docs": 35
+    },
+    {
+      "key": "ACTIVO",
+      "label": "Activo",
+      "side": "right",
+      "position": 1,
+      "detection_rate": 0.9143,
+      "docs": 32
+    }
+  ],
+  "code_column": null,
+  "name_column": {
+    "key": "NOMBRE",
+    "label": "Nombre",
+    "side": "left",
+    "position": 0,
+    "detection_rate": 1.0,
+    "docs": 35
+  },
+  "amount_columns": [
+    {
+      "key": "ACTIVO",
+      "label": "Activo",
+      "side": "right",
+      "position": 1,
+      "detection_rate": 0.9143,
+      "docs": 32
+    }
+  ],
+  "totals_pattern": "top:1col",
+  "total_keywords": [
+    "total",
+    "resultado",
+    "totales",
+    "sumas",
+    "utilidad"
+  ],
+  "summary_position": "TOP",
+  "confidence": 0.7921,
+  "n_documents": 35,
+  "docs_total": 62,
+  "docs_outliers": 27,
+  "header": {
+    "rows": 4,
+    "row_counts": {
+      "11": 1,
+      "2": 2,
+      "4": 32
+    },
+    "keywords": [
+      "activos",
+      "corrientes",
+      "efectivo",
+      "diciembre",
+      "equivalentes",
+      "otros",
+      "financieros",
+      "alto"
+    ]
+  },
+  "footer": {
+    "trailing_rows": 0,
+    "totals_position": "TOP",
+    "total_keywords": [
+      "total",
+      "resultado",
+      "totales",
+      "sumas",
+      "utilidad"
+    ],
+    "keywords": [
+      "antes",
+      "ganancia",
+      "impuesto",
+      "resultado",
+      "unidad",
+      "reajuste",
+      "gastos",
+      "otros"
+    ]
+  },
+  "validation": {
+    "docs_validated": 62,
+    "docs_with_rows": 62,
+    "coverage": 0.9354,
+    "precision": 0.7157,
+    "columns_rate": 1.0,
+    "columns_detected": 2.0,
+    "columns_expected": 2,
+    "total_account_rows": 2678,
+    "total_rows_in_table": 2485,
+    "total_rows_lost": 193,
+    "header_match_rate": 0.5161
+  },
+  "generated_at": ""
+}

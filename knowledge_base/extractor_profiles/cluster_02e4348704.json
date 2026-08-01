@@ -1,0 +1,100 @@
+{
+  "family_id": "cluster_02e4348704",
+  "family_name": "Familia Agrícola Gonzagri Ltda",
+  "layout": "LIBRE",
+  "document_type": "OTRO",
+  "code_pattern": "GUION",
+  "numeric_pattern": "ENTERO",
+  "header_rows": 4,
+  "table_start_row": 4,
+  "table_end_row": 194,
+  "columns": [
+    {
+      "key": "NOMBRE",
+      "label": "Nombre",
+      "side": "left",
+      "position": 0,
+      "detection_rate": 1.0,
+      "docs": 4
+    },
+    {
+      "key": "MONTO",
+      "label": "Monto",
+      "side": "right",
+      "position": 1,
+      "detection_rate": 1.0,
+      "docs": 4
+    }
+  ],
+  "code_column": null,
+  "name_column": {
+    "key": "NOMBRE",
+    "label": "Nombre",
+    "side": "left",
+    "position": 0,
+    "detection_rate": 1.0,
+    "docs": 4
+  },
+  "amount_columns": [
+    {
+      "key": "MONTO",
+      "label": "Monto",
+      "side": "right",
+      "position": 1,
+      "detection_rate": 1.0,
+      "docs": 4
+    }
+  ],
+  "totals_pattern": "none:1col",
+  "total_keywords": [],
+  "summary_position": "NONE",
+  "confidence": 0.5667,
+  "n_documents": 4,
+  "docs_total": 5,
+  "docs_outliers": 1,
+  "header": {
+    "rows": 4,
+    "row_counts": {
+      "4": 4
+    },
+    "keywords": [
+      "código",
+      "tasador",
+      "fecha",
+      "visita",
+      "informe",
+      "tasacion",
+      "garantia",
+      "viena"
+    ]
+  },
+  "footer": {
+    "trailing_rows": 54,
+    "totals_position": "NONE",
+    "total_keywords": [],
+    "keywords": [
+      "cerezos",
+      "kordia",
+      "bueno",
+      "goteo",
+      "regina",
+      "summit",
+      "sylvia",
+      "grannu"
+    ]
+  },
+  "validation": {
+    "docs_validated": 5,
+    "docs_with_rows": 5,
+    "coverage": 0.9968,
+    "precision": 0.2649,
+    "columns_rate": 1.0,
+    "columns_detected": 2.0,
+    "columns_expected": 2,
+    "total_account_rows": 256,
+    "total_rows_in_table": 253,
+    "total_rows_lost": 3,
+    "header_match_rate": 0.8
+  },
+  "generated_at": ""
+}
