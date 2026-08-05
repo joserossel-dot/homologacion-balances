@@ -3,8 +3,16 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from learning.engine import LearningEngine
 from learning.models import CorrectionEntry
+
+GOLD_DB = Path(__file__).resolve().parent.parent / "gold_standard.db"
+
+
+def _gold_engine(tmp_path: Path) -> LearningEngine:
+    return LearningEngine(db_path=GOLD_DB, queue_path=tmp_path / "queue.json")
 
 
 def test_record_correction(tmp_path: Path) -> None:
@@ -138,3 +146,33 @@ def test_get_most_frequent(tmp_path: Path) -> None:
     assert top[0].frequency == 3
     assert top[1].account_name == "A"
     assert top[1].frequency == 2
+
+
+@pytest.mark.skipif(not GOLD_DB.exists(), reason="gold_standard.db no disponible")
+class TestM2Diacritics:
+    """M2: elimina diacríticos en ambos lados (query y gold) vía NFKD."""
+
+    def test_vehiculos_anc03(self, tmp_path: Path) -> None:
+        res = _gold_engine(tmp_path).best_match("Vehículos")
+        assert res["source"] == "exact"
+        assert res["code"] == "ANC.03"
+
+    def test_muebles_y_utiles_anc01(self, tmp_path: Path) -> None:
+        res = _gold_engine(tmp_path).best_match("Muebles y Útiles")
+        assert res["source"] == "exact"
+        assert res["code"] == "ANC.01"
+
+    def test_provision_vacaciones_pc06(self, tmp_path: Path) -> None:
+        res = _gold_engine(tmp_path).best_match("Provisión Vacaciones")
+        assert res["source"] == "exact"
+        assert res["code"] == "PC.06"
+
+    def test_correccion_monetaria_er14(self, tmp_path: Path) -> None:
+        res = _gold_engine(tmp_path).best_match("Corrección Monetaria")
+        assert res["source"] == "exact"
+        assert res["code"] == "ER.14"
+
+    def test_depreciacion_er07(self, tmp_path: Path) -> None:
+        res = _gold_engine(tmp_path).best_match("Depreciación")
+        assert res["source"] == "exact"
+        assert res["code"] == "ER.07"

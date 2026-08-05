@@ -1,8 +1,13 @@
-"""LearningEngine — Gold Standard + Correction Queue.
+"""LearningEngine — Gold Standard + Correction Queue + Runtime (P4).
 
 Gold Standard:
   - best_match(name) → dict con source/code/confidence/matched_name
   - Consulta gold_standard.db vía SQLite
+
+Runtime (capa superior opcional, P4):
+  - Si use_runtime=True, primero consulta RuntimeManager (runtime_gold).
+  - Orden: runtime exact → runtime fuzzy → gold exact → gold fuzzy → none.
+  - Si no existe runtime, comportamiento idéntico al gold-only.
 
 Correction Queue (infraestructura, no aprendizaje automático):
   - record() → registra corrección humana en learning_queue.json
@@ -29,19 +34,20 @@ from learning.models import CorrectionEntry, CorrectionStats
 
 logger = logging.getLogger(__name__)
 
-
 class LearningEngine:
-    """Gold Standard lookup + Correction queue (infraestructura).
+    """Gold Standard lookup + Runtime (opcional) + Correction queue (infraestructura).
 
-    Dos modos:
-      1. Gold Standard: consulta SQLite (best_match)
-      2. Corrections: registra correcciones humanas en JSON (record)
+    Tres modos:
+      1. Runtime: capa superior opcional vía RuntimeManager (si use_runtime=True)
+      2. Gold Standard: consulta SQLite (best_match)
+      3. Corrections: registra correcciones humanas en JSON (record)
     """
 
     def __init__(
         self,
         db_path: str | Path = "gold_standard.db",
         queue_path: str | Path | None = None,
+        runtime_db_path: str | Path | None = None,
     ) -> None:
         self._db_path = Path(db_path)
 
@@ -51,33 +57,74 @@ class LearningEngine:
         self._queue: list[CorrectionEntry] = []
         self._load_queue()
 
+        from gold_standard.runtime_manager import RUNTIME_DB_DEFAULT
+
+        self._runtime_path = (
+            Path(runtime_db_path) if runtime_db_path is not None
+            else Path(RUNTIME_DB_DEFAULT)
+        )
+        self._metrics = {
+            "runtime_exact_hits": 0,
+            "runtime_fuzzy_hits": 0,
+            "gold_exact_hits": 0,
+            "gold_fuzzy_hits": 0,
+            "runtime_miss": 0,
+        }
+
         self._conn: sqlite3.Connection | None = None
 
     # ------------------------------------------------------------------
     # Gold Standard
     # ------------------------------------------------------------------
 
-    def best_match(self, account_name: str) -> dict[str, Any]:
+    def best_match(
+        self,
+        account_name: str,
+        *,
+        use_runtime: bool = True,
+    ) -> dict[str, Any]:
         try:
-            return self._best_match_impl(account_name)
+            return self._best_match_impl(account_name, use_runtime=use_runtime)
         except Exception as e:
             logger.warning("Gold Standard lookup failed: %s", e)
             return {"source": "none", "code": None, "confidence": 0.0, "matched_name": None}
 
-    def _best_match_impl(self, account_name: str) -> dict[str, Any]:
+    def _best_match_impl(
+        self,
+        account_name: str,
+        *,
+        use_runtime: bool = True,
+    ) -> dict[str, Any]:
+        if use_runtime:
+            runtime_result = self._runtime_lookup(account_name)
+            if runtime_result is not None:
+                return runtime_result
+
         if not self._db_path.exists():
             return {"source": "none", "code": None, "confidence": 0.0, "matched_name": None}
 
         conn = self._get_conn()
         norm = normalize_name(account_name)
 
-        # 1. Exact match
+        # 1. Exact match (normalización en ambos lados: texto buscado y gold)
         cursor = conn.execute(
-            "SELECT codigo_estandar, nombre_cuenta FROM gold_standard WHERE normalized = ?",
-            (norm,),
+            """
+            SELECT g.codigo_estandar, g.nombre_cuenta, g.normalized
+            FROM gold_standard g
+            LEFT JOIN gold_records r ON r.id = g.id
+            ORDER BY
+                CASE WHEN COALESCE(r.reviewer, '') != 'seed_script' THEN 0 ELSE 1 END,
+                COALESCE(r.suggested_confidence, 0) DESC,
+                COALESCE(r.review_date, '') DESC,
+                g.id
+            """
         )
-        row = cursor.fetchone()
+        row = next(
+            (r for r in cursor.fetchall() if normalize_name(r[2]) == norm),
+            None,
+        )
         if row is not None:
+            self._metrics["gold_exact_hits"] += 1
             return {
                 "source": "exact",
                 "code": row[0],
@@ -85,20 +132,21 @@ class LearningEngine:
                 "matched_name": row[1],
             }
 
-        # 2. Fuzzy match
+        # 2. Fuzzy match (normalización en ambos lados)
         cursor = conn.execute(
             "SELECT codigo_estandar, nombre_cuenta, normalized FROM gold_standard"
         )
         best_score = 0
         best_row = None
         for row in cursor.fetchall():
-            score = fuzzy_score(norm, row[2])
+            score = fuzzy_score(norm, normalize_name(row[2]))
             if score > best_score:
                 best_score = score
                 best_row = row
 
         if best_score >= 92 and best_row is not None:
             confidence = min(0.80 + (best_score - 92) * 0.01, 0.97)
+            self._metrics["gold_fuzzy_hits"] += 1
             return {
                 "source": "fuzzy",
                 "code": best_row[0],
@@ -107,6 +155,30 @@ class LearningEngine:
             }
 
         return {"source": "none", "code": None, "confidence": 0.0, "matched_name": None}
+
+    def _runtime_lookup(self, account_name: str) -> dict[str, Any] | None:
+        """Runtime exact → runtime fuzzy. Devuelve None si no hay hit."""
+        from gold_standard.runtime_manager import RuntimeManager
+
+        runtime = RuntimeManager(self._runtime_path)
+        try:
+            result = runtime.search_runtime(account_name)
+        finally:
+            runtime.close()
+
+        if result["source"] == "exact":
+            self._metrics["runtime_exact_hits"] += 1
+            return result
+        if result["source"] == "fuzzy":
+            self._metrics["runtime_fuzzy_hits"] += 1
+            return result
+        if runtime.exists():
+            self._metrics["runtime_miss"] += 1
+        return None
+
+    def get_metrics(self) -> dict[str, int]:
+        """Métricas de diagnóstico (solo lectura)."""
+        return dict(self._metrics)
 
     def _get_conn(self) -> sqlite3.Connection:
         if self._conn is None:

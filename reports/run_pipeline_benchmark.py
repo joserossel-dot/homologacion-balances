@@ -10,8 +10,6 @@ import json
 import os
 import sys
 import time
-import unicodedata
-import re
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Optional
@@ -24,6 +22,7 @@ from parser_universal import ParserPDF, CuentaRaw, OrigenColumna
 from app_validacion import MotorHibridoLocal, PATRON_NO_CUENTA, cargar_diccionario_base, REGLAS_COMPILADAS
 from pipeline.homologation_pipeline import HomologationPipeline
 from pipeline.features import CMCCFeatureFlags
+from core.normalizer import normalize
 
 
 CHECKPOINT_DIR = Path(__file__).parent
@@ -48,12 +47,7 @@ def recolectar_pdfs() -> list[Path]:
 
 
 def normalizar(nombre: str) -> str:
-    nombre = nombre.lower().strip()
-    nombre = unicodedata.normalize("NFKD", nombre)
-    nombre = nombre.encode("ascii", "ignore").decode("ascii")
-    nombre = re.sub(r"[^\w\s]", " ", nombre)
-    nombre = re.sub(r"\s+", " ", nombre)
-    return nombre.strip()
+    return normalize(nombre)
 
 
 def prefix(code: str | None) -> str:

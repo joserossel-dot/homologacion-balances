@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import logging
 import math
-import re
-import unicodedata
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
@@ -13,6 +11,7 @@ try:
 except ImportError:
     pd = None
 
+from core.normalizer import normalize
 from validation.validation_session import ValidationSession
 
 logger = logging.getLogger(__name__)
@@ -27,12 +26,7 @@ def _is_empty(value: Any) -> bool:
 
 
 def _normalize_name(name: str) -> str:
-    name = name.lower().strip()
-    name = unicodedata.normalize("NFKD", name)
-    name = name.encode("ascii", "ignore").decode("ascii")
-    name = re.sub(r"[^\w\s]", " ", name)
-    name = re.sub(r"\s+", " ", name)
-    return name.strip()
+    return normalize(name)
 
 
 class UnclassifiedAnalyzer:

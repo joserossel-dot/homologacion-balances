@@ -8,7 +8,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import re
 import signal
 import sys
 import time
@@ -21,6 +20,8 @@ import pandas as pd
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR))
+
+from core.normalizer import normalize
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger("layout_validation")
@@ -63,7 +64,7 @@ class LayoutResult:
 
 
 def _normalize_name(n: str) -> str:
-    return re.sub(r'\s+', ' ', (n or '').strip().lower())
+    return normalize(n, remove_accents=False, remove_symbols=False)
 
 
 def compare_accounts_safe(classic_list, dynamic_list) -> dict:

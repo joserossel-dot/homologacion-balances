@@ -8,7 +8,6 @@ import json
 import re
 import sys
 import time
-import unicodedata
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
@@ -22,6 +21,7 @@ from pipeline.homologation_pipeline import HomologationPipeline
 from pipeline.features import CMCCFeatureFlags
 from app_validacion import REGLAS_COMPILADAS
 from rapidfuzz import fuzz
+from core.normalizer import normalize
 
 REPORT_DIR = Path(__file__).parent
 OUTPUT_JSON = REPORT_DIR / "unknown_pareto.json"
@@ -56,12 +56,7 @@ def recolectar_pdfs() -> list[Path]:
 
 
 def normalizar(nombre: str) -> str:
-    nombre = nombre.lower().strip()
-    nombre = unicodedata.normalize("NFKD", nombre)
-    nombre = nombre.encode("ascii", "ignore").decode("ascii")
-    nombre = re.sub(r"[^\w\s]", " ", nombre)
-    nombre = re.sub(r"\s+", " ", nombre)
-    return nombre.strip()
+    return normalize(nombre)
 
 
 def extract_core_words(name: str) -> list[str]:
