@@ -37,6 +37,7 @@ from .registry import (
 )
 from .universal import UniversalExtractor
 from . import specialized  # noqa: F401 — registra los scaffolds al importar
+from .double_column import DoubleColumnExtractor  # noqa: F401 — doble columna
 from .factory import SpecializedExtractorFactory
 from .profile_driven import GenericTableExtractor
 

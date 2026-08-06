@@ -36,6 +36,7 @@ from gold_standard.models import GoldRecord
 from gold_standard.promotion import promote as promover_revisiones
 from gold_standard.runtime import RuntimeGoldStorage
 from gold_standard.runtime_manager import RuntimeManager
+from gold_standard.runtime_stats import RuntimeStatistics
 from reglas_especiales import ProcesadorReglasEspeciales, calcular_patrimonio_efectivo
 from config.regex_rules import REGLAS_REGEX, REGLAS_COMPILADAS
 from parser_universal import ParserPDF, CuentaRaw, OrigenColumna, parsear_excel
@@ -879,6 +880,11 @@ def main():
                         archivo.name, total_cuentas, clasificadas,
                         learning_hits, fallback_count, _t1 - _t0,
                     )
+        # P5.5 Runtime Observability: persistir métricas de uso para Runtime Analytics.
+        try:
+            st.session_state["runtime_metrics_last"] = hp._learning_engine.get_metrics()
+        except Exception:  # noqa: BLE001 — observabilidad no debe interrumpir el flujo
+            pass
     # After processing all uploaded files, propagate classifications across all balances
     if 'propagation_done' not in st.session_state:
         # Define helper to propagate classifications across balances
@@ -2006,9 +2012,9 @@ def _tab_knowledge_manager() -> None:
     gold_path = BASE_DIR / "gold_standard.db"
     rm = RuntimeManager(runtime_path)
 
-    tab_pend, tab_conf, tab_run, tab_hist, tab_stat = st.tabs(
+    tab_pend, tab_conf, tab_run, tab_hist, tab_stat, tab_an = st.tabs(
         ["📥 Promociones pendientes", "⚔️ Conflictos", "🗃️ Runtime",
-         "📜 Historial", "📊 Estadísticas"]
+         "📜 Historial", "📊 Estadísticas", "📊 Runtime Analytics"]
     )
 
     with tab_pend:
@@ -2021,6 +2027,8 @@ def _tab_knowledge_manager() -> None:
         _km_historial(rm)
     with tab_stat:
         _km_estadisticas(rm, gold_path)
+    with tab_an:
+        _km_runtime_analytics(rm, gold_path)
 
 
 def _km_pendientes(rm: RuntimeManager, gold_path: Path) -> None:
@@ -2272,6 +2280,80 @@ def _km_estadisticas(rm: RuntimeManager, gold_path: Path) -> None:
         f"Gold oficial: {s['gold_size']} cuentas · Eventos en historial: "
         f"{s['history_events']} · Runtime: {s['runtime_size']} cuentas activas."
     )
+
+
+def _km_runtime_analytics(rm: RuntimeManager, gold_path: Path) -> None:
+    """TAB 6 — 📊 Runtime Analytics: observabilidad completa (P5.5).
+
+    Toda la información sale de ``RuntimeStatistics`` (fuente única); la UI no
+    ejecuta SQL ni abre SQLite. Las métricas de uso provienen del último
+    procesamiento (``session_state``) y los eventos/cobertura de RuntimeManager.
+    No promueve, no revierte, no puebla: solo observa.
+    """
+    st.markdown("#### 📊 Runtime Analytics")
+    st.caption(
+        "Observabilidad del runtime (solo lectura). Métricas de uso del último "
+        "procesamiento + eventos/cobertura de `gold_standard_runtime.db`. "
+        "El benchmark (`gold_standard.db`) no se modifica."
+    )
+
+    snapshot = st.session_state.get("runtime_metrics_last")
+    try:
+        stats = RuntimeStatistics.capture(
+            metrics=snapshot,
+            runtime=rm,
+            gold_db=str(gold_path),
+        )
+    except Exception as e:  # noqa: BLE001
+        st.error(f"No se pudieron calcular las métricas runtime: {e}")
+        return
+
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    c1.metric("💠 Entradas runtime", stats.runtime_size)
+    c2.metric("🚀 Promociones", stats.promotion_count)
+    c3.metric("🔁 Rollbacks", stats.rollback_count)
+    c4.metric("❌ Rejects", stats.reject_count)
+    c5.metric("🎯 Runtime exact", stats.runtime_exact_hits)
+    c6.metric("🌀 Runtime fuzzy", stats.runtime_fuzzy_hits)
+
+    c7, c8, c9, c10, c11, c12 = st.columns(6)
+    c7.metric("🟢 Gold exact", stats.gold_exact_hits)
+    c8.metric("🌫️ Gold fuzzy", stats.gold_fuzzy_hits)
+    c9.metric("⬇️ Fallbacks", stats.fallback_to_gold)
+    c10.metric("Runtime miss", stats.runtime_miss)
+    c11.metric("Requests", stats.total_requests)
+    c12.metric("Historial", stats.history_events)
+
+    st.markdown("#### Cobertura")
+    c13, c14, c15, c16, c17 = st.columns(5)
+    c13.metric("📚 Cobertura runtime (uso)", f"{stats.runtime_usage_pct}%")
+    c14.metric("🏛️ Cobertura gold (uso)", f"{stats.gold_usage_pct}%")
+    c15.metric("🧠 Aprendizaje usado", f"{stats.learning_used_pct}%")
+    c16.metric("📐 Catálogo runtime", f"{stats.runtime_catalog_coverage_pct}%")
+    c17.metric("⬇️ Fallback", f"{stats.fallback_pct}%")
+
+    st.markdown("#### Impacto por promoción")
+    st.caption(
+        "¿Qué promociones realmente generan impacto? Promoción cuyo código "
+        "estándar fue usado por el runtime (hit exacto/fuzzy) durante el "
+        "último procesamiento."
+    )
+    if not stats.promotion_impact:
+        st.info("Sin promociones registradas o sin actividad de uso todavía.")
+    else:
+        df = pd.DataFrame(stats.promotion_impact)
+        df["impacto"] = df["impactful"].map({True: "✅ Impacto", False: "—"})
+        st.dataframe(
+            df[["account_name", "code", "hits", "impacto", "promotion_id"]],
+            use_container_width=True, hide_index=True,
+        )
+
+    if stats.promotion_count:
+        st.caption(
+            f"Promociones con impacto real: **{stats.impactful_promotions}** "
+            f"de {len(stats.promotion_impact)} promociones registradas. "
+            "Promociones sin hits pendientes de adopción."
+        )
 
 
 def _mostrar_resumen_catalogo(catalogo: dict):

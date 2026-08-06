@@ -37,8 +37,8 @@ logger = logging.getLogger("parser_universal")
 # para determinar el orden real de columnas.
 ENABLE_DYNAMIC_LAYOUT = False
 
-# Feature flag: cuando está en False, no se ejecuta AccountTypeResolver.
-# Cuando está en True, cada cuenta se resuelve a AccountType después del parseo.
+# OBSOLETO desde Fase A: ParserPDF ya no ejecuta AccountTypeResolver.
+# Se conserva solo para compatibilidad (imports/tests). Sin efecto.
 ENABLE_ACCOUNT_TYPE_RESOLVER = False
 
 # Umbral de confianza para aplicar corrección de rotación 180°
@@ -51,9 +51,9 @@ ROTATION_CORRECTION_THRESHOLD = 0.7
 # heurística estándar (ULTIMAS_COLS).
 LAYOUT_CONFIDENCE_THRESHOLD = 0.8
 
-# Umbral de confianza para activar AccountTypeResolver desde ExtractionContext.
-# Solo se activa si el contexto fue producido por DocumentAnalyzer,
-# tiene confianza suficiente, y contiene hints de layout o formato.
+# OBSOLETO desde Fase A: la resolución de tipo_cuenta ya no se activa desde
+# ExtractionContext dentro de ParserPDF. Se conserva solo para compatibilidad
+# (imports/tests). Sin efecto.
 ACCOUNT_TYPE_CONFIDENCE_THRESHOLD = 0.7
 
 
@@ -102,7 +102,7 @@ class CuentaRaw:
     origen_columna: OrigenColumna = OrigenColumna.DESCONOCIDO
     es_total: bool = False
     confianza_extraccion: float = 1.0  # baja si viene de OCR
-    tipo_cuenta: Optional[str] = None  # AccountType resuelto (ACTIVO|PASIVO|...)
+    tipo_cuenta: Optional[str] = None  # DEPRECATED (Fase A): NO lo escribe ParserPDF; se puebla post-parseo.
 
 
 @dataclass
@@ -145,6 +145,10 @@ class ExtractionContext:
     format_hint: Optional[FormatoCodigo] = None
     confidence: float = 1.0
     analysis_source: Optional[str] = None
+    # Líneas ya separadas por un extractor especializado (doble columna).
+    # Si vienen seteadas, ParserPDF las usa en lugar de re-extraer el texto
+    # plano del PDF, reutilizando íntegramente el pipeline de parseo.
+    lineas_presplit: Optional[list[str]] = None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -199,7 +203,9 @@ def validar_archivo(path: Path) -> tuple[bool, str]:
 
 PATRON_GUION = re.compile(r'^\d+(-\d+){2,}$')
 PATRON_PUNTO = re.compile(r'^\d+(\.\d+){2,}$')
-PATRON_COMPACTO = re.compile(r'^\d{6,10}$')
+# COMPACTO acepta códigos de 5 a 10 dígitos (p. ej. 11010 CAJAS / 21010 OBLIG).
+# Antes era 6-10: los códigos de 5 dígitos quedaban como SIN_CODIGO.
+PATRON_COMPACTO = re.compile(r'^\d{5,10}$')
 
 
 def detectar_formato_codigo(codigos_muestra: list[str]) -> FormatoCodigo:
@@ -408,8 +414,23 @@ def verificar_cuadre_balance(cuentas: list[CuentaRaw]) -> tuple[bool, dict, list
 PATRONES_CODIGO_LINEA = {
     FormatoCodigo.GUION:    re.compile(r'^(\d+(?:-\d+){2,})\s+(.+)'),
     FormatoCodigo.PUNTO:    re.compile(r'^(\d+(?:\.\d+){2,})\s+(.+)'),
-    FormatoCodigo.COMPACTO: re.compile(r'^(\d{6,10})\s+(.+)'),
+    FormatoCodigo.COMPACTO: re.compile(r'^(\d{5,10})\s+(.+)'),
 }
+
+# PQ-2 (FG1/FG2) — recuperación de códigos perdidos en documentos SIN_CODIGO.
+# Se prueban SOLO después de los tres patrones estándar y SOLO en la rama de
+# auto-detección por línea, por lo que no alteran la extracción de documentos
+# con formato GUION/PUNTO/COMPACTO detectado. Reutilizan el resto del flujo
+# (montos y columnas) aguas abajo en parsear_linea.
+#
+# FG1 — código con UN solo separador (guión o punto): 1101-51, 13216-0000.
+#   La guarda `\d{4,6}` al inicio excluye RUT (7-8 dígitos) y fechas cortas.
+_PATRON_AUX_UNISEP = re.compile(r'^(\d{4,6}[-.]\d{1,6})\s+(.+)')
+# FG2 — código compacto concatenado al nombre sin espacio: 11090BANCO, 10423CTA.
+#    El lookahead `(?=[A-Z...])` parte en la frontera dígito → letra y exige que
+#    el código sea de 4 a 6 dígitos seguidos inmediatamente por una letra.
+_PATRON_AUX_CONCATENADO = re.compile(r'^(\d{4,6})(?=[A-ZÁÉÍÓÚÑ])(.+)')
+PATRONES_CODIGO_AUXILIARES = (_PATRON_AUX_UNISEP, _PATRON_AUX_CONCATENADO)
 
 PATRON_MONTOS = re.compile(r'(-?\(?[\d.,]{1,18}\)?)')
 _OCR_CERO = re.compile(r'^[oO]$')
@@ -516,6 +537,16 @@ def parsear_linea(
                 codigo = m.group(1)
                 resto = m.group(2)
                 break
+        # PQ-2 (FG1/FG2): códigos con un solo separador o compactos concatenados
+        # al nombre. Solo si ninguno de los patrones estándar coincidió (no
+        # altera documentos con formato ya detectado).
+        if codigo is None:
+            for patron in PATRONES_CODIGO_AUXILIARES:
+                m = patron.match(linea)
+                if m:
+                    codigo = m.group(1)
+                    resto = m.group(2)
+                    break
 
     tokens = resto.split()
     descartados_finales = 0
@@ -778,35 +809,11 @@ class ParserPDF:
             if c:
                 cuentas.append(c)
 
-        # 4b. Resolver tipo de cuenta
-        # Activación:
-        #   1) ENABLE_ACCOUNT_TYPE_RESOLVER (flag legacy, False por defecto)
-        #   2) ExtractionContext desde DocumentAnalyzer con confianza suficiente + hints
-        if cuentas and (
-            ENABLE_ACCOUNT_TYPE_RESOLVER
-            or (
-                context is not None
-                and context.analysis_source == "DocumentAnalyzer"
-                and context.confidence >= ACCOUNT_TYPE_CONFIDENCE_THRESHOLD
-                and (context.layout_hint is not None or context.format_hint is not None)
-            )
-        ):
-            from parsers.account_type_resolver import AccountTypeResolver
-            resolver = AccountTypeResolver()
-            suma_conf = 0.0
-            for c in cuentas:
-                result = resolver.resolve(
-                    origen_columna=c.origen_columna,
-                    codigo=c.codigo,
-                    layout_columns=layout_columns,
-                )
-                c.tipo_cuenta = result.account_type.value
-                suma_conf += result.confidence
-            prom_conf = suma_conf / len(cuentas)
-            advertencias.append(
-                f"AccountTypeResolver: {len(cuentas)} cuentas resueltas, "
-                f"confianza promedio={prom_conf:.2f}"
-            )
+        # NOTA (Fase A): la resolución de tipo_cuenta se eliminó de ParserPDF.
+        # El parser es un extractor pasivo: NO escribe CuentaRaw.tipo_cuenta.
+        # La resolución contable ocurre fuera del parser (HomologationPipeline
+        # o reportes vía AccountTypeResolver).
+        # Ver reports/cuenta_raw_architecture/fase_a_impact_analysis.md.
 
         if requirio_ocr:
             advertencias.append(
@@ -884,13 +891,44 @@ class ParserPDF:
         path: Path,
         context: Optional[ExtractionContext] = None,
     ) -> tuple[list[str], bool, int]:
+        # Sprint F: si un extractor especializado ya separó las líneas
+        # (p. ej. doble columna ACTIVO|PASIVO), usarlas directamente. Se
+        # reutiliza íntegramente el pipeline de parseo posterior (formato,
+        # separador, parsear_linea); no se duplica ninguna lógica.
+        if context is not None and context.lineas_presplit:
+            lineas = [l for l in context.lineas_presplit if l.strip()]
+            if lineas:
+                return lineas, False, 0
+
         lineas: list[str] = []
 
         with pdfplumber.open(path) as pdf:
             n_paginas = len(pdf.pages)
             for page in pdf.pages:
                 texto = page.extract_text() or ""
-                if texto.strip():
+                if not texto.strip():
+                    continue
+                # Sprint F — doble columna: si la página parece tener dos
+                # columnas de cuenta (pre-filtro barato sobre el texto plano),
+                # intentar la separación estructural por coordenadas (x0).
+                # Si el análisis no confirma, se conserva el texto plano tal
+                # cual (comportamiento universal idéntico).
+                page_lineas: Optional[list[str]] = None
+                try:
+                    from document_intelligence.extractors.double_column import (
+                        _prefiltro_sugiere,
+                        separar_page,
+                    )
+                    if _prefiltro_sugiere(texto):
+                        page_lineas = separar_page(page)
+                except Exception as exc:  # noqa: BLE001 — fallback seguro
+                    logger.debug(
+                        "Detección de doble columna no disponible (%s); "
+                        "universal.", exc,
+                    )
+                if page_lineas:
+                    lineas.extend(l for l in page_lineas if l.strip())
+                else:
                     lineas.extend(texto.split('\n'))
 
         if lineas:

@@ -28,6 +28,7 @@ KM_FUNCTIONS = [
     "_km_runtime",
     "_km_historial",
     "_km_estadisticas",
+    "_km_runtime_analytics",
 ]
 
 

@@ -69,6 +69,9 @@ class LearningEngine:
             "gold_exact_hits": 0,
             "gold_fuzzy_hits": 0,
             "runtime_miss": 0,
+            "fallback_to_gold": 0,
+            "total_requests": 0,
+            "runtime_hits_by_code": Counter(),
         }
 
         self._conn: sqlite3.Connection | None = None
@@ -95,10 +98,14 @@ class LearningEngine:
         *,
         use_runtime: bool = True,
     ) -> dict[str, Any]:
+        self._metrics["total_requests"] += 1
         if use_runtime:
             runtime_result = self._runtime_lookup(account_name)
             if runtime_result is not None:
                 return runtime_result
+            # El runtime se desplegó pero no resolvió: se cae al gold.
+            if self._runtime_path.exists():
+                self._metrics["fallback_to_gold"] += 1
 
         if not self._db_path.exists():
             return {"source": "none", "code": None, "confidence": 0.0, "matched_name": None}
@@ -168,9 +175,11 @@ class LearningEngine:
 
         if result["source"] == "exact":
             self._metrics["runtime_exact_hits"] += 1
+            self._metrics["runtime_hits_by_code"][result["code"]] += 1
             return result
         if result["source"] == "fuzzy":
             self._metrics["runtime_fuzzy_hits"] += 1
+            self._metrics["runtime_hits_by_code"][result["code"]] += 1
             return result
         if runtime.exists():
             self._metrics["runtime_miss"] += 1
@@ -179,6 +188,10 @@ class LearningEngine:
     def get_metrics(self) -> dict[str, int]:
         """Métricas de diagnóstico (solo lectura)."""
         return dict(self._metrics)
+
+    def get_runtime_hits_by_code(self) -> dict[str, int]:
+        """Conteo de hits del runtime por código estándar (impacto por promoción)."""
+        return dict(self._metrics["runtime_hits_by_code"])
 
     def _get_conn(self) -> sqlite3.Connection:
         if self._conn is None:

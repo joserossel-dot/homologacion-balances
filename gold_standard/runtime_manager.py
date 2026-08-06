@@ -56,10 +56,14 @@ RUNTIME_SCHEMA_VERSION = "1.0"
 EVENT_PROMOTE = "PROMOTE"
 EVENT_ROLLBACK = "ROLLBACK"
 EVENT_REJECT = "REJECT"
+EVENT_DISABLE = "DISABLE"
+EVENT_ENABLE = "ENABLE"
 STATE_PENDING = "PENDING"
 STATE_APPROVED = "APPROVED"
 STATE_REJECTED = "REJECTED"
 STATE_ROLLED_BACK = "ROLLED_BACK"
+STATE_ACTIVE = "ACTIVE"
+STATE_INACTIVE = "INACTIVE"
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS runtime_gold (
@@ -67,6 +71,7 @@ CREATE TABLE IF NOT EXISTS runtime_gold (
     codigo_estandar  TEXT NOT NULL,
     nombre_cuenta    TEXT NOT NULL,
     normalized       TEXT NOT NULL,
+    activa           INTEGER NOT NULL DEFAULT 1,
     source_record_id INTEGER NOT NULL DEFAULT 0,
     reviewer         TEXT NOT NULL DEFAULT '',
     review_date      TEXT NOT NULL DEFAULT '',
@@ -143,8 +148,23 @@ class RuntimeManager:
         conn = self._connect()
         conn.executescript(_SCHEMA)
         conn.executescript(_INDEXES)
+        self._ensure_activa_column()
         self._init_metadata()
         conn.commit()
+
+    def _ensure_activa_column(self) -> None:
+        """Migración idempotente: agrega la columna ``activa`` a runtime_gold.
+
+        ``activa`` controla si una entrada participa en las búsquedas del
+        runtime (1) o está desactivada (0) sin eliminar el registro (auditable).
+        """
+        conn = self._connect()
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(runtime_gold)").fetchall()]
+        if "activa" not in cols:
+            conn.execute(
+                "ALTER TABLE runtime_gold ADD COLUMN activa INTEGER NOT NULL DEFAULT 1"
+            )
+            conn.commit()
 
     @staticmethod
     def _now() -> str:
@@ -157,13 +177,13 @@ class RuntimeManager:
         try:
             conn = self._connect()
             rows = conn.execute(
-                "SELECT id, codigo_estandar, nombre_cuenta, normalized "
+                "SELECT id, codigo_estandar, nombre_cuenta, normalized, activa "
                 "FROM runtime_gold ORDER BY id"
             ).fetchall()
         except sqlite3.OperationalError:
             return ""
         payload = "\n".join(
-            f"{r['id']}|{r['codigo_estandar']}|{r['nombre_cuenta']}|{r['normalized']}"
+            f"{r['id']}|{r['codigo_estandar']}|{r['nombre_cuenta']}|{r['normalized']}|{r['activa']}"
             for r in rows
         )
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
@@ -230,6 +250,9 @@ class RuntimeManager:
     def search_runtime(self, account_name: str) -> dict[str, Any]:
         """Busca en runtime_gold: exacto primero, luego fuzzy.
 
+        Solo considera entradas ``activa = 1`` (las desactivadas quedan
+        excluidas de la búsqueda pero se conservan para auditoría).
+
         Contrato de salida idéntico al de ``LearningEngine.best_match`` para
         permitir un wiring futuro sin cambios de interfaz.
         """
@@ -240,7 +263,7 @@ class RuntimeManager:
             conn = self._connect()
             rows = conn.execute(
                 "SELECT codigo_estandar, nombre_cuenta, normalized "
-                "FROM runtime_gold ORDER BY id"
+                "FROM runtime_gold WHERE activa = 1 ORDER BY id"
             ).fetchall()
         except sqlite3.OperationalError:
             return {"source": "none", "code": None, "confidence": 0.0, "matched_name": None}
@@ -490,6 +513,91 @@ class RuntimeManager:
         self._init_metadata()
         conn.commit()
         return True
+
+    def set_active(
+        self,
+        entry_id: int,
+        *,
+        activa: bool,
+        usuario: str = "system",
+        comentario: str = "",
+    ) -> bool:
+        """Activa (activa=True) o desactiva (activa=False) una entrada del runtime.
+
+        No elimina el registro: conserva ``runtime_gold`` completo para
+        trazabilidad. Registra el evento ENABLE/DISABLE en promotion_history.
+        Solo las entradas ``activa = 1`` participan en ``search_runtime``.
+        """
+        if not self._path.exists():
+            return False
+        try:
+            conn = self._connect()
+            row = conn.execute(
+                "SELECT codigo_estandar, nombre_cuenta, source_record_id "
+                "FROM runtime_gold WHERE id = ?",
+                (entry_id,),
+            ).fetchone()
+        except sqlite3.OperationalError:
+            return False
+        if row is None:
+            return False
+
+        valor = 1 if activa else 0
+        conn.execute(
+            "UPDATE runtime_gold SET activa = ? WHERE id = ?", (valor, entry_id)
+        )
+
+        now = self._now()
+        source_record_id = row["source_record_id"] or 0
+        promotion_id = self._promotion_id_for(source_record_id)
+        accion = EVENT_ENABLE if activa else EVENT_DISABLE
+        state = STATE_ACTIVE if activa else STATE_INACTIVE
+        conn.execute(
+            """
+            INSERT INTO promotion_history
+                (promotion_id, fecha, usuario, origen, accion,
+                 source_record_id, account_name, codigo_anterior,
+                 codigo_nuevo, state, comentario)
+            VALUES (?, ?, ?, 'runtime_gold', ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (promotion_id, now, usuario, accion,
+             source_record_id, row["nombre_cuenta"], row["codigo_estandar"],
+             row["codigo_estandar"], state,
+             comentario or f"{accion} {row['nombre_cuenta']}"),
+        )
+        self._init_metadata()
+        conn.commit()
+        return True
+
+    def deactivate(
+        self,
+        entry_id: int,
+        *,
+        usuario: str = "system",
+        comentario: str = "",
+    ) -> bool:
+        return self.set_active(entry_id, activa=False, usuario=usuario, comentario=comentario)
+
+    def activate(
+        self,
+        entry_id: int,
+        *,
+        usuario: str = "system",
+        comentario: str = "",
+    ) -> bool:
+        return self.set_active(entry_id, activa=True, usuario=usuario, comentario=comentario)
+
+    def get_active_keys(self) -> list[dict[str, Any]]:
+        """Entradas de runtime_gold activas (activa = 1)."""
+        if not self._path.exists():
+            return []
+        try:
+            rows = self._connect().execute(
+                "SELECT * FROM runtime_gold WHERE activa = 1 ORDER BY id"
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return []
+        return [dict(r) for r in rows]
 
     # ------------------------------------------------------------------
     # Estadísticas
