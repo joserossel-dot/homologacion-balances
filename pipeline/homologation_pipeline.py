@@ -549,6 +549,7 @@ class HomologationPipeline:
                 nombre_cuenta=ab.account_name,
                 codigo_clasificado=classification.get("standard_code") or "",
                 monto=classification_amount,
+                origen_columna=raw.origen_columna,
             )
 
             final_code = (
@@ -571,6 +572,7 @@ class HomologationPipeline:
                 "method": classification.get("method", "unknown"),
                 "reason": classification.get("reason", ""),
                 "special_rule": adjustment.nota if adjustment.aplica else None,
+                "review_required": adjustment.requiere_revision,
                 "source_file": path.name,
                 "source_page": ab.source_page,
                 "semantic_result": semantic_result,

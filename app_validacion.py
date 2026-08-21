@@ -39,7 +39,11 @@ from gold_standard.promotion import promote as promover_revisiones
 from gold_standard.runtime import RuntimeGoldStorage
 from gold_standard.runtime_manager import RuntimeManager
 from gold_standard.runtime_stats import RuntimeStatistics
-from reglas_especiales import ProcesadorReglasEspeciales, calcular_patrimonio_efectivo
+from reglas_especiales import (
+    ProcesadorReglasEspeciales,
+    calcular_patrimonio_efectivo,
+    es_cuenta_socios,
+)
 from config.regex_rules import REGLAS_REGEX, REGLAS_COMPILADAS
 from parser_universal import ParserPDF, CuentaRaw, OrigenColumna, parsear_excel
 from parsers.column_interpretation import es_ingreso as es_ingreso_col, es_gasto as es_gasto_col
@@ -384,6 +388,9 @@ def _codigo_compatible_con_origen(
     if (origen_efectivo == 'pasivo' and _es_contra_activo(nombre)
             and str(codigo or '').startswith('ANC')):
         return True
+    if (origen_efectivo == 'activo' and str(codigo or '') == 'PAT.10'
+            and es_cuenta_socios(nombre)):
+        return True
     tipos = _resolver_tipos_permitidos(origen_efectivo)
     if not tipos:
         return True
@@ -693,13 +700,19 @@ class MotorHibridoLocal:
                 resultado['confianza'] = min(resultado['confianza'] + 0.05, 0.99)
 
         codigo_pre = resultado['codigo_estandar'] or 'AC.08'
-        ajuste = self.reglas_especiales.aplicar(cuenta.nombre, codigo_pre, cuenta.monto, giro_empresa)
+        ajuste = self.reglas_especiales.aplicar(
+            cuenta.nombre, codigo_pre, cuenta.monto, giro_empresa,
+            origen_columna=cuenta.origen_columna,
+        )
         if ajuste.aplica:
             resultado['codigo_estandar'] = ajuste.codigo_final
             resultado['metodo'] += f'+regla_especial({ajuste.flag})'
             resultado['nota_regla_especial'] = ajuste.nota
 
-        resultado['requiere_revision'] = resultado['confianza'] < UMBRAL_REVISION
+        resultado['requiere_revision'] = (
+            resultado['confianza'] < UMBRAL_REVISION
+            or (ajuste.aplica and ajuste.requiere_revision)
+        )
         return resultado
 
     def _corregir_por_columna(self, nombre_norm, codigo_actual, origen, monto):
@@ -1017,6 +1030,7 @@ def main():
                                 nombre_cuenta=ab.account_name,
                                 codigo_clasificado=classification.get("standard_code") or "",
                                 monto=classification_amount,
+                                origen_columna=c.origen_columna,
                             )
                             final_code = (
                                 adjustment.codigo_final if adjustment.aplica
@@ -1040,7 +1054,10 @@ def main():
                             codigo_clasificado = final_code or ""
                             metodo = classification.get("method", "")
                             confianza = classification.get("confidence", 0.0)
-                            requiere_revision = confianza < UMBRAL_REVISION
+                            requiere_revision = (
+                                confianza < UMBRAL_REVISION
+                                or (adjustment.aplica and adjustment.requiere_revision)
+                            )
                             nota = adjustment.nota if adjustment.aplica else ""
                             clasif_evidencia = classification.get("reason", "")
                             clasif_origen = _origen_desde_clasif(classification, ab.account_name, hp)
@@ -1974,7 +1991,15 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict):
         return
 
     clasificadas['monto'] = clasificadas['monto'].fillna(0)
-    agrupado = clasificadas.groupby('codigo_clasificado').agg(monto_total=('monto', 'sum'), num_cuentas=('nombre_original', 'count')).reset_index()
+    clasificadas['monto_presentacion'] = clasificadas.apply(
+        lambda row: -abs(row['monto'])
+        if row['codigo_clasificado'] == 'PAT.10' else row['monto'],
+        axis=1,
+    )
+    agrupado = clasificadas.groupby('codigo_clasificado').agg(
+        monto_total=('monto_presentacion', 'sum'),
+        num_cuentas=('nombre_original', 'count'),
+    ).reset_index()
     agrupado['nombre_estandar'] = agrupado['codigo_clasificado'].map(lambda c: catalogo.get(c, {}).get('nombre_estandar', c))
     agrupado['categoria'] = agrupado['codigo_clasificado'].map(lambda c: catalogo.get(c, {}).get('categoria', ''))
 

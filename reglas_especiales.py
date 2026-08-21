@@ -9,7 +9,7 @@ Reglas:
   R2: Terrenos en activo corriente en empresa inmobiliaria → AC.05
   R3: Ingresos percibidos por adelantado → PC.08 (pasivo, no activo)
   R4: Clientes con saldo negativo → PC.08 (anticipo recibido)
-  R5: Cta. Cte. Socios → AC.06S + descuento de PAT (criterio conservador)
+  R5: Cta. Cte. Socios en activo → PAT.10 con revisión humana obligatoria
 """
 
 import re
@@ -22,6 +22,20 @@ SECTORES_INMOBILIARIOS = {
     'promotora', 'bienes raices', 'desarrollo inmobiliario'
 }
 
+PATRON_CUENTA_SOCIOS = re.compile(
+    r'(cuenta\s+(particular|corriente)\s+(socio|accionista))|'
+    r'(cta\.?\s*(cte\.?|particular)\s+(socio|accionista))|'
+    r'\bretiro(s)?\s+(de\s+)?(socio|utilidad)\b|'
+    r'\bdividendo(s)?\s+(provisorio(s)?|anticipado(s)?|pagado(s)?)\b|'
+    r'\bdistribucion(es)?\s+(a\s+)?(socio|accionista)\b|'
+    r'\bsocios?\s+cuenta\s+corriente\b'
+)
+
+
+def es_cuenta_socios(nombre: str | None) -> bool:
+    """Identifica cuentas de socios que requieren juicio contable humano."""
+    return bool(PATRON_CUENTA_SOCIOS.search(str(nombre or '').lower().strip()))
+
 
 @dataclass
 class AjusteEspecial:
@@ -30,6 +44,7 @@ class AjusteEspecial:
     codigo_final: str
     flag: Optional[str]
     nota: str
+    requiere_revision: bool = False
 
 
 class ProcesadorReglasEspeciales:
@@ -45,6 +60,7 @@ class ProcesadorReglasEspeciales:
         codigo_clasificado: str,
         monto: Optional[float],
         giro_empresa: Optional[str] = None,
+        origen_columna=None,
     ) -> AjusteEspecial:
         """
         Aplica todas las reglas en orden. Retorna el ajuste si alguna aplica,
@@ -73,7 +89,7 @@ class ProcesadorReglasEspeciales:
             return r4
 
         # R5: Cta cte socios → ajuste patrimonio conservador
-        r5 = self._r5_cta_socios(nombre_norm, codigo_clasificado)
+        r5 = self._r5_cta_socios(nombre_norm, codigo_clasificado, origen_columna)
         if r5.aplica:
             return r5
 
@@ -187,22 +203,28 @@ class ProcesadorReglasEspeciales:
                               codigo_final=codigo, flag=None, nota='')
 
     # ── REGLA 5 ───────────────────────────────────────────────────────────────
-    def _r5_cta_socios(self, nombre: str, codigo: str) -> AjusteEspecial:
+    def _r5_cta_socios(self, nombre: str, codigo: str, origen_columna=None) -> AjusteEspecial:
         """
-        Cta. Cte. Socios en activo → AC.06S (criterio conservador).
-        Se descuenta del patrimonio al calcular indicadores crediticios.
+        Cta. Cte. Socios ubicada en activo → PAT.10 con signo contrario.
+        La ambigüedad exige siempre confirmación humana.
         """
-        patron = re.search(
-            r'(cuenta\s+(particular|corriente)\s+(socio|accionista))|'
-            r'(cta\.?\s*(cte\.?|particular)\s+(socio|accionista))|'
-            r'\bretiro(s)?\s+(de\s+)?(socio|utilidad)\b|'
-            r'\bdividendo(s)?\s+(provisorio(s)?|anticipado(s)?|pagado(s)?)\b|'
-            r'\bdistribucion(es)?\s+(a\s+)?(socio|accionista)\b|'
-            r'\bsocios?\s+cuenta\s+corriente\b',
-            nombre
-        )
+        patron = es_cuenta_socios(nombre)
 
         if patron:
+            origen = getattr(origen_columna, 'value', origen_columna)
+            if str(origen or '').strip().lower() == 'activo':
+                return AjusteEspecial(
+                    aplica=True,
+                    codigo_original=codigo,
+                    codigo_final='PAT.10',
+                    flag='retiro_socio_contra_patrimonio',
+                    nota=(
+                        'Cuenta de socios extraída desde Activo: propuesta PAT.10 '
+                        '(retiro patrimonial con signo contrario). Requiere '
+                        'confirmación humana antes de consolidar.'
+                    ),
+                    requiere_revision=True,
+                )
             return AjusteEspecial(
                 aplica=True,
                 codigo_original=codigo,
@@ -230,8 +252,10 @@ def calcular_patrimonio_efectivo(
     Aplica el criterio conservador D5 al cálculo de patrimonio.
     Retorna patrimonio contable y efectivo para los indicadores.
     """
-    pat_codigos = ['PAT.01', 'PAT.02', 'PAT.03', 'PAT.04']
-    patrimonio_contable = sum(estados.get(c, 0) for c in pat_codigos)
+    patrimonio_contable = sum(
+        monto for codigo, monto in estados.items()
+        if str(codigo).startswith('PAT.')
+    )
     patrimonio_efectivo = patrimonio_contable - abs(monto_ac06s)
 
     return {

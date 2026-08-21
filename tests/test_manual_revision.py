@@ -9,6 +9,7 @@ from app_validacion import (
     _origen_efectivo,
     _pendientes_revision,
 )
+from reglas_especiales import ProcesadorReglasEspeciales, calcular_patrimonio_efectivo
 
 
 def _nombre_mostrar(row: pd.Series) -> str:
@@ -160,6 +161,48 @@ class TestOrigenContableEnRevision:
     )
     def test_otras_contra_cuentas_acreedoras_permiten_anc(self, nombre):
         assert _codigo_compatible_con_origen('ANC.01', 'pasivo', 100, nombre)
+
+    def test_cuenta_socios_en_activo_permite_pat10(self):
+        assert _codigo_compatible_con_origen(
+            'PAT.10', 'activo', 13037263, 'Cuenta Particular Socio L Figueroa'
+        )
+
+    def test_activo_generico_no_permite_pat10(self):
+        assert not _codigo_compatible_con_origen(
+            'PAT.10', 'activo', 13037263, 'Caja'
+        )
+
+
+class TestCuentaCorrienteSocios:
+    def test_activo_propone_pat10_y_exige_revision_humana(self):
+        ajuste = ProcesadorReglasEspeciales().aplicar(
+            'Cuenta Particular Socio L Figueroa',
+            'AC.07',
+            13037263,
+            origen_columna='activo',
+        )
+
+        assert ajuste.aplica
+        assert ajuste.codigo_final == 'PAT.10'
+        assert ajuste.flag == 'retiro_socio_contra_patrimonio'
+        assert ajuste.requiere_revision is True
+
+    def test_sin_origen_conserva_regla_historica_ac06s(self):
+        ajuste = ProcesadorReglasEspeciales().aplicar(
+            'Cta Cte Socio los Guris', 'AC.06', 15000000
+        )
+
+        assert ajuste.codigo_final == 'AC.06S'
+        assert ajuste.requiere_revision is False
+
+    def test_pat10_negativo_reduce_patrimonio(self):
+        resultado = calcular_patrimonio_efectivo({
+            'PAT.01': 100000000,
+            'PAT.10': -13037263,
+        })
+
+        assert resultado['patrimonio_contable'] == 86962737
+        assert resultado['patrimonio_efectivo'] == 86962737
 
 
 class TestPendientesRevision:
