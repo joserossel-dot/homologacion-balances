@@ -43,6 +43,7 @@ from reglas_especiales import ProcesadorReglasEspeciales, calcular_patrimonio_ef
 from config.regex_rules import REGLAS_REGEX, REGLAS_COMPILADAS
 from parser_universal import ParserPDF, CuentaRaw, OrigenColumna, parsear_excel
 from parsers.column_interpretation import es_ingreso as es_ingreso_col, es_gasto as es_gasto_col
+from parsers.account_type_resolver import is_contra_asset_name
 from extractor_metadata import extraer_metadata, MetadataEmpresa
 from account_qualification import qualify_cuentas as _safe_qualify_cuentas, \
     safe_mode_enabled as _safe_mode_enabled
@@ -368,9 +369,22 @@ def _etiqueta_origen(origen_columna, monto) -> str:
     return extraido
 
 
-def _codigo_compatible_con_origen(codigo: str | None, origen_columna, monto) -> bool:
+def _es_contra_activo(nombre: str | None) -> bool:
+    """Reconoce cuentas acreedoras que corrigen el valor de un activo."""
+    return is_contra_asset_name(nombre)
+
+
+def _codigo_compatible_con_origen(
+        codigo: str | None, origen_columna, monto, nombre: str | None = None) -> bool:
     """Impide sugerencias que contradigan la columna efectiva del balance."""
-    tipos = _resolver_tipos_permitidos(_origen_efectivo(origen_columna, monto))
+    origen_efectivo = _origen_efectivo(origen_columna, monto)
+    # Una depreciación/amortización acumulada puede venir físicamente en la
+    # columna Pasivo por su saldo acreedor, pero contablemente es contra-activo
+    # y debe poder homologarse dentro del activo fijo (ANC).
+    if (origen_efectivo == 'pasivo' and _es_contra_activo(nombre)
+            and str(codigo or '').startswith('ANC')):
+        return True
+    tipos = _resolver_tipos_permitidos(origen_efectivo)
     if not tipos:
         return True
     from pipeline.homologation_pipeline import HomologationPipeline
@@ -870,7 +884,8 @@ def main():
                         origen_efectivo = _origen_efectivo(c.origen_columna, c.monto)
                         if (r.get('codigo_estandar') and
                                 not _codigo_compatible_con_origen(
-                                    r['codigo_estandar'], c.origen_columna, c.monto)):
+                                    r['codigo_estandar'], c.origen_columna, c.monto,
+                                    c.nombre)):
                             r = {
                                 **r,
                                 'codigo_estandar': None,
@@ -977,6 +992,9 @@ def main():
                         classification_amount = interp.classification_amount
                         origen_efectivo = _origen_efectivo(c.origen_columna, classification_amount)
                         account_tipo = _resolver_tipo_cuenta(origen_efectivo, c.codigo)
+                        if (origen_efectivo == 'pasivo'
+                                and _es_contra_activo(c.nombre)):
+                            account_tipo = 'ACTIVO'
                         if classification_amount is None:
                             codigo_clasificado = ""
                             metodo = "movement_only"
@@ -1006,7 +1024,8 @@ def main():
                             )
                             if (final_code and
                                     not _codigo_compatible_con_origen(
-                                        final_code, c.origen_columna, classification_amount)):
+                                        final_code, c.origen_columna,
+                                        classification_amount, c.nombre)):
                                 final_code = None
                                 classification = {
                                     **classification,
@@ -1650,6 +1669,7 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                         codigo_lote,
                         df.at[idx_lote, 'origen_columna'],
                         df.at[idx_lote, 'monto'],
+                        df.at[idx_lote, 'nombre_original'],
                     )
                 ]
                 if incompatibles:
@@ -1790,18 +1810,33 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                         st.rerun()
 
             with c2:
+                mostrar_todas = st.checkbox(
+                    "🔎 Buscar más clasificaciones",
+                    key=f"mostrar_todas_{idx}",
+                    help=(
+                        "Muestra el catálogo completo para casos contables "
+                        "excepcionales que no coinciden con la columna física."
+                    ),
+                )
                 sugerido = row['codigo_clasificado']
-                if sugerido and not _codigo_compatible_con_origen(
-                        sugerido, row.get('origen_columna'), row.get('monto')):
+                if (not mostrar_todas and sugerido
+                        and not _codigo_compatible_con_origen(
+                            sugerido, row.get('origen_columna'), row.get('monto'),
+                            _nombre_mostrar(row))):
                     sugerido = ''
                 st.write(f"Sugerido: **{sugerido or '(ninguno)'}**")
 
-                opciones_fila = [opciones_codigo[0]] + [
-                    codigo for codigo in opciones_codigo[1:]
-                    if codigo in ('➕ NUEVA CATEGORÍA', '🚫 NO INCLUIR')
-                    or _codigo_compatible_con_origen(
-                        codigo, row.get('origen_columna'), row.get('monto'))
-                ]
+                if mostrar_todas:
+                    opciones_fila = opciones_codigo
+                    st.caption("Catálogo completo habilitado para esta cuenta.")
+                else:
+                    opciones_fila = [opciones_codigo[0]] + [
+                        codigo for codigo in opciones_codigo[1:]
+                        if codigo in ('➕ NUEVA CATEGORÍA', '🚫 NO INCLUIR')
+                        or _codigo_compatible_con_origen(
+                            codigo, row.get('origen_columna'), row.get('monto'),
+                            _nombre_mostrar(row))
+                    ]
                 default_idx = (opciones_fila.index(sugerido)
                                if sugerido in opciones_fila else 0)
                 seleccion = st.selectbox(

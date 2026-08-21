@@ -20,6 +20,7 @@ from parser_universal import FormatoCodigo, ParserPDF, ResultadoParseo
 from pipeline.cmcc_classifier import CMCCClassifier
 from pipeline.features import CMCCFeatureFlags
 from persistence.neon_store import NeonKnowledgeStore
+from parsers.account_type_resolver import is_contra_asset_name
 from reglas_especiales import ProcesadorReglasEspeciales
 from decision.engine import DecisionEngine
 from semantic.semantic_engine import SemanticEngine
@@ -439,6 +440,8 @@ class HomologationPipeline:
                 codigo=cr.codigo,
             )
             account_tipo = tipo_result.account_type.value
+            if account_tipo == "PASIVO" and is_contra_asset_name(ab.account_name):
+                account_tipo = "ACTIVO"
 
             # None significa ausencia de información.
             # Un saldo 0.0 puede tener cuenta válida y debe clasificarse.

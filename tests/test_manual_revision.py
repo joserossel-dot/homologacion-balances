@@ -140,6 +140,27 @@ class TestOrigenContableEnRevision:
     def test_pasivo_sigue_rechazando_activos(self):
         assert not _codigo_compatible_con_origen('AC.01', 'pasivo', 100)
 
+    def test_depreciacion_acumulada_en_pasivo_permite_activo_fijo(self):
+        assert _codigo_compatible_con_origen(
+            'ANC.01', 'pasivo', 8371044, 'Depreciación Acumulada'
+        )
+
+    def test_pasivo_comun_no_permite_activo_fijo(self):
+        assert not _codigo_compatible_con_origen(
+            'ANC.01', 'pasivo', 8371044, 'Proveedores nacionales'
+        )
+
+    @pytest.mark.parametrize(
+        'nombre',
+        [
+            'Depreciaciones acumuladas',
+            'Amortización acumulada de intangibles',
+            'Deterioro acumulado de activos',
+        ],
+    )
+    def test_otras_contra_cuentas_acreedoras_permiten_anc(self, nombre):
+        assert _codigo_compatible_con_origen('ANC.01', 'pasivo', 100, nombre)
+
 
 class TestPendientesRevision:
     def test_excluye_cuentas_con_monto_cero(self, df_resultados):

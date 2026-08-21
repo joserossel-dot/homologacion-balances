@@ -12,9 +12,23 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+import re
 from typing import Any, Optional
 
 from parser_universal import OrigenColumna
+
+
+def is_contra_asset_name(name: str | None) -> bool:
+    """True para cuentas acreedoras que reducen activos no corrientes."""
+    normalized = re.sub(r"\s+", " ", str(name or "").lower()).strip()
+    return any(
+        re.search(pattern, normalized)
+        for pattern in (
+            r"depreciaci[oó]n(?:es)? acumulada",
+            r"amortizaci[oó]n(?:es)? acumulada",
+            r"deterioro acumulado",
+        )
+    )
 
 
 class AccountType(str, Enum):
