@@ -33,6 +33,7 @@ jobs:
           pytest -q
           tests/test_neon_store.py
           tests/test_neon_preflight.py
+          tests/test_release_document_matrix.py
           tests/test_manual_revision.py
           tests/test_learning_engine.py
           tests/test_learning_runtime.py
