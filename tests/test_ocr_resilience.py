@@ -23,7 +23,30 @@ def test_ocr_timeout_no_aborta_documento(monkeypatch, tmp_path, caplog):
     monkeypatch.setattr(parser.subprocess, "run", timeout)
 
     assert parser.ocr_pagina(imagen, 0) == ""
-    assert "OCR omitido por timeout" in caplog.text
+    assert "OCR excedió" in caplog.text
+
+
+def test_ocr_timeout_reintenta_con_imagen_reducida(monkeypatch, tmp_path):
+    imagen = _imagen_temporal(tmp_path, (200, 200))
+    monkeypatch.setattr(parser, "OCR_MAX_PIXELS", 100_000)
+    monkeypatch.setattr(parser, "OCR_RETRY_MAX_PIXELS", 10_000)
+    llamadas = []
+
+    def ejecutar(cmd, **kwargs):
+        llamadas.append((Path(cmd[1]), kwargs["timeout"]))
+        if len(llamadas) == 1:
+            raise subprocess.TimeoutExpired(cmd, kwargs["timeout"])
+        with Image.open(cmd[1]) as img:
+            assert img.width * img.height <= parser.OCR_RETRY_MAX_PIXELS
+        return subprocess.CompletedProcess(cmd, 0, stdout="Caja 100\n", stderr="")
+
+    monkeypatch.setattr(parser.subprocess, "run", ejecutar)
+
+    assert parser.ocr_pagina(imagen, 0) == "Caja 100\n"
+    assert [timeout for _, timeout in llamadas] == [
+        parser.OCR_PAGE_TIMEOUT_SECONDS,
+        parser.OCR_RETRY_TIMEOUT_SECONDS,
+    ]
 
 
 def test_ocr_reduce_imagen_grande_antes_de_tesseract(monkeypatch, tmp_path):

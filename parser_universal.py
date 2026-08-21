@@ -59,9 +59,11 @@ ACCOUNT_TYPE_CONFIDENCE_THRESHOLD = 0.7
 # Límites defensivos para OCR en instancias con CPU/memoria acotadas (Render).
 # Rasterizar a 250 DPI y entregar imágenes sin límite a Tesseract podía bloquear
 # una página durante más de dos minutos y abortar la carga completa.
-OCR_RENDER_DPI = 180
-OCR_MAX_PIXELS = 4_000_000
+OCR_RENDER_DPI = 165
+OCR_MAX_PIXELS = 3_500_000
+OCR_RETRY_MAX_PIXELS = 1_200_000
 OCR_PAGE_TIMEOUT_SECONDS = 60
+OCR_RETRY_TIMEOUT_SECONDS = 45
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -363,6 +365,7 @@ def detectar_rotacion_heuristica(img_path: Path) -> int:
 
 def ocr_pagina(img_path: Path, rotacion: int) -> str:
     tmp_path: Optional[Path] = None
+    retry_path: Optional[Path] = None
     imagen_ocr = img_path
 
     with Image.open(img_path) as img:
@@ -391,11 +394,39 @@ def ocr_pagina(img_path: Path, rotacion: int) -> str:
             )
         except subprocess.TimeoutExpired:
             logger.warning(
-                "OCR omitido por timeout tras %ss: %s",
+                "OCR excedió %ss; reintentando imagen reducida: %s",
                 OCR_PAGE_TIMEOUT_SECONDS,
                 img_path.name,
             )
-            return ""
+            with Image.open(imagen_ocr) as img:
+                pixeles = img.width * img.height
+                if pixeles <= OCR_RETRY_MAX_PIXELS:
+                    return ""
+                escala = (OCR_RETRY_MAX_PIXELS / pixeles) ** 0.5
+                reducida = img.resize(
+                    (
+                        max(1, int(img.width * escala)),
+                        max(1, int(img.height * escala)),
+                    ),
+                    Image.Resampling.LANCZOS,
+                )
+                with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
+                    reducida.save(tmp.name)
+                    retry_path = Path(tmp.name)
+            try:
+                result = subprocess.run(
+                    [obtener_tesseract_bin(), str(retry_path), '-', '--psm', '6', '-l', 'spa'],
+                    capture_output=True, text=True,
+                    timeout=OCR_RETRY_TIMEOUT_SECONDS,
+                    env={'TESSDATA_PREFIX': TESSDATA_DIR},
+                )
+            except subprocess.TimeoutExpired:
+                logger.warning(
+                    "OCR omitido tras segundo timeout de %ss: %s",
+                    OCR_RETRY_TIMEOUT_SECONDS,
+                    img_path.name,
+                )
+                return ""
         if result.returncode != 0:
             logger.warning(
                 "Tesseract falló para %s (código %s): %s",
@@ -408,6 +439,8 @@ def ocr_pagina(img_path: Path, rotacion: int) -> str:
     finally:
         if tmp_path is not None:
             tmp_path.unlink(missing_ok=True)
+        if retry_path is not None:
+            retry_path.unlink(missing_ok=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
