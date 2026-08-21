@@ -56,6 +56,13 @@ LAYOUT_CONFIDENCE_THRESHOLD = 0.8
 # (imports/tests). Sin efecto.
 ACCOUNT_TYPE_CONFIDENCE_THRESHOLD = 0.7
 
+# Límites defensivos para OCR en instancias con CPU/memoria acotadas (Render).
+# Rasterizar a 250 DPI y entregar imágenes sin límite a Tesseract podía bloquear
+# una página durante más de dos minutos y abortar la carga completa.
+OCR_RENDER_DPI = 180
+OCR_MAX_PIXELS = 4_000_000
+OCR_PAGE_TIMEOUT_SECONDS = 60
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # MODELOS DE DATOS
@@ -355,24 +362,51 @@ def detectar_rotacion_heuristica(img_path: Path) -> int:
 
 
 def ocr_pagina(img_path: Path, rotacion: int) -> str:
-    if rotacion != 0:
-        img = Image.open(img_path)
-        img_rot = img.rotate(rotacion, expand=True)
-        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
-            img_rot.save(tmp.name)
-            tmp_path = Path(tmp.name)
-    else:
-        tmp_path = img_path
+    tmp_path: Optional[Path] = None
+    imagen_ocr = img_path
+
+    with Image.open(img_path) as img:
+        preparada = img.rotate(rotacion, expand=True) if rotacion != 0 else img.copy()
+        pixeles = preparada.width * preparada.height
+        if pixeles > OCR_MAX_PIXELS:
+            escala = (OCR_MAX_PIXELS / pixeles) ** 0.5
+            nuevo_tamano = (
+                max(1, int(preparada.width * escala)),
+                max(1, int(preparada.height * escala)),
+            )
+            preparada = preparada.resize(nuevo_tamano, Image.Resampling.LANCZOS)
+
+        if rotacion != 0 or pixeles > OCR_MAX_PIXELS:
+            with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
+                preparada.save(tmp.name)
+                tmp_path = Path(tmp.name)
+                imagen_ocr = tmp_path
 
     try:
-        result = subprocess.run(
-            [obtener_tesseract_bin(), str(tmp_path), '-', '--psm', '6', '-l', 'spa'],
-            capture_output=True, text=True, timeout=120,
-            env={'TESSDATA_PREFIX': TESSDATA_DIR}
-        )
+        try:
+            result = subprocess.run(
+                [obtener_tesseract_bin(), str(imagen_ocr), '-', '--psm', '6', '-l', 'spa'],
+                capture_output=True, text=True, timeout=OCR_PAGE_TIMEOUT_SECONDS,
+                env={'TESSDATA_PREFIX': TESSDATA_DIR}
+            )
+        except subprocess.TimeoutExpired:
+            logger.warning(
+                "OCR omitido por timeout tras %ss: %s",
+                OCR_PAGE_TIMEOUT_SECONDS,
+                img_path.name,
+            )
+            return ""
+        if result.returncode != 0:
+            logger.warning(
+                "Tesseract falló para %s (código %s): %s",
+                img_path.name,
+                result.returncode,
+                (result.stderr or "").strip()[:300],
+            )
+            return ""
         return result.stdout
     finally:
-        if rotacion != 0:
+        if tmp_path is not None:
             tmp_path.unlink(missing_ok=True)
 
 
@@ -656,6 +690,7 @@ class ParserPDF:
                 if w not in advertencias_iniciales:
                     advertencias_iniciales.append(w)
 
+        self._ocr_advertencias: list[str] = []
         lineas, requirio_ocr, rotacion = self._extraer_lineas(path, context)
 
         if not lineas:
@@ -663,7 +698,10 @@ class ParserPDF:
                 archivo=path.name, formato_codigo=FormatoCodigo.SIN_CODIGO,
                 separador_miles='.', requirio_ocr=requirio_ocr,
                 rotacion_aplicada=rotacion,
-                advertencias=["No se pudo extraer texto (ni nativo ni OCR)"],
+                advertencias=(
+                    self._ocr_advertencias
+                    + ["No se pudo extraer texto (ni nativo ni OCR)"]
+                ),
                 document_context=documento_ctx,
             )
 
@@ -683,7 +721,7 @@ class ParserPDF:
         #   2) Perfil de familia aprendido (Sprint 36, solo si ENABLE_DYNAMIC_LAYOUT)
         #   3) LayoutDetector interno (solo si ENABLE_DYNAMIC_LAYOUT)
         #   4) Heurística estándar (ULTIMAS_COLS) por defecto
-        advertencias = list(advertencias_iniciales)
+        advertencias = list(advertencias_iniciales) + self._ocr_advertencias
         column_order: Optional[list[OrigenColumna]] = None
         layout_columns: Optional[list[str]] = None
 
@@ -965,12 +1003,35 @@ class ParserPDF:
 
             for pagina in range(1, n_paginas + 1):
                 prefix = tmpdir_path / f'pg{pagina}'
-                subprocess.run(
-                    [pdftoppm_bin, '-png', '-r', '250',
-                     '-f', str(pagina), '-l', str(pagina),
-                     str(path), str(prefix)],
-                    capture_output=True, timeout=120
-                )
+                try:
+                    raster = subprocess.run(
+                        [pdftoppm_bin, '-png', '-gray', '-r', str(OCR_RENDER_DPI),
+                         '-f', str(pagina), '-l', str(pagina),
+                         str(path), str(prefix)],
+                        capture_output=True, timeout=OCR_PAGE_TIMEOUT_SECONDS
+                    )
+                except subprocess.TimeoutExpired:
+                    self._ocr_advertencias.append(
+                        f"Página {pagina}: no pudo rasterizarse dentro de "
+                        f"{OCR_PAGE_TIMEOUT_SECONDS} segundos y fue omitida."
+                    )
+                    logger.warning(
+                        "Rasterización OCR omitida por timeout en página %d de %s",
+                        pagina,
+                        path.name,
+                    )
+                    continue
+                if raster.returncode != 0:
+                    self._ocr_advertencias.append(
+                        f"Página {pagina}: falló su rasterización OCR y fue omitida."
+                    )
+                    logger.warning(
+                        "No se pudo rasterizar página %d de %s (código %s)",
+                        pagina,
+                        path.name,
+                        raster.returncode,
+                    )
+                    continue
                 imgs = list(tmpdir_path.glob(f'pg{pagina}*.png'))
                 if not imgs:
                     continue
@@ -983,6 +1044,11 @@ class ParserPDF:
                     rotacion_global = rot
 
                 texto = ocr_pagina(img_path, rotacion_global)
+                if not texto.strip():
+                    self._ocr_advertencias.append(
+                        f"Página {pagina}: OCR sin texto utilizable; revise que el "
+                        "documento procesado esté completo."
+                    )
                 lineas.extend(texto.split('\n'))
 
         return lineas, True, rotacion_global or 0

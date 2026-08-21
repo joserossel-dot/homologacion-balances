@@ -323,6 +323,18 @@ def _resolver_tipo_cuenta(origen_columna, codigo) -> str | None:
         return None
 
 
+def _resolver_tipos_permitidos(origen_columna) -> set[str]:
+    """Tipos compatibles con la columna, conservando sus ambiguedades reales."""
+    try:
+        from parser_universal import OrigenColumna as _OC
+        from parsers.account_type_resolver import AccountTypeResolver
+        origen = _OC(origen_columna) if origen_columna else _OC.DESCONOCIDO
+        resultado = AccountTypeResolver().resolve(origen_columna=origen)
+        return {tipo.value for tipo in resultado.allowed_types}
+    except Exception:
+        return set()
+
+
 _CONTRA_ORIGEN = {
     'activo': 'pasivo',
     'pasivo': 'activo',
@@ -358,11 +370,22 @@ def _etiqueta_origen(origen_columna, monto) -> str:
 
 def _codigo_compatible_con_origen(codigo: str | None, origen_columna, monto) -> bool:
     """Impide sugerencias que contradigan la columna efectiva del balance."""
-    tipo = _resolver_tipo_cuenta(_origen_efectivo(origen_columna, monto), None)
-    if not tipo:
+    tipos = _resolver_tipos_permitidos(_origen_efectivo(origen_columna, monto))
+    if not tipos:
         return True
     from pipeline.homologation_pipeline import HomologationPipeline
-    return HomologationPipeline._is_code_allowed_for_tipo(codigo, tipo)
+    return any(
+        HomologationPipeline._is_code_allowed_for_tipo(codigo, tipo)
+        for tipo in tipos
+    )
+
+
+def _pendientes_revision(df: pd.DataFrame) -> pd.DataFrame:
+    """Devuelve solo cuentas revisables: no totales y con saldo distinto de cero."""
+    pendientes = df[df['requiere_revision'] | (df['codigo_clasificado'] == '')]
+    pendientes = pendientes[~pendientes['es_total']]
+    montos = pd.to_numeric(pendientes['monto'], errors='coerce')
+    return pendientes[montos.isna() | montos.ne(0)]
 
 
 def _explicar_clasificacion(hp, account_code: str, account_name: str, *,
@@ -1087,8 +1110,7 @@ def main():
         for name in nombres_subidos:
             df_f = st.session_state.resultados.get(name)
             if df_f is not None and not df_f.empty:
-                pendientes_f = df_f[df_f['requiere_revision'] | (df_f['codigo_clasificado'] == '')]
-                pendientes_f = pendientes_f[~pendientes_f['es_total']]
+                pendientes_f = _pendientes_revision(df_f)
                 n_pendientes = len(pendientes_f)
                 if n_pendientes > 0:
                     st.caption(f"🔸 `{name}` ({n_pendientes} pendientes)")
@@ -1564,8 +1586,9 @@ def _tab_inteligencia() -> None:
 def _tab_resumen(df: pd.DataFrame):
     col1, col2, col3, col4 = st.columns(4)
     total = len(df)
-    sin_clasificar = (df['codigo_clasificado'] == '').sum()
-    requiere_rev = df['requiere_revision'].sum()
+    pendientes = _pendientes_revision(df)
+    sin_clasificar = (pendientes['codigo_clasificado'] == '').sum()
+    requiere_rev = len(pendientes)
     confianza_prom = df.loc[df['confianza'] > 0, 'confianza'].mean()
 
     col1.metric("Cuentas extraídas", total)
@@ -1588,8 +1611,7 @@ def _tab_resumen(df: pd.DataFrame):
 
 
 def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, archivo_nombre: str):
-    pendientes = df[df['requiere_revision'] | (df['codigo_clasificado'] == '')]
-    pendientes = pendientes[~pendientes['es_total']]
+    pendientes = _pendientes_revision(df)
 
     if pendientes.empty:
         st.success("✅ No hay cuentas pendientes de revisión.")

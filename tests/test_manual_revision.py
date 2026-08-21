@@ -7,6 +7,7 @@ from app_validacion import (
     _codigo_compatible_con_origen,
     _etiqueta_origen,
     _origen_efectivo,
+    _pendientes_revision,
 )
 
 
@@ -130,6 +131,44 @@ class TestOrigenContableEnRevision:
     def test_perdida_negativa_se_trata_como_ganancia(self):
         assert _origen_efectivo('perdida', -41840145) == 'ganancia'
         assert _codigo_compatible_con_origen('ER.01', 'perdida', -41840145)
+
+    def test_pasivo_permite_codigos_de_pasivo_y_patrimonio(self):
+        assert _codigo_compatible_con_origen('PC.01', 'pasivo', 100)
+        assert _codigo_compatible_con_origen('PNC.01', 'pasivo', 100)
+        assert _codigo_compatible_con_origen('PAT.01', 'pasivo', 100)
+
+    def test_pasivo_sigue_rechazando_activos(self):
+        assert not _codigo_compatible_con_origen('AC.01', 'pasivo', 100)
+
+
+class TestPendientesRevision:
+    def test_excluye_cuentas_con_monto_cero(self, df_resultados):
+        df = df_resultados.copy()
+        df.at[0, 'monto'] = 0
+
+        pendientes = _pendientes_revision(df)
+
+        assert 0 not in pendientes.index
+        assert 1 in pendientes.index
+
+    def test_excluye_cero_textual(self, df_resultados):
+        df = df_resultados.copy()
+        df['monto'] = df['monto'].astype(object)
+        df.at[0, 'monto'] = '0'
+
+        assert 0 not in _pendientes_revision(df).index
+
+    def test_conserva_monto_faltante_para_revision(self, df_resultados):
+        df = df_resultados.copy()
+        df.at[0, 'monto'] = None
+
+        assert 0 in _pendientes_revision(df).index
+
+    def test_sigue_excluyendo_totales(self, df_resultados):
+        df = df_resultados.copy()
+        df.at[0, 'es_total'] = True
+
+        assert 0 not in _pendientes_revision(df).index
 
 
 class TestVisualNameChange:
