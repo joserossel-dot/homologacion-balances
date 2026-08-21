@@ -62,8 +62,8 @@ ACCOUNT_TYPE_CONFIDENCE_THRESHOLD = 0.7
 OCR_RENDER_DPI = 165
 OCR_MAX_PIXELS = 3_500_000
 OCR_RETRY_MAX_PIXELS = 1_200_000
-OCR_PAGE_TIMEOUT_SECONDS = 60
-OCR_RETRY_TIMEOUT_SECONDS = 45
+OCR_PAGE_TIMEOUT_SECONDS = 120
+OCR_RETRY_TIMEOUT_SECONDS = 90
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -310,6 +310,14 @@ def parsear_monto(valor: str, separador_miles: str) -> Optional[float]:
 TESSDATA_DIR = '/usr/local/share/tessdata'
 
 
+def _tesseract_env() -> dict[str, str]:
+    """Entorno estable para instancias con una fracción pequeña de CPU."""
+    return {
+        'TESSDATA_PREFIX': TESSDATA_DIR,
+        'OMP_THREAD_LIMIT': '1',
+    }
+
+
 def obtener_tesseract_bin() -> str:
     return shutil.which('tesseract') or 'tesseract'
 
@@ -319,7 +327,7 @@ def detectar_rotacion_osd(img_path: Path) -> Optional[int]:
         result = subprocess.run(
             [obtener_tesseract_bin(), str(img_path), '-', '--psm', '0', '-l', 'osd'],
             capture_output=True, text=True, timeout=60,
-            env={'TESSDATA_PREFIX': TESSDATA_DIR}
+            env=_tesseract_env()
         )
         for line in result.stdout.splitlines():
             if 'Orientation in degrees' in line:
@@ -346,7 +354,7 @@ def detectar_rotacion_heuristica(img_path: Path) -> int:
             result = subprocess.run(
                 [obtener_tesseract_bin(), str(tmp_path), '-', '--psm', '6', '-l', 'spa'],
                 capture_output=True, text=True, timeout=90,
-                env={'TESSDATA_PREFIX': TESSDATA_DIR}
+                env=_tesseract_env()
             )
             texto = result.stdout
             palabras = re.findall(r'[a-záéíóúñA-ZÁÉÍÓÚÑ]{3,}', texto)
@@ -390,7 +398,7 @@ def ocr_pagina(img_path: Path, rotacion: int) -> str:
             result = subprocess.run(
                 [obtener_tesseract_bin(), str(imagen_ocr), '-', '--psm', '6', '-l', 'spa'],
                 capture_output=True, text=True, timeout=OCR_PAGE_TIMEOUT_SECONDS,
-                env={'TESSDATA_PREFIX': TESSDATA_DIR}
+                env=_tesseract_env()
             )
         except subprocess.TimeoutExpired:
             logger.warning(
@@ -418,7 +426,7 @@ def ocr_pagina(img_path: Path, rotacion: int) -> str:
                     [obtener_tesseract_bin(), str(retry_path), '-', '--psm', '6', '-l', 'spa'],
                     capture_output=True, text=True,
                     timeout=OCR_RETRY_TIMEOUT_SECONDS,
-                    env={'TESSDATA_PREFIX': TESSDATA_DIR},
+                    env=_tesseract_env(),
                 )
             except subprocess.TimeoutExpired:
                 logger.warning(

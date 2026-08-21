@@ -14,6 +14,10 @@ def _imagen_temporal(tmp_path: Path, size: tuple[int, int] = (100, 100)) -> Path
     return path
 
 
+def test_tesseract_limita_hilos_en_instancias_pequenas():
+    assert parser._tesseract_env()["OMP_THREAD_LIMIT"] == "1"
+
+
 def test_ocr_timeout_no_aborta_documento(monkeypatch, tmp_path, caplog):
     imagen = _imagen_temporal(tmp_path)
 
