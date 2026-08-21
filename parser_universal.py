@@ -605,6 +605,18 @@ def parsear_linea(
         if m:
             codigo = m.group(1)
             resto = m.group(2)
+        else:
+            # OCR puede perder todos los separadores de una cuenta puntual
+            # (1.01.01.01 -> 1010101). Recuperar el formato alternativo evita
+            # que el código quede incorporado al nombre y bloquee el matching.
+            for fmt, patron_alternativo in PATRONES_CODIGO_LINEA.items():
+                if fmt == formato_codigo:
+                    continue
+                m = patron_alternativo.match(linea)
+                if m:
+                    codigo = m.group(1)
+                    resto = m.group(2)
+                    break
     else:
         for fmt in (FormatoCodigo.PUNTO, FormatoCodigo.GUION, FormatoCodigo.COMPACTO):
             m = PATRONES_CODIGO_LINEA[fmt].match(linea)
@@ -626,6 +638,7 @@ def parsear_linea(
     tokens = resto.split()
     descartados_finales = 0
     while tokens and descartados_finales < 2 and \
+            normalizar_token_ocr(tokens[-1]) != '0' and \
             not re.search(r'\d', tokens[-1]) and len(tokens[-1]) <= 2:
         tokens.pop()
         descartados_finales += 1

@@ -102,3 +102,34 @@ def test_parseo_sin_texto_expone_advertencia_ocr(monkeypatch, tmp_path):
     assert resultado.requirio_ocr is True
     assert "Página 1: OCR sin texto utilizable" in resultado.advertencias
     assert "No se pudo extraer texto" in resultado.advertencias[-1]
+
+
+def test_linea_ocr_preserva_ceros_finales_y_columna_activo():
+    cuenta = parser.parsear_linea(
+        "1010101 Caja 3,100,000 1,385,515 1,714,485 0 1714485 o 0 o",
+        numero_linea=10,
+        formato_codigo=parser.FormatoCodigo.PUNTO,
+        separador_miles=",",
+        confianza_base=0.75,
+    )
+
+    assert cuenta is not None
+    assert cuenta.codigo == "1010101"
+    assert cuenta.nombre == "Caja"
+    assert cuenta.monto == 1714485
+    assert cuenta.origen_columna == parser.OrigenColumna.ACTIVO
+
+
+def test_linea_ocr_vehiculo_queda_en_activo():
+    cuenta = parser.parsear_linea(
+        "1.02.03.03 Vehículos 23,871,062 o 23,871,062 O 23,871,062 o 0 o",
+        numero_linea=33,
+        formato_codigo=parser.FormatoCodigo.PUNTO,
+        separador_miles=",",
+        confianza_base=0.75,
+    )
+
+    assert cuenta is not None
+    assert cuenta.nombre == "Vehículos"
+    assert cuenta.monto == 23871062
+    assert cuenta.origen_columna == parser.OrigenColumna.ACTIVO
