@@ -26,11 +26,11 @@ jobs:
       - name: Validate package and release configuration
         run: |
           poetry check
-          python -m py_compile app_validacion.py persistence/neon_store.py pipeline/homologation_pipeline.py
+          poetry run python -m py_compile app_validacion.py persistence/neon_store.py pipeline/homologation_pipeline.py
           git diff --check
       - name: Run certified functional suite
         run: >-
-          pytest -q
+          poetry run pytest -q
           tests/test_neon_store.py
           tests/test_neon_preflight.py
           tests/test_release_document_matrix.py
@@ -49,6 +49,6 @@ jobs:
       - name: Require Neon secret
         run: test -n "$DATABASE_URL"
       - name: Verify Neon and pipeline knowledge
-        run: python scripts/neon_preflight.py
+        run: poetry run python scripts/neon_preflight.py
       - name: Record certified commit
         run: echo "CERTIFIED_COMMIT=$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"

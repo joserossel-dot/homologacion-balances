@@ -30,5 +30,5 @@ def test_release_gate_exige_neon_y_registra_commit():
         Path(__file__).parents[1] / ".github" / "workflows" / "release-gate.yml"
     ).read_text()
     assert "secrets.NEON_DATABASE_URL" in source
-    assert "python scripts/neon_preflight.py" in source
+    assert "poetry run python scripts/neon_preflight.py" in source
     assert "CERTIFIED_COMMIT=$GITHUB_SHA" in source
