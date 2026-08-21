@@ -3,6 +3,12 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
+from app_validacion import (
+    _codigo_compatible_con_origen,
+    _etiqueta_origen,
+    _origen_efectivo,
+)
+
 
 def _nombre_mostrar(row: pd.Series) -> str:
     return row.get('nombre_revision_usuario', '') or row['nombre_original']
@@ -93,6 +99,37 @@ class TestNombreMostrar:
         original = row_base['nombre_original']
         row_base['nombre_revision_usuario'] = 'Nombre visual editado'
         assert row_base['nombre_original'] == original
+
+
+class TestOrigenContableEnRevision:
+    def test_monto_positivo_conserva_columna_extraida(self):
+        assert _origen_efectivo('perdida', 41840145) == 'perdida'
+        assert _etiqueta_origen('perdida', 41840145) == 'PERDIDA'
+
+    @pytest.mark.parametrize(
+        ('extraida', 'contra'),
+        [
+            ('activo', 'pasivo'),
+            ('pasivo', 'activo'),
+            ('perdida', 'ganancia'),
+            ('ganancia', 'perdida'),
+        ],
+    )
+    def test_monto_negativo_usa_contra_cuenta(self, extraida, contra):
+        assert _origen_efectivo(extraida, -100) == contra
+        assert _etiqueta_origen(extraida, -100) == (
+            f'{extraida.upper()} → {contra.upper()} (monto negativo)'
+        )
+
+    def test_perdida_rechaza_sugerencia_de_activo(self):
+        assert not _codigo_compatible_con_origen('AC.07', 'perdida', 41840145)
+
+    def test_perdida_permite_estado_de_resultados(self):
+        assert _codigo_compatible_con_origen('ER.09', 'perdida', 41840145)
+
+    def test_perdida_negativa_se_trata_como_ganancia(self):
+        assert _origen_efectivo('perdida', -41840145) == 'ganancia'
+        assert _codigo_compatible_con_origen('ER.01', 'perdida', -41840145)
 
 
 class TestVisualNameChange:

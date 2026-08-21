@@ -248,6 +248,48 @@ def _resolver_tipo_cuenta(origen_columna, codigo) -> str | None:
         return None
 
 
+_CONTRA_ORIGEN = {
+    'activo': 'pasivo',
+    'pasivo': 'activo',
+    'perdida': 'ganancia',
+    'ganancia': 'perdida',
+}
+
+
+def _origen_efectivo(origen_columna, monto) -> str:
+    """Naturaleza contable efectiva, preservando aparte la columna física.
+
+    En balances de 8 columnas un importe negativo representa una contra cuenta:
+    ACTIVO <-> PASIVO y PERDIDA <-> GANANCIA.
+    """
+    origen = getattr(origen_columna, 'value', origen_columna)
+    origen = str(origen or 'desconocido').strip().lower()
+    try:
+        es_negativo = monto is not None and pd.notna(monto) and float(monto) < 0
+    except (TypeError, ValueError):
+        es_negativo = False
+    return _CONTRA_ORIGEN.get(origen, origen) if es_negativo else origen
+
+
+def _etiqueta_origen(origen_columna, monto) -> str:
+    """Etiqueta auditable para la cola: extracción y naturaleza efectiva."""
+    extraido = getattr(origen_columna, 'value', origen_columna)
+    extraido = str(extraido or 'desconocido').strip().upper()
+    efectivo = _origen_efectivo(origen_columna, monto).upper()
+    if efectivo != extraido:
+        return f"{extraido} → {efectivo} (monto negativo)"
+    return extraido
+
+
+def _codigo_compatible_con_origen(codigo: str | None, origen_columna, monto) -> bool:
+    """Impide sugerencias que contradigan la columna efectiva del balance."""
+    tipo = _resolver_tipo_cuenta(_origen_efectivo(origen_columna, monto), None)
+    if not tipo:
+        return True
+    from pipeline.homologation_pipeline import HomologationPipeline
+    return HomologationPipeline._is_code_allowed_for_tipo(codigo, tipo)
+
+
 def _explicar_clasificacion(hp, account_code: str, account_name: str, *,
                             account_tipo: str | None = None,
                             origen_columna=None,
@@ -719,6 +761,17 @@ def main():
                         _t0_legacy = time.perf_counter()
                         r = motor.clasificar(c, company_giro_norm)
                         _t1_legacy = (time.perf_counter() - _t0_legacy) * 1000
+                        origen_efectivo = _origen_efectivo(c.origen_columna, c.monto)
+                        if (r.get('codigo_estandar') and
+                                not _codigo_compatible_con_origen(
+                                    r['codigo_estandar'], c.origen_columna, c.monto)):
+                            r = {
+                                **r,
+                                'codigo_estandar': None,
+                                'metodo': 'sin_clasificar+filtro_columna',
+                                'confianza': 0.0,
+                                'requiere_revision': True,
+                            }
                         filas.append({
                             'linea': c.linea,
                             'codigo_original': c.codigo or '',
@@ -726,6 +779,7 @@ def main():
                             'nombre_normalizado': normalizar_nombre(c.nombre),
                             'monto': c.monto,
                             'origen_columna': c.origen_columna.value,
+                            'origen_columna_efectiva': origen_efectivo,
                             'es_total': c.es_total,
                             'codigo_clasificado': r['codigo_estandar'] or '',
                             'metodo': r['metodo'],
@@ -733,7 +787,7 @@ def main():
                             'requiere_revision': r['requiere_revision'],
                             'nota': r.get('nota_regla_especial', ''),
                             'confianza_extraccion': c.confianza_extraccion,
-                            'origen_columna_display': c.origen_columna.value,
+                            'origen_columna_display': _etiqueta_origen(c.origen_columna, c.monto),
                             'nombre_revision_usuario': '',
                             'tipo_revision': '',
                             'origen': _origen_desde_metodo_display(r['metodo']),
@@ -815,6 +869,8 @@ def main():
                         ab = AccountAdapter.from_cuenta_raw(c)
                         interp = BalanceInterpreter(ab)
                         classification_amount = interp.classification_amount
+                        origen_efectivo = _origen_efectivo(c.origen_columna, classification_amount)
+                        account_tipo = _resolver_tipo_cuenta(origen_efectivo, c.codigo)
                         if classification_amount is None:
                             codigo_clasificado = ""
                             metodo = "movement_only"
@@ -827,7 +883,11 @@ def main():
                         else:
                             clasificadas += 1
                             _t0_clasif = time.perf_counter()
-                            classification = hp._classify_account(ab.account_code, ab.account_name)
+                            classification = hp._classify_account(
+                                ab.account_code,
+                                ab.account_name,
+                                account_tipo=account_tipo,
+                            )
                             tiempo_clasif_ms = round((time.perf_counter() - _t0_clasif) * 1000, 3)
                             adjustment = hp._rule_processor.aplicar(
                                 nombre_cuenta=ab.account_name,
@@ -838,6 +898,20 @@ def main():
                                 adjustment.codigo_final if adjustment.aplica
                                 else classification.get("standard_code")
                             )
+                            if (final_code and
+                                    not _codigo_compatible_con_origen(
+                                        final_code, c.origen_columna, classification_amount)):
+                                final_code = None
+                                classification = {
+                                    **classification,
+                                    "standard_code": None,
+                                    "confidence": 0.0,
+                                    "method": "unclassified_type_filter",
+                                    "reason": (
+                                        "Sugerencia descartada por ser incompatible con "
+                                        f"la columna efectiva {account_tipo}"
+                                    ),
+                                }
                             codigo_clasificado = final_code or ""
                             metodo = classification.get("method", "")
                             confianza = classification.get("confidence", 0.0)
@@ -857,6 +931,7 @@ def main():
                             'nombre_normalizado': normalizar_nombre(c.nombre),
                             'monto': c.monto,
                             'origen_columna': c.origen_columna.value,
+                            'origen_columna_efectiva': origen_efectivo,
                             'es_total': c.es_total,
                             'codigo_clasificado': codigo_clasificado,
                             'metodo': metodo,
@@ -864,7 +939,8 @@ def main():
                             'requiere_revision': requiere_revision,
                             'nota': nota,
                             'confianza_extraccion': c.confianza_extraccion,
-                            'origen_columna_display': c.origen_columna.value,
+                            'origen_columna_display': _etiqueta_origen(
+                                c.origen_columna, classification_amount),
                             'nombre_revision_usuario': '',
                             'tipo_revision': '',
                             'origen': clasif_origen,
@@ -1462,6 +1538,21 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
         if confirmar_lote and n_sel > 0 and cat_lote:
             codigo_lote = '__EXCLUIR__' if cat_lote == '🚫 NO INCLUIR' else (cat_lote if cat_lote != '➕ NUEVA CATEGORÍA' else None)
             if codigo_lote:
+                incompatibles = [
+                    idx_lote for idx_lote in st.session_state.lote_seleccion
+                    if codigo_lote != '__EXCLUIR__'
+                    and not _codigo_compatible_con_origen(
+                        codigo_lote,
+                        df.at[idx_lote, 'origen_columna'],
+                        df.at[idx_lote, 'monto'],
+                    )
+                ]
+                if incompatibles:
+                    st.error(
+                        "La categoría elegida contradice la columna contable de "
+                        f"{len(incompatibles)} cuenta(s). No se aplicó el lote."
+                    )
+                    st.stop()
                 procesados = 0
                 for idx_lote in list(st.session_state.lote_seleccion):
                     nombre_orig = df.at[idx_lote, 'nombre_original']
@@ -1507,7 +1598,12 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                     st.session_state.lote_seleccion.discard(idx); st.rerun()
 
             with c1:
-                col_actual = row.get('origen_columna_display', row.get('origen_columna', '')).upper()
+                col_extraida = row.get('origen_columna', 'desconocido')
+                col_actual = row.get(
+                    'origen_columna_efectiva',
+                    _origen_efectivo(col_extraida, row.get('monto')),
+                ).upper()
+                etiqueta_columna = _etiqueta_origen(col_extraida, row.get('monto'))
                 badge_bg = {
                     'ACTIVO': '#1E90FF', 'PASIVO': '#FF8C00',
                     'PERDIDA': '#DC143C', 'GANANCIA': '#2E8B57',
@@ -1515,9 +1611,10 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                 st.markdown(
                     f"<span style='background:{badge_bg}; color:white; "
                     f"padding:2px 10px; border-radius:4px; font-size:0.75em; "
-                    f"font-weight:600; letter-spacing:0.5px;'>{col_actual}</span>",
+                    f"font-weight:600; letter-spacing:0.5px;'>{etiqueta_columna}</span>",
                     unsafe_allow_html=True,
                 )
+                st.caption("Columna de origen del balance")
                 st.markdown(f"**{_nombre_mostrar(row)}**")
                 monto_val = row['monto']
                 if pd.notna(monto_val):
@@ -1551,8 +1648,11 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                             df_mod.at[idx, 'nombre_original'] = nuevo_nombre
                             df_mod.at[idx, 'nombre_revision_usuario'] = ''
                             df_mod.at[idx, 'origen_columna'] = nueva_nat.lower()
-                            df_mod.at[idx, 'origen_columna_display'] = nueva_nat.lower()
                             df_mod.at[idx, 'monto'] = nuevo_monto
+                            df_mod.at[idx, 'origen_columna_efectiva'] = _origen_efectivo(
+                                nueva_nat, nuevo_monto)
+                            df_mod.at[idx, 'origen_columna_display'] = _etiqueta_origen(
+                                nueva_nat, nuevo_monto)
                             if codigo_final:
                                 df_mod.at[idx, 'codigo_clasificado'] = codigo_final
                             df_mod.at[idx, 'metodo'] = 'manual_revision'
@@ -1574,13 +1674,22 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
 
             with c2:
                 sugerido = row['codigo_clasificado']
+                if sugerido and not _codigo_compatible_con_origen(
+                        sugerido, row.get('origen_columna'), row.get('monto')):
+                    sugerido = ''
                 st.write(f"Sugerido: **{sugerido or '(ninguno)'}**")
 
-                default_idx = (opciones_codigo.index(sugerido)
-                               if sugerido in opciones_codigo else 0)
+                opciones_fila = [opciones_codigo[0]] + [
+                    codigo for codigo in opciones_codigo[1:]
+                    if codigo in ('➕ NUEVA CATEGORÍA', '🚫 NO INCLUIR')
+                    or _codigo_compatible_con_origen(
+                        codigo, row.get('origen_columna'), row.get('monto'))
+                ]
+                default_idx = (opciones_fila.index(sugerido)
+                               if sugerido in opciones_fila else 0)
                 seleccion = st.selectbox(
                     "Clasificación correcta",
-                    opciones_codigo,
+                    opciones_fila,
                     index=default_idx,
                     format_func=lambda c: (
                         f"{c} — {catalogo[c]['nombre_estandar']}" if c in catalogo
