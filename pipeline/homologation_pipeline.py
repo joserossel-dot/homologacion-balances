@@ -19,6 +19,7 @@ from models.account_balance import AccountBalance
 from parser_universal import FormatoCodigo, ParserPDF, ResultadoParseo
 from pipeline.cmcc_classifier import CMCCClassifier
 from pipeline.features import CMCCFeatureFlags
+from persistence.neon_store import NeonKnowledgeStore
 from reglas_especiales import ProcesadorReglasEspeciales
 from decision.engine import DecisionEngine
 from semantic.semantic_engine import SemanticEngine
@@ -67,6 +68,15 @@ class HomologationPipeline:
 
     @staticmethod
     def _load_dictionary() -> list[dict[str, str]]:
+        store = NeonKnowledgeStore()
+        if store.enabled:
+            try:
+                data = store.load_dictionary()
+                if data:
+                    logger.info("Diccionario cargado desde Neon: %d entradas", len(data))
+                    return [e for e in data if e.get("codigo_estandar") != "__EXCLUIR__"]
+            except Exception as exc:
+                logger.warning("Neon no disponible; usando diccionario JSON: %s", exc)
         path = Path(__file__).resolve().parent.parent / "diccionario.json"
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)

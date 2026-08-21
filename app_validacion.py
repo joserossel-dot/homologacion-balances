@@ -21,6 +21,7 @@ Funcionalidad:
 """
 
 import json
+import os
 import re
 import time
 from pathlib import Path
@@ -28,6 +29,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 from rapidfuzz import fuzz, process
+from dotenv import load_dotenv
 
 from clasificador_codigo_cuenta import ClasificadorCodigo
 from catalog_selection import opciones_clasificacion
@@ -44,15 +46,27 @@ from parsers.column_interpretation import es_ingreso as es_ingreso_col, es_gasto
 from extractor_metadata import extraer_metadata, MetadataEmpresa
 from account_qualification import qualify_cuentas as _safe_qualify_cuentas, \
     safe_mode_enabled as _safe_mode_enabled
+from persistence.neon_store import NeonKnowledgeStore
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIGURACIÓN
 # ─────────────────────────────────────────────────────────────────────────────
 
 BASE_DIR = Path(__file__).parent
+load_dotenv(BASE_DIR / '.env')
 UMBRAL_REVISION = 0.85  # bajo este valor, la cuenta va a la cola de revisión
 USE_LEGACY_ENGINE = False  # True → MotorHibridoLocal (antiguo); False → HomologationPipeline (nuevo, default)
 SHADOW_MODE = True  # True → ejecuta nuevo pipeline en paralelo sin afectar UI, guarda logs en logs/shadow/
+
+
+def _build_date() -> str:
+    configured = os.environ.get("APP_BUILD_DATE")
+    if configured:
+        return configured
+    try:
+        return (BASE_DIR / ".build_date").read_text(encoding="utf-8").strip()
+    except OSError:
+        return "desarrollo-local"
 
 st.set_page_config(
     page_title="Homologación de Balances Tributarios",
@@ -67,14 +81,75 @@ st.set_page_config(
 
 @st.cache_data
 def cargar_catalogo() -> dict:
+    store = NeonKnowledgeStore()
+    if store.enabled:
+        try:
+            catalogo = store.load_catalog()
+            if catalogo:
+                return catalogo
+        except Exception:
+            pass
     with open(BASE_DIR / 'catalogo_maestro.json', encoding='utf-8') as f:
         return json.load(f)
 
 
 @st.cache_data
 def cargar_diccionario_base() -> list[dict]:
+    store = NeonKnowledgeStore()
+    if store.enabled:
+        try:
+            diccionario = store.load_dictionary()
+            if diccionario:
+                return diccionario
+        except Exception:
+            pass
     with open(BASE_DIR / 'diccionario.json', encoding='utf-8') as f:
         return json.load(f)
+
+
+def _persistir_validacion(
+    *, nombre: str, codigo: str, fuente: str, agregar_diccionario: bool,
+    sugerido: str | None = None, metodo: str | None = None,
+    confianza: float | None = None, archivo: str = '',
+) -> bool:
+    """Persiste en Neon; retorna False para que el caller use fallback JSON."""
+    store = NeonKnowledgeStore()
+    if not store.enabled:
+        return False
+    try:
+        store.save_validation(
+            account_name=nombre,
+            validated_code=codigo,
+            source=fuente,
+            suggested_code=sugerido,
+            suggested_method=metodo,
+            suggested_confidence=confianza,
+            source_file=archivo,
+            add_to_dictionary=agregar_diccionario,
+        )
+        cargar_diccionario_base.clear()
+        return True
+    except Exception:
+        st.error("Neon no pudo guardar la validación; se usará respaldo local.")
+        return False
+
+
+def _persistir_catalogo(entry: dict) -> bool:
+    store = NeonKnowledgeStore()
+    if not store.enabled:
+        return False
+    try:
+        store.save_catalog_entry(entry)
+        cargar_catalogo.clear()
+        return True
+    except Exception:
+        st.error("Neon no pudo guardar la categoría; se usará respaldo local.")
+        return False
+
+
+@st.cache_data(ttl=60)
+def _neon_disponible() -> bool:
+    return NeonKnowledgeStore().healthcheck()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -661,6 +736,14 @@ def main():
 
     with st.sidebar:
         st.header("⚙️ Configuración")
+        commit = os.environ.get("RENDER_GIT_COMMIT", "local")[:8]
+        release_branch = os.environ.get("APP_RELEASE_BRANCH", "desarrollo-local")
+        build_date = _build_date()
+        persistence_label = "Neon conectado" if _neon_disponible() else "JSON local"
+        st.caption(
+            f"Rama `{release_branch}` · Commit `{commit}` · Build `{build_date}` · "
+            f"Persistencia: **{persistence_label}**"
+        )
         archivos = st.file_uploader(
             "Balances tributarios", type=['pdf', 'xlsx', 'xls'], accept_multiple_files=True
         )
@@ -1554,6 +1637,7 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                     )
                     st.stop()
                 procesados = 0
+                fallback_json_lote = False
                 for idx_lote in list(st.session_state.lote_seleccion):
                     nombre_orig = df.at[idx_lote, 'nombre_original']
                     codigo_orig = df.at[idx_lote, 'codigo_original']
@@ -1566,13 +1650,24 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                     st.session_state.resultados[archivo_nombre].at[idx_lote, 'evidencia'] = 'Asignación en lote por analista'
                     # Gold Standard autoaprendizaje
                     _save_gold_standard(nombre_orig, codigo_orig, codigo_lote)
+                    persistido = _persistir_validacion(
+                        nombre=nombre_orig,
+                        codigo=codigo_lote,
+                        fuente='validacion_humana_lote',
+                        agregar_diccionario="diccionario" in alcance_lote,
+                        sugerido=df.at[idx_lote, 'codigo_clasificado'] or None,
+                        metodo=df.at[idx_lote, 'metodo'],
+                        confianza=float(df.at[idx_lote, 'confianza']),
+                        archivo=archivo_nombre,
+                    )
                     if "diccionario" in alcance_lote:
                         entrada = {'cuenta_original': nombre_orig, 'codigo_estandar': codigo_lote, 'fuente': 'validacion_humana_lote'}
                         st.session_state.diccionario.append(entrada)
                         st.session_state.correcciones.append(entrada)
+                        fallback_json_lote = fallback_json_lote or not persistido
                     propagar_clasificacion_resultados(nombre_orig, codigo_lote, 'validacion_humana_lote_propagada')
                     procesados += 1
-                if "diccionario" in alcance_lote:
+                if "diccionario" in alcance_lote and fallback_json_lote:
                     with open(BASE_DIR / 'diccionario.json', 'w', encoding='utf-8') as f:
                         json.dump(st.session_state.diccionario, f, ensure_ascii=False, indent=2)
                 st.session_state.lote_seleccion = set()
@@ -1743,8 +1838,9 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                                 'afecta_ebitda': False,
                             }
                             catalogo[nuevo_codigo.strip().upper()] = nueva_entrada
-                            with open(BASE_DIR / 'catalogo_maestro.json', 'w', encoding='utf-8') as f:
-                                json.dump(catalogo, f, ensure_ascii=False, indent=2)
+                            if not _persistir_catalogo(nueva_entrada):
+                                with open(BASE_DIR / 'catalogo_maestro.json', 'w', encoding='utf-8') as f:
+                                    json.dump(catalogo, f, ensure_ascii=False, indent=2)
                             codigo_final = nuevo_codigo.strip().upper()
                             st.toast(f"Nueva categoría '{nuevo_nombre_cat}' ({codigo_final}) creada ✨", icon="🆕")
                         else:
@@ -1756,11 +1852,21 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                         st.session_state.resultados[archivo_nombre].at[idx, 'confianza'] = 1.0
                         st.session_state.resultados[archivo_nombre].at[idx, 'requiere_revision'] = False
                         if "diccionario" in alcance:
-                            st.session_state.diccionario.append({
+                            entrada_exclusion = {
                                 'cuenta_original': _nombre_mostrar(row),
                                 'codigo_estandar': '__EXCLUIR__',
                                 'fuente': 'excluido_analista'
-                            })
+                            }
+                            st.session_state.diccionario.append(entrada_exclusion)
+                        persistido = _persistir_validacion(
+                            nombre=_nombre_mostrar(row), codigo='__EXCLUIR__',
+                            fuente='excluido_analista',
+                            agregar_diccionario="diccionario" in alcance,
+                            sugerido=row['codigo_clasificado'] or None,
+                            metodo=row['metodo'], confianza=float(row['confianza']),
+                            archivo=archivo_nombre,
+                        )
+                        if "diccionario" in alcance and not persistido:
                             with open(BASE_DIR / 'diccionario.json', 'w', encoding='utf-8') as f:
                                 json.dump(st.session_state.diccionario, f, ensure_ascii=False, indent=2)
                         propagar_clasificacion_resultados(row['nombre_original'], '__EXCLUIR__', 'excluido_analista_propagado')
@@ -1778,6 +1884,14 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                         st.session_state.resultados[archivo_nombre].at[idx, 'requiere_revision'] = False
                         st.session_state.lote_seleccion.discard(idx)
                         _save_gold_standard(row['nombre_original'], row['codigo_original'], codigo_final)
+                        persistido = _persistir_validacion(
+                            nombre=row['nombre_original'], codigo=codigo_final,
+                            fuente='validacion_humana',
+                            agregar_diccionario="diccionario" in alcance,
+                            sugerido=row['codigo_clasificado'] or None,
+                            metodo=row['metodo'], confianza=float(row['confianza']),
+                            archivo=archivo_nombre,
+                        )
                         if "diccionario" in alcance:
                             nuevo_dic = {
                                 'cuenta_original': row['nombre_original'],
@@ -1786,8 +1900,9 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                             }
                             st.session_state.diccionario.append(nuevo_dic)
                             st.session_state.correcciones.append(nuevo_dic)
-                            with open(BASE_DIR / 'diccionario.json', 'w', encoding='utf-8') as f:
-                                json.dump(st.session_state.diccionario, f, ensure_ascii=False, indent=2)
+                            if not persistido:
+                                with open(BASE_DIR / 'diccionario.json', 'w', encoding='utf-8') as f:
+                                    json.dump(st.session_state.diccionario, f, ensure_ascii=False, indent=2)
                             st.toast(f"'{_nombre_mostrar(row)[:35]}' → {codigo_final} guardado 📚", icon="✅")
                         else:
                             st.toast(f"'{_nombre_mostrar(row)[:35]}' → {codigo_final} (solo este caso)", icon="✅")
@@ -2033,6 +2148,28 @@ def _tab_diccionario():
 
 def _tab_aprendizaje():
     st.subheader("🧠 Autoaprendizaje — Gold Standard")
+    store = NeonKnowledgeStore()
+    if _neon_disponible():
+        try:
+            stats = store.learning_statistics()
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Diccionario activo", stats["dictionary_entries"])
+            c2.metric("Aprendidas por humanos", stats["human_learned"])
+            c3.metric("Validaciones registradas", stats["validations"])
+            c4.metric("Correcciones", stats["corrections"])
+            st.caption(
+                "Fuente: Neon. Cada validación queda auditada y las entradas agregadas "
+                "al diccionario son consumidas por el pipeline en futuras sesiones."
+            )
+            recientes = store.recent_validations(20)
+            if recientes:
+                st.markdown("#### Actividad reciente")
+                st.dataframe(pd.DataFrame(recientes), use_container_width=True, hide_index=True)
+            else:
+                st.info("Neon está conectado; aún no hay validaciones registradas.")
+            return
+        except Exception:
+            st.warning("No fue posible leer las métricas de Neon; se muestran datos locales.")
     try:
         builder = GoldBuilder()
         stats = builder.statistics()
@@ -2120,6 +2257,9 @@ def _tab_knowledge_manager() -> None:
     Toda acción (promover, rechazar, rollback) requiere aprobación explícita.
     """
     st.subheader("🧠 Knowledge Manager")
+    if _neon_disponible():
+        _tab_neon_knowledge_manager()
+        return
     st.caption(
         "Administra exclusivamente `gold_standard_runtime.db` vía `RuntimeManager`. "
         "El benchmark (`gold_standard.db`) permanece intacto. Eventos auditables: "
@@ -2148,6 +2288,62 @@ def _tab_knowledge_manager() -> None:
         _km_estadisticas(rm, gold_path)
     with tab_an:
         _km_runtime_analytics(rm, gold_path)
+
+
+def _tab_neon_knowledge_manager() -> None:
+    """Gobernanza durable del diccionario cuando Neon es la fuente activa."""
+    store = NeonKnowledgeStore()
+    st.caption(
+        "Fuente durable: Neon. El rollback solo se permite si el cambio elegido "
+        "continúa siendo el estado vigente de la cuenta."
+    )
+    tab_hist, tab_conf, tab_stats = st.tabs(
+        ["📜 Historial", "⚔️ Conflictos", "📊 Estadísticas"]
+    )
+    with tab_hist:
+        history = store.dictionary_history(100)
+        if not history:
+            st.info("Aún no hay cambios humanos en el diccionario Neon.")
+        else:
+            st.dataframe(pd.DataFrame(history), use_container_width=True, hide_index=True)
+            options = {
+                f"#{row['id']} · {row['cuenta_original']} · "
+                f"{row['codigo_anterior'] or 'sin entrada'} → {row['codigo_nuevo'] or 'inactivo'}": row
+                for row in history if row["accion"] != "ROLLBACK"
+            }
+            if options:
+                selected = st.selectbox("Cambio a revertir", list(options))
+                confirm = st.checkbox(
+                    "Confirmo que deseo revertir este cambio vigente",
+                    key="neon_rollback_confirm",
+                )
+                if st.button("↩️ Ejecutar rollback", disabled=not confirm):
+                    row = options[selected]
+                    if store.rollback_dictionary_change(row["id"], reviewer=_km_usuario()):
+                        cargar_diccionario_base.clear()
+                        st.success("Rollback aplicado y registrado en el historial.")
+                        st.rerun()
+                    else:
+                        st.error(
+                            "No se aplicó: el cambio ya no es el estado vigente o no existe."
+                        )
+    with tab_conf:
+        conflicts = store.conflicts()
+        if conflicts:
+            st.warning(f"Se detectaron {len(conflicts)} cuentas con códigos históricos distintos.")
+            st.dataframe(pd.DataFrame(conflicts), use_container_width=True, hide_index=True)
+        else:
+            st.success("No hay conflictos históricos registrados en Neon.")
+    with tab_stats:
+        stats = store.learning_statistics()
+        cols = st.columns(5)
+        labels = [
+            ("Catálogo", "catalog_entries"), ("Diccionario", "dictionary_entries"),
+            ("Aprendidas", "human_learned"), ("Validaciones", "validations"),
+            ("Correcciones", "corrections"),
+        ]
+        for col, (label, key) in zip(cols, labels):
+            col.metric(label, stats[key])
 
 
 def _km_pendientes(rm: RuntimeManager, gold_path: Path) -> None:

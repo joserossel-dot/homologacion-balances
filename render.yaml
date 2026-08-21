@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: homologacion-balances-1
+    runtime: docker
+    branch: codex/release-operativa-neon
+    dockerfilePath: ./Dockerfile
+    autoDeploy: false
+    healthCheckPath: /_stcore/health
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: APP_RELEASE_BRANCH
+        value: codex/release-operativa-neon

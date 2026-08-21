@@ -20,11 +20,14 @@ WORKDIR /app
 # Copiar todo el proyecto
 COPY . .
 
+# Trazabilidad visible del artefacto desplegado (UTC, generada en cada build).
+RUN date -u +%Y-%m-%dT%H:%M:%SZ > /app/.build_date
+
 # Desactivar el entorno virtual e instalar las dependencias de forma global
-RUN poetry config virtualenvs.create false && poetry install --no-interaction --no-ansi
+RUN poetry config virtualenvs.create false && poetry install --only main --sync --no-interaction --no-ansi
 
 # Forzamos a Python a mirar tanto en la raíz como en la carpeta src
 ENV PYTHONPATH="/app:/app/src"
 
 # CAMBIO CRUCIAL: Arrancamos con 'streamlit run', asignando el puerto 10000 de Render
-CMD ["streamlit", "run", "app_validacion.py", "--server.port=10000", "--server.address=0.0.0.0"]
+CMD ["sh", "-c", "streamlit run app_validacion.py --server.port=${PORT:-10000} --server.address=0.0.0.0"]
