@@ -456,32 +456,47 @@ class TestLayoutDetectorIntegration:
 
 
 class TestAccountTypeResolverIntegration:
-    """AccountTypeResolver vía ExtractionContext en ParserPDF."""
+    """Fase A: ParserPDF es un extractor pasivo.
 
-    def test_contexto_vacio_no_activa_resolver(self, native_pdf):
-        """ExtractionContext() vacío no debe activar el resolver."""
+    Invariantes:
+    1. ParserPDF NO escribe `tipo_cuenta` (ni con contexto, ni con flag legacy).
+    2. DocumentAnalyzer conserva el contexto/layout aunque el parser no resuelva.
+    3. La resolución contable debe probarse fuera del parser (AccountTypeResolver).
+    """
+
+    def test_parser_no_escribe_tipo_cuenta_con_contexto_vacio(self, native_pdf):
+        """ExtractionContext() vacío: el parser no escribe tipo_cuenta."""
         r = ParserPDF().parsear(native_pdf, ExtractionContext())
         cuentas_con_tipo = sum(1 for c in r.cuentas if c.tipo_cuenta is not None)
         assert cuentas_con_tipo == 0, (
-            f"Contexto vacío activó resolver: {cuentas_con_tipo} cuentas con tipo"
+            f"ParserPDF escribió tipo_cuenta: {cuentas_con_tipo} cuentas"
         )
 
-    def test_contexto_real_de_analyzer_activa_resolver(self, native_pdf):
-        """Contexto desde DocumentAnalyzer activa el resolver."""
-        from parsers.analyzer import DocumentAnalyzer
-
+    def test_parser_no_escribe_tipo_cuenta_con_analyzer(self, native_pdf):
+        """Contexto real de DocumentAnalyzer: el parser sigue sin escribir tipo_cuenta."""
         analyzer = DocumentAnalyzer()
         analysis = analyzer.analyze(native_pdf)
         context = analyzer.to_extraction_context(analysis)
         assert context.analysis_source == "DocumentAnalyzer"
         r = ParserPDF().parsear(native_pdf, context)
         cuentas_con_tipo = sum(1 for c in r.cuentas if c.tipo_cuenta is not None)
-        assert cuentas_con_tipo > 0, (
-            f"Resolver no activó: 0 cuentas con tipo (confianza={context.confidence})"
+        assert cuentas_con_tipo == 0, (
+            f"ParserPDF escribió tipo_cuenta con contexto: {cuentas_con_tipo}"
         )
 
-    def test_confidence_bajo_no_activa(self, native_pdf):
-        """Context con confidence bajo no debe activar el resolver."""
+    def test_analyzer_conserva_contexto_y_layout(self, native_pdf):
+        """DocumentAnalyzer conserva contexto/layout independiente del parser."""
+        from parsers.integration import parse_with_analysis
+        enhanced = parse_with_analysis(native_pdf)
+        assert enhanced.analysis.layout.columns is not None
+        assert len(enhanced.analysis.layout.columns) > 0
+        assert enhanced.analysis.orientation.rotation == 0
+        # La metadata del análisis sigue accesible aunque ParserPDF no resuelva tipos
+        ctx = enhanced.resultado.document_context
+        assert ctx is not None
+
+    def test_parser_no_escribe_tipo_cuenta_con_confidence_baja(self, native_pdf):
+        """Context con confidence bajo: el parser no escribe tipo_cuenta (invariante)."""
         context = ExtractionContext(
             analysis_source="DocumentAnalyzer",
             confidence=0.3,
@@ -491,26 +506,17 @@ class TestAccountTypeResolverIntegration:
         cuentas_con_tipo = sum(1 for c in r.cuentas if c.tipo_cuenta is not None)
         assert cuentas_con_tipo == 0
 
-    def test_analysis_source_incorrecto_no_activa(self, native_pdf):
-        """Context sin analysis_source='DocumentAnalyzer' no activa resolver."""
-        context = ExtractionContext(
-            analysis_source="manual",
-            confidence=0.9,
-            layout_hint=["activo", "pasivo"],
-        )
-        r = ParserPDF().parsear(native_pdf, context)
-        cuentas_con_tipo = sum(1 for c in r.cuentas if c.tipo_cuenta is not None)
-        assert cuentas_con_tipo == 0
-
-    def test_flag_legacy_sigue_funcionando(self, native_pdf):
-        """ENABLE_ACCOUNT_TYPE_RESOLVER=True activa resolver incluso sin contexto."""
+    def test_parser_no_escribe_tipo_cuenta_con_flag_legacy(self, native_pdf):
+        """ENABLE_ACCOUNT_TYPE_RESOLVER=True ya no hace escribir al parser."""
         import parser_universal as pu
         original = pu.ENABLE_ACCOUNT_TYPE_RESOLVER
         pu.ENABLE_ACCOUNT_TYPE_RESOLVER = True
         try:
             r = ParserPDF().parsear(native_pdf)
             cuentas_con_tipo = sum(1 for c in r.cuentas if c.tipo_cuenta is not None)
-            assert cuentas_con_tipo > 0, "Flag legacy no activó resolver"
+            assert cuentas_con_tipo == 0, (
+                "Flag legacy escribió tipo_cuenta — Fase A exige extractor pasivo"
+            )
         finally:
             pu.ENABLE_ACCOUNT_TYPE_RESOLVER = original
 
@@ -519,19 +525,21 @@ class TestAccountTypeResolverIntegration:
         import parser_universal as pu
         assert pu.ENABLE_ACCOUNT_TYPE_RESOLVER is False
 
-    def test_tipos_cuenta_en_rango_valido(self, native_pdf):
-        """Tipos resueltos deben ser valores válidos."""
-        from parsers.analyzer import DocumentAnalyzer
-
-        analyzer = DocumentAnalyzer()
-        context = analyzer.to_extraction_context(analyzer.analyze(native_pdf))
-        r = ParserPDF().parsear(native_pdf, context)
+    def test_resolucion_contable_fuera_del_parser(self, native_pdf):
+        """La resolución contable se prueba fuera del parser (AccountTypeResolver)."""
+        from parsers.account_type_resolver import AccountTypeResolver
+        r = ParserPDF().parsear(native_pdf)
+        assert len(r.cuentas) > 0
+        resolver = AccountTypeResolver()
         tipos_validos = {"ACTIVO", "PASIVO", "PATRIMONIO", "PERDIDA", "GANANCIA", "DESCONOCIDO"}
-        for c in r.cuentas:
-            if c.tipo_cuenta is not None:
-                assert c.tipo_cuenta in tipos_validos, (
-                    f"Tipo inválido: {c.tipo_cuenta}"
-                )
+        for c in r.cuentas[:5]:
+            res = resolver.resolve(
+                origen_columna=c.origen_columna,
+                codigo=c.codigo,
+            )
+            assert res.account_type.value in tipos_validos, (
+                f"Tipo inválido: {res.account_type.value}"
+            )
 
     def test_compatibilidad_con_extraction_context_vacio(self, native_pdf):
         """parsear(path, ExtractionContext()) produce mismo resultado que parsear(path)."""
@@ -545,14 +553,12 @@ class TestAccountTypeResolverIntegration:
         for c1, c2 in zip(r_sin.cuentas, r_con.cuentas):
             assert c1.nombre == c2.nombre
             assert c1.monto == c2.monto
-            # tipo_cuenta debe ser None en ambos (sin resolver)
+            # tipo_cuenta debe ser None en ambos (extractor pasivo)
             assert c1.tipo_cuenta is None
             assert c2.tipo_cuenta is None
 
     def test_analysis_source_en_context(self, native_pdf):
         """DocumentAnalyzer.to_extraction_context() establece analysis_source."""
-        from parsers.analyzer import DocumentAnalyzer
-
         context = DocumentAnalyzer().to_extraction_context(
             DocumentAnalyzer().analyze(native_pdf)
         )

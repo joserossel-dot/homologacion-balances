@@ -1,8 +1,7 @@
-"""
-Valida AccountTypeResolver contra el dataset completo con checkpoint.
+"""Valida AccountTypeResolver contra el dataset completo con checkpoint.
 
-Procesa cada PDF una sola vez (con flag=True). Guarda checkpoint
-cada 10 documentos. La resolución es O(n) en cada cuenta — CPU puro.
+Procesa cada PDF una sola vez y resuelve el tipo de cuenta después de la
+extracción. Guarda checkpoint cada cinco documentos.
 """
 
 import json
@@ -12,7 +11,6 @@ from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import parser_universal as pu
 from parser_universal import ParserPDF
 
 CHECKPOINT_PATH = Path(__file__).parent / "account_type_validation_checkpoint.json"
@@ -50,8 +48,6 @@ def cargar_checkpoint() -> dict:
         "total_origen_columna": {},
         "total_metodos": {},
         "confianzas_por_metodo": {},
-        "documentos_con_cambio_cuentas": 0,
-        "cambio_cuentas_detalle": [],
     }
 
 
@@ -62,39 +58,39 @@ def guardar_checkpoint(data: dict):
 
 
 def procesar_pdf(pdf: Path) -> dict:
-    pu.ENABLE_ACCOUNT_TYPE_RESOLVER = False
-    res_classic = ParserPDF().parsear(pdf)
+    """Parsea el PDF y resuelve tipo_cuenta con AccountTypeResolver.
 
-    pu.ENABLE_ACCOUNT_TYPE_RESOLVER = True
-    res_dynamic = ParserPDF().parsear(pdf)
+    Fase A: ParserPDF ya no escribe tipo_cuenta (extractor pasivo). Este
+    script resuelve el tipo directamente después del parseo.
+    """
+    from parsers.account_type_resolver import AccountTypeResolver
 
-    n_classic = len(res_classic.cuentas)
-    n_dynamic = len(res_dynamic.cuentas)
+    res = ParserPDF().parsear(pdf)
+    resolver = AccountTypeResolver()
+
+    n_cuentas = len(res.cuentas)
 
     doc_result = {
         "grupo": pdf.parent.name,
         "archivo": pdf.name,
-        "n_cuentas_classic": n_classic,
-        "n_cuentas_dynamic": n_dynamic,
-        "hay_cambio": n_classic != n_dynamic,
-        "n_advertencias": len(res_dynamic.advertencias),
+        "n_cuentas": n_cuentas,
+        "n_advertencias": len(res.advertencias),
         "cuentas": [],
     }
 
-    for c in res_dynamic.cuentas:
+    for c in res.cuentas:
+        tipo = resolver.resolve(
+            origen_columna=c.origen_columna,
+            codigo=c.codigo,
+        )
         cuenta_info = {
             "linea": c.linea,
             "codigo": c.codigo,
             "nombre": c.nombre,
             "origen_columna": c.origen_columna.value,
-            "tipo_cuenta": c.tipo_cuenta,
+            "tipo_cuenta": tipo.account_type.value,
         }
         doc_result["cuentas"].append(cuenta_info)
-
-    # Extraer advertencia del resolver
-    for w in res_dynamic.advertencias:
-        if "AccountTypeResolver" in w:
-            doc_result["advertencia_resolver"] = w
 
     return doc_result
 
@@ -129,14 +125,6 @@ def main():
 
             data["cuentas_por_documento"][pdf.name] = doc
 
-            if doc["hay_cambio"]:
-                data["documentos_con_cambio_cuentas"] += 1
-                data["cambio_cuentas_detalle"].append({
-                    "archivo": pdf.name,
-                    "classic": doc["n_cuentas_classic"],
-                    "dynamic": doc["n_cuentas_dynamic"],
-                })
-
             for c in doc["cuentas"]:
                 oc = c["origen_columna"]
                 data["total_origen_columna"][oc] = data["total_origen_columna"].get(oc, 0) + 1
@@ -146,14 +134,12 @@ def main():
 
             elapsed = time.perf_counter() - t1
             data["procesados"] += 1
-            print(f"  [{i}/{len(pdfs)}] {pdf.name}: {doc['n_cuentas_dynamic']} cuentas ({elapsed:.1f}s)")
+            print(f"  [{i}/{len(pdfs)}] {pdf.name}: {doc['n_cuentas']} cuentas ({elapsed:.1f}s)")
 
             if i % 5 == 0:
                 guardar_checkpoint(data)
 
         print(f"\nTiempo total: {time.perf_counter() - t0:.1f}s")
-
-    pu.ENABLE_ACCOUNT_TYPE_RESOLVER = False
 
     # Construir reporte final
     output = {
@@ -163,8 +149,6 @@ def main():
             "errores_count": len(data["errores"]),
         },
         "errores": data["errores"],
-        "documentos_con_cambio_cuentas": data["documentos_con_cambio_cuentas"],
-        "cambio_cuentas_detalle": data["cambio_cuentas_detalle"][:10],
         "distribucion_tipo_cuenta": dict(sorted(
             data["distribucion_tipo_cuenta"].items(),
             key=lambda x: -x[1]
@@ -176,7 +160,7 @@ def main():
         "cuentas_por_documento": {
             k: {
                 "grupo": v["grupo"],
-                "n_cuentas": v["n_cuentas_dynamic"],
+                "n_cuentas": v["n_cuentas"],
                 "n_advertencias": v["n_advertencias"],
             }
             for k, v in data["cuentas_por_documento"].items()
@@ -190,7 +174,6 @@ def main():
     print(f"\nResultados guardados en {OUTPUT_PATH}")
     print(f"  Procesados: {output['metadata']['procesados']}/{output['metadata']['total_pdfs']}")
     print(f"  Errores: {output['metadata']['errores_count']}")
-    print(f"  Docs con cambio cuentas: {output['documentos_con_cambio_cuentas']}")
     print(f"  Distribución tipo_cuenta:")
     for tipo, count in output["distribucion_tipo_cuenta"].items():
         print(f"    {tipo}: {count}")

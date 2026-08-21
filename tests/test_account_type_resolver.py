@@ -222,14 +222,14 @@ class TestIntegrationParserUniversal:
         assert pu.ENABLE_ACCOUNT_TYPE_RESOLVER is False
 
     def test_cuenta_raw_tiene_tipo_cuenta(self):
-        """CuentaRaw tiene el nuevo campo opcional."""
+        """CuentaRaw mantiene el campo tipo_cuenta (DEPRECATED, se puebla post-parseo)."""
         from parser_universal import CuentaRaw
         c = CuentaRaw(linea=0, codigo=None, nombre="Test", monto=None)
         assert hasattr(c, 'tipo_cuenta')
         assert c.tipo_cuenta is None
 
-    def test_enable_flag_cambia_comportamiento(self):
-        """Al activar el flag, las cuentas reciben tipo_cuenta."""
+    def test_parser_no_escribe_tipo_cuenta(self):
+        """Fase A: ParserPDF NO escribe tipo_cuenta aunque el flag legacy esté activo."""
         import parser_universal as pu
         original_flag = pu.ENABLE_ACCOUNT_TYPE_RESOLVER
         pu.ENABLE_ACCOUNT_TYPE_RESOLVER = True
@@ -242,9 +242,30 @@ class TestIntegrationParserUniversal:
                 parser = pu.ParserPDF()
                 r = parser.parsear(pdfs[0])
                 resueltos = sum(1 for c in r.cuentas if c.tipo_cuenta is not None)
-                assert resueltos > 0, f"Ninguna cuenta resuelta en {pdfs[0].name}"
-                cuenta_con_tipo = next((c for c in r.cuentas if c.tipo_cuenta), None)
-                if cuenta_con_tipo:
-                    assert cuenta_con_tipo.tipo_cuenta in ("ACTIVO", "PASIVO", "PATRIMONIO", "PERDIDA", "GANANCIA", "DESCONOCIDO")
+                assert resueltos == 0, (
+                    f"ParserPDF escribió tipo_cuenta en {resueltos} cuentas — "
+                    "Fase A exige un extractor pasivo"
+                )
         finally:
             pu.ENABLE_ACCOUNT_TYPE_RESOLVER = original_flag
+
+    def test_resolucion_fuera_del_parser(self):
+        """Fase A: la resolución contable se hace fuera del parser (AccountTypeResolver)."""
+        import parser_universal as pu
+        from pathlib import Path
+        pdfs = sorted(Path("edge_cases").glob("*.pdf"))
+        if not pdfs:
+            pdfs = sorted(Path("datasets/edge_cases").glob("*.pdf"))
+        if pdfs:
+            r = pu.ParserPDF().parsear(pdfs[0])
+            from parsers.account_type_resolver import AccountTypeResolver
+            resolver = AccountTypeResolver()
+            cuenta = next((c for c in r.cuentas if c.tipo_cuenta is None), None)
+            assert cuenta is not None
+            res = resolver.resolve(
+                origen_columna=cuenta.origen_columna,
+                codigo=cuenta.codigo,
+            )
+            assert res.account_type.value in (
+                "ACTIVO", "PASIVO", "PATRIMONIO", "PERDIDA", "GANANCIA", "DESCONOCIDO"
+            )
