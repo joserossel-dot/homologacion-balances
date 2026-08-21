@@ -42,6 +42,8 @@ from config.regex_rules import REGLAS_REGEX, REGLAS_COMPILADAS
 from parser_universal import ParserPDF, CuentaRaw, OrigenColumna, parsear_excel
 from parsers.column_interpretation import es_ingreso as es_ingreso_col, es_gasto as es_gasto_col
 from extractor_metadata import extraer_metadata, MetadataEmpresa
+from account_qualification import qualify_cuentas as _safe_qualify_cuentas, \
+    safe_mode_enabled as _safe_mode_enabled
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIGURACIÓN
@@ -1139,6 +1141,14 @@ def _extraer_cuentas(archivo) -> tuple[list[CuentaRaw], object]:
         parser = ParserPDF()
         resultado = parser.parsear(tmp_path)
         for adv in resultado.advertencias: st.warning(adv)
+        # GATE 4E: SAFE-R02+R03+R08 (ruido de encabezado/pie, URLs/emails,
+        # duplicados) aplicado ANTES de la clasificación, ÚNICAMENTE con
+        # activación explícita (env SAFE_MODE ON). Con SAFE OFF el
+        # comportamiento es exactamente el previo: se devuelven todas las
+        # cuentas extraídas, sin filtrado.
+        if _safe_mode_enabled():
+            return _safe_qualify_cuentas(resultado.cuentas), \
+                getattr(resultado, 'document_context', None)
         return resultado.cuentas, getattr(resultado, 'document_context', None)
     else:
         return parsear_excel(archivo), None

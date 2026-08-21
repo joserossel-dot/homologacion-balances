@@ -6,6 +6,7 @@ from pathlib import Path
 from document_context import DocumentContext
 from document_context.models import ParserData
 from parser_universal import ParserPDF, parsear_excel
+from account_qualification import qualify_cuentas, safe_mode_enabled
 
 
 class ParserAdapter:
@@ -43,13 +44,22 @@ class ParserAdapter:
                 ctx.set_custom("parser_error", f"PDF parse error: {e}")
                 return ctx
 
+        # GATE 4E: SAFE-R02+R03+R08 se aplica ÚNICAMENTE con activación
+        # explícita (env SAFE_MODE ON). Con SAFE OFF el comportamiento es
+        # exactamente el previo: raw_accounts == resultado.cuentas sin filtrar.
+        safe_on = safe_mode_enabled()
+        raw_accounts = qualify_cuentas(resultado.cuentas) if safe_on else resultado.cuentas
+
         parser_data = ParserData(
             selected_parser="ParserPDF",
             parser_version="1.0.0",
             parser_time=elapsed if ext not in (".xlsx", ".xls") else 0.0,
-            raw_accounts=resultado.cuentas,
+            raw_accounts=raw_accounts,
         )
         ctx.set_parser(parser_data, module="parser_adapter")
         ctx.set_custom("parser_resultado", resultado)
+        ctx.set_custom("parser_raw_accounts", len(resultado.cuentas))
+        ctx.set_custom("parser_raw_accounts_safe", len(raw_accounts))
+        ctx.set_custom("parser_safe_mode", safe_on)
 
         return ctx
