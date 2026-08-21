@@ -852,5 +852,16 @@
     "descripcion": "Subtotal del estado de resultados previo a la provisión de impuesto a la renta. Cuenta de cálculo, no seleccionable.",
     "clasificable": false,
     "grupo_presentacion": "Gastos"
+  },
+  "AC.10": {
+    "codigo_estandar": "AC.10",
+    "nombre_estandar": "Deudores Varios",
+    "categoria": "activo_corriente",
+    "tipo_estado": "balance",
+    "naturaleza": "deudora",
+    "signo_normal": 1,
+    "es_deuda_financiera": false,
+    "es_activo_liquido": false,
+    "afecta_ebitda": false
   }
 }

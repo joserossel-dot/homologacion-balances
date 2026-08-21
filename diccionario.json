@@ -4268,5 +4268,315 @@
     "cuenta_original": "Impuesto Unico Trabajadores",
     "codigo_estandar": "PC.05",
     "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "BCl",
+    "codigo_estandar": "PC.02",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Anticipos de proveedores",
+    "codigo_estandar": "AC.07",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Fondo Fijo Unidad",
+    "codigo_estandar": "AC.01",
+    "fuente": "validacion_humana_lote"
+  },
+  {
+    "cuenta_original": "Bco. Chile Sede Central",
+    "codigo_estandar": "AC.01",
+    "fuente": "validacion_humana_lote"
+  },
+  {
+    "cuenta_original": "Bco. Chile Chiledar S.C",
+    "codigo_estandar": "AC.01",
+    "fuente": "validacion_humana_lote"
+  },
+  {
+    "cuenta_original": "Bco. Estado",
+    "codigo_estandar": "AC.01",
+    "fuente": "validacion_humana_lote"
+  },
+  {
+    "cuenta_original": "Bco. Chile Instituto",
+    "codigo_estandar": "AC.01",
+    "fuente": "validacion_humana_lote"
+  },
+  {
+    "cuenta_original": "Banco Unidad Fondos Sename",
+    "codigo_estandar": "AC.01",
+    "fuente": "validacion_humana_lote"
+  },
+  {
+    "cuenta_original": "Banco Unidad Fondos Propios",
+    "codigo_estandar": "AC.01",
+    "fuente": "validacion_humana_lote"
+  },
+  {
+    "cuenta_original": "Banco Unidad Sename REM",
+    "codigo_estandar": "AC.01",
+    "fuente": "validacion_humana_lote"
+  },
+  {
+    "cuenta_original": "Banco Unidad Sename PER",
+    "codigo_estandar": "AC.01",
+    "fuente": "validacion_humana_lote"
+  },
+  {
+    "cuenta_original": "Banco Unidad Sename PRM",
+    "codigo_estandar": "AC.01",
+    "fuente": "validacion_humana_lote"
+  },
+  {
+    "cuenta_original": "Banco Santander Chiledar",
+    "codigo_estandar": "AC.01",
+    "fuente": "validacion_humana_lote"
+  },
+  {
+    "cuenta_original": "Banco Estado 5% Administracion",
+    "codigo_estandar": "AC.01",
+    "fuente": "validacion_humana_lote"
+  },
+  {
+    "cuenta_original": "Banco Fdos.Propios PRM",
+    "codigo_estandar": "AC.01",
+    "fuente": "validacion_humana_lote"
+  },
+  {
+    "cuenta_original": "Banco Estado PIE",
+    "codigo_estandar": "AC.01",
+    "fuente": "validacion_humana_lote"
+  },
+  {
+    "cuenta_original": "Valores por Depositar",
+    "codigo_estandar": "AC.01",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Otros Documentos por Depositar",
+    "codigo_estandar": "AC.04",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Docuemntos por Cobrar (Pagares)",
+    "codigo_estandar": "AC.04",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Deposito en Monena Nacional",
+    "codigo_estandar": "AC.01",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Deposito en US$",
+    "codigo_estandar": "AC.01",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Fondos Mutuos",
+    "codigo_estandar": "AC.02",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Acciones Empresa CMPC S.A",
+    "codigo_estandar": "AC.02",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Monedas de Oro",
+    "codigo_estandar": "AC.08",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Avaluo Terreno S.C",
+    "codigo_estandar": "ANC.01",
+    "fuente": "validacion_humana_lote"
+  },
+  {
+    "cuenta_original": "Avaluo Terreno Unidad",
+    "codigo_estandar": "ANC.01",
+    "fuente": "validacion_humana_lote"
+  },
+  {
+    "cuenta_original": "Avaluo Construcción S.C",
+    "codigo_estandar": "ANC.01",
+    "fuente": "validacion_humana_lote"
+  },
+  {
+    "cuenta_original": "Avaluo Construcción (Habilitación)Un2id.0a5d9.125.605",
+    "codigo_estandar": "ANC.01",
+    "fuente": "validacion_humana_lote"
+  },
+  {
+    "cuenta_original": "Avaluo Vehiculo S.C",
+    "codigo_estandar": "ANC.01",
+    "fuente": "validacion_humana_lote"
+  },
+  {
+    "cuenta_original": "Avaluo Vehiculo Unidad",
+    "codigo_estandar": "ANC.01",
+    "fuente": "validacion_humana_lote"
+  },
+  {
+    "cuenta_original": "Equipamiento Unidades",
+    "codigo_estandar": "ANC.01",
+    "fuente": "validacion_humana_lote"
+  },
+  {
+    "cuenta_original": "Inventario Inmuebles Arrendados",
+    "codigo_estandar": "ANC.01",
+    "fuente": "validacion_humana_lote"
+  },
+  {
+    "cuenta_original": "Inventario inmuebles s/Destino",
+    "codigo_estandar": "ANC.01",
+    "fuente": "validacion_humana_lote"
+  },
+  {
+    "cuenta_original": "Depreciación Acumulada Construcción2.S8.1C8..309.408",
+    "codigo_estandar": "ANC.01",
+    "fuente": "validacion_humana_lote"
+  },
+  {
+    "cuenta_original": "Depreciacion Acumulada Construcción1.U04n8id.9ad51.201",
+    "codigo_estandar": "ANC.01",
+    "fuente": "validacion_humana_lote"
+  },
+  {
+    "cuenta_original": "Depreciacion Acumulada VehiculoS.C",
+    "codigo_estandar": "ANC.01",
+    "fuente": "validacion_humana_lote"
+  },
+  {
+    "cuenta_original": "Depreciacion Acumulada VehiculoUnid2a1d2.021.861",
+    "codigo_estandar": "ANC.01",
+    "fuente": "validacion_humana_lote"
+  },
+  {
+    "cuenta_original": "Depreciacion Acumulada InventarioS.C.36.791.495",
+    "codigo_estandar": "ANC.01",
+    "fuente": "validacion_humana_lote"
+  },
+  {
+    "cuenta_original": "Depreciación Acumulada InventarioUni1d6a0d.828.382",
+    "codigo_estandar": "ANC.01",
+    "fuente": "validacion_humana_lote"
+  },
+  {
+    "cuenta_original": "Impuestos 2da. Categoria",
+    "codigo_estandar": "PC.05",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Inversiones Otras Sociedades",
+    "codigo_estandar": "ANC.04",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Créditos Bancarios c/p",
+    "codigo_estandar": "PC.02",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Ingresos Inversiones Financier",
+    "codigo_estandar": "ER.12",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Gastos Administración Gnral",
+    "codigo_estandar": "ER.04",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Diferencia de Cambio ME",
+    "codigo_estandar": "ER.15",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Diferencia de cambio MN",
+    "codigo_estandar": "ER.15",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Patente Comercial",
+    "codigo_estandar": "ER.04",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Dividendos Percibidos",
+    "codigo_estandar": "ER.13",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Deudores Varios",
+    "codigo_estandar": "AC.07",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Prestamos Cta. Cte. Mercantil",
+    "codigo_estandar": "AC.06",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Propiedades",
+    "codigo_estandar": "ANC.01",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "PPM Especial Ut. Absorvidas",
+    "codigo_estandar": "AC.08",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Garantia Arriendo",
+    "codigo_estandar": "AC.08",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "OTROS INGRESOS DONACIONES",
+    "codigo_estandar": "ER.17",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "GASTOS DE OFICINA",
+    "codigo_estandar": "ER.04",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "MOVILIZACION",
+    "codigo_estandar": "ER.04",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "INTERESES Y MULTAS",
+    "codigo_estandar": "ER.09",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "PERDIDA Y GANANCIAS",
+    "codigo_estandar": "PAT.03",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Ejercicio Local",
+    "codigo_estandar": "__EXCLUIR__",
+    "fuente": "validacion_humana_lote"
+  },
+  {
+    "cuenta_original": "Nuevo Colorado PC 18 Chacabuco Página:",
+    "codigo_estandar": "__EXCLUIR__",
+    "fuente": "validacion_humana_lote"
+  },
+  {
+    "cuenta_original": "Banco Santarder",
+    "codigo_estandar": "AC.01",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Anticipo Cliente US$",
+    "codigo_estandar": "PC.01",
+    "fuente": "validacion_humana"
   }
 ]
