@@ -378,6 +378,35 @@ def _es_contra_activo(nombre: str | None) -> bool:
     return is_contra_asset_name(nombre)
 
 
+def _monto_presentacion(codigo: str | None, monto, nombre: str | None = None) -> float:
+    """Aplica el signo contable sin alterar el importe extraído auditable."""
+    valor = 0.0 if pd.isna(monto) else float(monto)
+    if str(codigo or '') == 'PAT.10':
+        return -abs(valor)
+    if str(codigo or '').startswith('ANC') and _es_contra_activo(nombre):
+        return -abs(valor)
+    return valor
+
+
+def _resultado_periodo(clasificadas: pd.DataFrame) -> float | None:
+    """Calcula ganancia menos pérdida desde las columnas efectivas extraídas."""
+    ganancias = 0.0
+    perdidas = 0.0
+    encontro_resultado = False
+    for _, row in clasificadas.iterrows():
+        origen = row.get('origen_columna_efectiva') or _origen_efectivo(
+            row.get('origen_columna'), row.get('monto')
+        )
+        monto = abs(float(row.get('monto') or 0.0))
+        if origen == 'ganancia':
+            ganancias += monto
+            encontro_resultado = True
+        elif origen == 'perdida':
+            perdidas += monto
+            encontro_resultado = True
+    return ganancias - perdidas if encontro_resultado else None
+
+
 def _codigo_compatible_con_origen(
         codigo: str | None, origen_columna, monto, nombre: str | None = None) -> bool:
     """Impide sugerencias que contradigan la columna efectiva del balance."""
@@ -1992,9 +2021,9 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict):
 
     clasificadas['monto'] = clasificadas['monto'].fillna(0)
     clasificadas['monto_presentacion'] = clasificadas.apply(
-        lambda row: -abs(row['monto'])
-        if row['codigo_clasificado'] == 'PAT.10' else row['monto'],
-        axis=1,
+        lambda row: _monto_presentacion(
+            row['codigo_clasificado'], row['monto'], row['nombre_original']
+        ), axis=1,
     )
     agrupado = clasificadas.groupby('codigo_clasificado').agg(
         monto_total=('monto_presentacion', 'sum'),
@@ -2002,6 +2031,22 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict):
     ).reset_index()
     agrupado['nombre_estandar'] = agrupado['codigo_clasificado'].map(lambda c: catalogo.get(c, {}).get('nombre_estandar', c))
     agrupado['categoria'] = agrupado['codigo_clasificado'].map(lambda c: catalogo.get(c, {}).get('categoria', ''))
+
+    resultado_periodo = _resultado_periodo(clasificadas)
+    if resultado_periodo is not None:
+        derivados = []
+        for codigo_resultado in ('ER.11', 'PAT.04'):
+            if codigo_resultado not in set(agrupado['codigo_clasificado']):
+                info = catalogo.get(codigo_resultado, {})
+                derivados.append({
+                    'codigo_clasificado': codigo_resultado,
+                    'monto_total': resultado_periodo,
+                    'num_cuentas': 0,
+                    'nombre_estandar': info.get('nombre_estandar', codigo_resultado),
+                    'categoria': info.get('categoria', ''),
+                })
+        if derivados:
+            agrupado = pd.concat([agrupado, pd.DataFrame(derivados)], ignore_index=True)
 
     orden_cat = ['activo_corriente', 'activo_no_corriente', 'pasivo_corriente', 'pasivo_no_corriente', 'patrimonio', 'resultado']
     agrupado['orden'] = agrupado['categoria'].map(lambda c: orden_cat.index(c) if c in orden_cat else 99)
@@ -2080,11 +2125,22 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict):
             (clasificadas['codigo_clasificado'] != '') &
             (clasificadas['codigo_clasificado'] != '__EXCLUIR__') &
             (~clasificadas['es_total'])
-        ][['codigo_clasificado', 'codigo_original', 'nombre_original', 'nombre_revision_usuario', 'monto', 'metodo', 'confianza']].copy()
+        ][['codigo_clasificado', 'codigo_original', 'nombre_original',
+           'nombre_revision_usuario', 'monto', 'origen_columna',
+           'origen_columna_efectiva', 'metodo', 'confianza']].copy()
 
         det['nombre_visual'] = det['nombre_revision_usuario'].where(det['nombre_revision_usuario'] != '', det['nombre_original'])
         det['nombre_estandar'] = det['codigo_clasificado'].map(lambda c: catalogo_local.get(c, {}).get('nombre_estandar', c))
-        detalle_completo = det[['codigo_clasificado', 'nombre_estandar', 'codigo_original', 'nombre_visual', 'monto', 'metodo', 'confianza']].copy()
+        det['monto_normalizado'] = det.apply(
+            lambda row: _monto_presentacion(
+                row['codigo_clasificado'], row['monto'], row['nombre_visual']
+            ), axis=1,
+        )
+        detalle_completo = det[[
+            'codigo_clasificado', 'nombre_estandar', 'codigo_original',
+            'nombre_visual', 'origen_columna', 'origen_columna_efectiva',
+            'monto', 'monto_normalizado', 'metodo', 'confianza',
+        ]].copy()
 
         # Reconstrucción de la lógica de ordenamiento nativo
         detalle_completo = detalle_completo.sort_values(
@@ -2094,12 +2150,14 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict):
         )
         detalle_completo.columns = [
             'Código Estándar', 'Nombre Estándar',
-            'Cód. Original', 'Nombre',
-            'Monto', 'Método Clasificación', 'Confianza'
+            'Cód. Original', 'Nombre', 'Columna Extraída', 'Naturaleza Efectiva',
+            'Monto Extraído', 'Monto Normalizado',
+            'Método Clasificación', 'Confianza'
         ]
-        detalle_completo['Monto'] = detalle_completo['Monto'].apply(
+        for columna_monto in ('Monto Extraído', 'Monto Normalizado'):
+            detalle_completo[columna_monto] = detalle_completo[columna_monto].apply(
             lambda x: round(x, 0) if pd.notna(x) else 0
-        )
+            )
         detalle_completo['Confianza'] = detalle_completo['Confianza'].apply(
             lambda x: f"{x:.0%}" if pd.notna(x) else ""
         )
@@ -2121,8 +2179,11 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict):
             cell.font = Font(bold=True, color=BLANCO, size=10)
 
         ws.column_dimensions["E"].width = 18
-        ws.column_dimensions["F"].width = 22
-        ws.column_dimensions["G"].width = 12
+        ws.column_dimensions["F"].width = 20
+        ws.column_dimensions["G"].width = 18
+        ws.column_dimensions["H"].width = 20
+        ws.column_dimensions["I"].width = 22
+        ws.column_dimensions["J"].width = 12
 
     buf.seek(0)
     

@@ -498,9 +498,9 @@ PATRONES_CODIGO_LINEA = {
 # con formato GUION/PUNTO/COMPACTO detectado. Reutilizan el resto del flujo
 # (montos y columnas) aguas abajo en parsear_linea.
 #
-# FG1 — código con UN solo separador (guión o punto): 1101-51, 13216-0000.
-#   La guarda `\d{4,6}` al inicio excluye RUT (7-8 dígitos) y fechas cortas.
-_PATRON_AUX_UNISEP = re.compile(r'^(\d{4,6}[-.]\d{1,6})\s+(.+)')
+# FG1 — código con UN solo separador (guión o punto): 4.021201, 201.1205,
+# 1101-51. OCR puede fusionar varios grupos a cualquiera de sus lados.
+_PATRON_AUX_UNISEP = re.compile(r'^(\d{1,6}[-.]\d{2,8})\s+([A-Za-zÁÉÍÓÚÑáéíóúñ].+)')
 # FG2 — código compacto concatenado al nombre sin espacio: 11090BANCO, 10423CTA.
 #    El lookahead `(?=[A-Z...])` parte en la frontera dígito → letra y exige que
 #    el código sea de 4 a 6 dígitos seguidos inmediatamente por una letra.
@@ -570,14 +570,14 @@ def _es_linea_basura(linea: str) -> bool:
 # produciendo cosas como "1.1.01,01" o "1,1,08,05". Se detecta un prefijo
 # de 3-5 grupos cortos de dígitos separados por '.' o ',' al inicio de la
 # línea y se normaliza a '.' antes de cualquier otro procesamiento.
-PATRON_CODIGO_OCR = re.compile(r'^(\d{1,2}[.,]){2,4}\d{1,2}(?=\s)')
+PATRON_CODIGO_OCR = re.compile(r'^(\d{1,2}[.,/]){2,4}\d{1,2}(?=\s)')
 
 
 def normalizar_codigo_ocr(linea: str) -> str:
     m = PATRON_CODIGO_OCR.match(linea)
     if not m:
         return linea
-    codigo_normalizado = m.group(0).replace(',', '.')
+    codigo_normalizado = m.group(0).replace(',', '.').replace('/', '.')
     return codigo_normalizado + linea[m.end():]
 
 
@@ -617,6 +617,13 @@ def parsear_linea(
                     codigo = m.group(1)
                     resto = m.group(2)
                     break
+            if codigo is None:
+                for patron_auxiliar in PATRONES_CODIGO_AUXILIARES:
+                    m = patron_auxiliar.match(linea)
+                    if m:
+                        codigo = m.group(1)
+                        resto = m.group(2)
+                        break
     else:
         for fmt in (FormatoCodigo.PUNTO, FormatoCodigo.GUION, FormatoCodigo.COMPACTO):
             m = PATRONES_CODIGO_LINEA[fmt].match(linea)
@@ -645,13 +652,19 @@ def parsear_linea(
 
     montos_tokens = []
     i = len(tokens) - 1
-    while i >= 0:
+    while i >= 0 and len(montos_tokens) < 8:
         tok_norm = normalizar_token_ocr(tokens[i])
         if tok_norm == '-':
             montos_tokens.insert(0, '0')
             i -= 1
         elif PATRON_MONTOS.fullmatch(tok_norm.replace('$', '')):
             montos_tokens.insert(0, tok_norm.replace('$', ''))
+            i -= 1
+        elif montos_tokens and len(tok_norm) <= 2 and not re.search(r'\d', tok_norm):
+            # En tablas de ocho columnas Tesseract ocasionalmente convierte
+            # un cero intermedio en ruido breve (p. ej. ``ly``). Una vez
+            # iniciada la cola numérica se conserva la posición como cero.
+            montos_tokens.insert(0, '0')
             i -= 1
         else:
             break

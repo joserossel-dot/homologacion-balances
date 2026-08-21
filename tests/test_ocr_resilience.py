@@ -133,3 +133,39 @@ def test_linea_ocr_vehiculo_queda_en_activo():
     assert cuenta.nombre == "Vehículos"
     assert cuenta.monto == 23871062
     assert cuenta.origen_columna == parser.OrigenColumna.ACTIVO
+
+
+def test_linea_ocr_tolera_ruido_breve_dentro_de_columnas_finales():
+    cuenta = parser.parsear_linea(
+        "1.01.02.01 Documentos en Garantía 2,550,000 0 2,550,000 O 2,550,000 o ly 0",
+        numero_linea=12,
+        formato_codigo=parser.FormatoCodigo.PUNTO,
+        separador_miles=",",
+        confianza_base=0.75,
+    )
+
+    assert cuenta is not None
+    assert cuenta.nombre == "Documentos en Garantía"
+    assert cuenta.monto == 2550000
+    assert cuenta.origen_columna == parser.OrigenColumna.ACTIVO
+
+
+def test_linea_ocr_recupera_codigo_con_un_separador_en_documento_punto():
+    cuenta = parser.parsear_linea(
+        "4.021201 Diferencias de cambio Perdida 572 o 572 o o o 572 o",
+        numero_linea=80,
+        formato_codigo=parser.FormatoCodigo.PUNTO,
+        separador_miles=",",
+        confianza_base=0.75,
+    )
+
+    assert cuenta is not None
+    assert cuenta.codigo == "4.021201"
+    assert cuenta.monto == 572
+    assert cuenta.origen_columna == parser.OrigenColumna.PERDIDA
+
+
+def test_normaliza_slash_perdido_en_codigo_ocr():
+    assert parser.normalizar_codigo_ocr("2/03.01.01 Capital 0 1,000,000") == (
+        "2.03.01.01 Capital 0 1,000,000"
+    )

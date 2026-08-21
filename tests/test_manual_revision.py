@@ -6,8 +6,10 @@ import pytest
 from app_validacion import (
     _codigo_compatible_con_origen,
     _etiqueta_origen,
+    _monto_presentacion,
     _origen_efectivo,
     _pendientes_revision,
+    _resultado_periodo,
 )
 from reglas_especiales import ProcesadorReglasEspeciales, calcular_patrimonio_efectivo
 
@@ -203,6 +205,26 @@ class TestCuentaCorrienteSocios:
 
         assert resultado['patrimonio_contable'] == 86962737
         assert resultado['patrimonio_efectivo'] == 86962737
+
+
+class TestPresentacionYResultado:
+    def test_depreciacion_acumulada_resta_activo_fijo(self):
+        assert _monto_presentacion(
+            'ANC.01', 8371044, 'Depreciación Acumulada'
+        ) == -8371044
+
+    def test_activo_fijo_comun_conserva_signo(self):
+        assert _monto_presentacion('ANC.01', 23871062, 'Vehículos') == 23871062
+
+    def test_resultado_usa_columna_efectiva(self):
+        df = pd.DataFrame([
+            {'monto': 721416978, 'origen_columna': 'ganancia',
+             'origen_columna_efectiva': 'ganancia'},
+            {'monto': 741589846, 'origen_columna': 'perdida',
+             'origen_columna_efectiva': 'perdida'},
+        ])
+
+        assert _resultado_periodo(df) == -20172868
 
 
 class TestPendientesRevision:
