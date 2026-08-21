@@ -31,7 +31,7 @@ REGLAS_REGEX = [
     (r"\b(utilidad(es)?\s*(acumulada(s)?|retenida(s)?)|resultado(s)?\s*acumulado(s)?|p[eé]rdida(s)?\s*acumulada(s)?)\b", "PAT.03", 0.90),
     (r"\butilidad\s*del\s*(ejercicio|periodo|a[ñn]o)|resultado\s*del\s*(ejercicio|periodo)|p[eé]rdida\s*del\s*(ejercicio|periodo)|utilidad\s*[/(]?\s*p[eé]rdida\b", "PAT.04", 0.92),
     (r"\b(venta(s)?|ingreso(s)?\s*(por\s*venta|operacional|del\s*giro)|facturacion)\b", "ER.01", 0.90),
-    (r"\bcosto(s)?\s*(de\s*)?(venta(s)?|explotacion|produccion|mercader[ií]a)\b", "ER.02", 0.92),
+    (r"\bcosto(s)?\s*(de\s*)?(venta(s)?|explotacion|produccion|mercader[ií]a|motos?\s*(usadas?)?|repuestos?(\s+y\s+accesorios)?|servicio\s+taller)\b", "ER.02", 0.92),
     (r"\bgasto(s)?\s*(de\s*)?(administracion|general(es)?|gestion)\b", "ER.04", 0.88),
     (r"\bgasto(s)?\s*(de\s*)?(venta(s)?|comercial(es)?|marketing|distribucion)\b", "ER.05", 0.88),
     (r"\b(depreciacion|amortizacion)\b", "ER.07", 0.90),

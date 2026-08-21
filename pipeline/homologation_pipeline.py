@@ -62,6 +62,10 @@ class HomologationPipeline:
         (re.compile(REGLAS_REGEX[i][0], re.IGNORECASE | re.UNICODE), REGLAS_REGEX[i][1], REGLAS_REGEX[i][2])
         for i in (16, 19, 26, 31, 34, 35, 36)
     ]
+    _REGEX_CONTEXTUAL: list[tuple[re.Pattern, str, float]] = [
+        (re.compile(pattern, re.IGNORECASE | re.UNICODE), code, confidence)
+        for pattern, code, confidence in REGLAS_REGEX
+    ]
 
     # ------------------------------------------------------------------
     # Dictionary loading
@@ -178,6 +182,63 @@ class HomologationPipeline:
                 }
         return None
 
+    def _classify_by_regex_contextual(
+        self, account_name: str, account_tipo: str | None,
+    ) -> dict[str, Any] | None:
+        """Aplica reglas amplias solo cuando la columna contable las valida."""
+        if not account_name or not account_tipo:
+            return None
+        normalized = self._normalize_name(account_name)
+        if account_tipo == "ACTIVO" and is_contra_asset_name(account_name):
+            return {
+                "standard_code": "ANC.01",
+                "confidence": 0.84,
+                "method": "regex_contextual",
+                "reason": (
+                    "Contra-activo identificado por nombre y columna acreedora → "
+                    "ANC.01; requiere revisión humana"
+                ),
+            }
+        for pattern, code, confidence in self._REGEX_CONTEXTUAL:
+            if (pattern.search(normalized)
+                    and self._is_code_allowed_for_tipo(code, account_tipo)):
+                return {
+                    "standard_code": code,
+                    "confidence": min(confidence, 0.84),
+                    "method": "regex_contextual",
+                    "reason": (
+                        f"Patrón contextual compatible con {account_tipo} → {code}; "
+                        "requiere revisión humana"
+                    ),
+                }
+        return None
+
+    @staticmethod
+    def _classify_by_origin_fallback(
+        account_code: str, account_tipo: str | None,
+    ) -> dict[str, Any] | None:
+        """Evita dejar sin categoría balances sin códigos y con columna fiable."""
+        if account_code or not account_tipo:
+            return None
+        fallback = {
+            "ACTIVO": "AC.08",
+            "PASIVO": "PC.08",
+            "PATRIMONIO": "PAT.10",
+            "GANANCIA": "ER.17",
+            "PERDIDA": "ER.18",
+        }.get(account_tipo)
+        if not fallback:
+            return None
+        return {
+            "standard_code": fallback,
+            "confidence": 0.55,
+            "method": "origin_fallback",
+            "reason": (
+                f"Categoría residual inferida desde columna {account_tipo}; "
+                "requiere revisión humana"
+            ),
+        }
+
     def _is_code_allowed(self, code: str | None, tipo: str | None) -> bool:
         if not self._features.ENABLE_ACCOUNT_TYPE_FILTER or not code or not tipo:
             return True
@@ -242,6 +303,12 @@ class HomologationPipeline:
             or self._classify_by_dictionary_fuzzy(account_name)
         )
 
+        if (result is not None and account_tipo
+                and not self._is_code_allowed_for_tipo(
+                    result.get("standard_code"), account_tipo
+                )):
+            result = None
+
         if result is None and self._features.ENABLE_SEMANTIC_MATCHER and self._semantic_matcher is not None:
             sm_result = self._semantic_matcher.match(account_name, account_tipo)
             if not sm_result.is_unknown:
@@ -259,6 +326,12 @@ class HomologationPipeline:
 
         if result is None and self._features.ENABLE_REGEX_FALLBACK:
             result = self._classify_by_regex(account_name, account_tipo)
+
+        if result is None and not account_code:
+            result = self._classify_by_regex_contextual(account_name, account_tipo)
+
+        if result is None:
+            result = self._classify_by_origin_fallback(account_code, account_tipo)
 
         if result is None:
             result = {
@@ -637,7 +710,7 @@ class HomologationPipeline:
             "AC": {"ACTIVO"},
             "PNC": {"PASIVO"},
             "PC": {"PASIVO"},
-            "PAT": {"PATRIMONIO"},
+            "PAT": {"PATRIMONIO", "PASIVO"},
             "ER": {"PERDIDA", "GANANCIA"},
         }
         for prefix, allowed in _PREFIX_TIPO.items():

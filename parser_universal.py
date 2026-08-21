@@ -18,6 +18,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import unicodedata
 import zipfile
 from dataclasses import dataclass, field
 from enum import Enum
@@ -30,6 +31,53 @@ from PIL import Image
 
 
 logger = logging.getLogger("parser_universal")
+
+
+def _sin_acentos(texto: str) -> str:
+    return ''.join(
+        char for char in unicodedata.normalize('NFKD', texto)
+        if not unicodedata.combining(char)
+    )
+
+
+def _extraer_tabla_balance_8_columnas(page) -> list[str]:
+    """Reconstruye tablas nativas donde los guiones preservan columnas vacías.
+
+    ``extract_text`` colapsa esas celdas y desplaza el monto hacia Ganancia.
+    ``extract_tables`` conserva las nueve celdas (nombre + ocho importes), por
+    lo que se emite una línea canónica compatible con ``parsear_linea``.
+    """
+    esperados = [
+        'nombre', 'debitos', 'creditos', 'saldo deudor', 'saldo acreedor',
+        'activo', 'pasivo', 'perdida', 'ganancia',
+    ]
+    for tabla in page.extract_tables() or []:
+        for indice, fila in enumerate(tabla):
+            if not fila or len(fila) != 9:
+                continue
+            encabezados = [
+                re.sub(r'\s+', ' ', _sin_acentos(str(celda or '')).lower()).strip()
+                for celda in fila
+            ]
+            if encabezados != esperados:
+                continue
+
+            lineas: list[str] = []
+            for datos in tabla[indice + 1:]:
+                if not datos or len(datos) != 9:
+                    continue
+                nombre = re.sub(r'\s+', ' ', str(datos[0] or '')).strip()
+                if not nombre:
+                    continue
+                montos = [
+                    '0' if str(celda or '').strip() in ('', '-')
+                    else re.sub(r'\s+', '', str(celda))
+                    for celda in datos[1:]
+                ]
+                lineas.append(f"{nombre} {' '.join(montos)}")
+            if lineas:
+                return lineas
+    return []
 
 
 # Feature flag: cuando está en False, se usa la heurística fija ULTIMAS_COLS.
@@ -1034,7 +1082,11 @@ class ParserPDF:
                 if page_lineas:
                     lineas.extend(l for l in page_lineas if l.strip())
                 else:
-                    lineas.extend(texto.split('\n'))
+                    tabla_8_columnas = _extraer_tabla_balance_8_columnas(page)
+                    if tabla_8_columnas:
+                        lineas.extend(tabla_8_columnas)
+                    else:
+                        lineas.extend(texto.split('\n'))
 
         if lineas:
             if self._debe_corregir_rotacion(context):

@@ -169,3 +169,32 @@ def test_normaliza_slash_perdido_en_codigo_ocr():
     assert parser.normalizar_codigo_ocr("2/03.01.01 Capital 0 1,000,000") == (
         "2.03.01.01 Capital 0 1,000,000"
     )
+
+
+def test_tabla_nativa_preserva_posicion_de_perdida_y_ganancia():
+    class Pagina:
+        @staticmethod
+        def extract_tables():
+            return [[
+                ['Nombre', 'Débitos', 'Créditos', 'Saldo Deudor',
+                 'Saldo Acreedor', 'Activo', 'Pasivo', 'Perdida', 'Ganancia'],
+                ['COSTO MOTOS', '80.149.009', '2.864.000', '77.285.009',
+                 '-', '-', '-', '77.285.009', '-'],
+                ['VENTA MOTOS', '546.449.983', '4.215.989.922', '-',
+                 '3.669.539.939', '-', '-', '-', '3.669.539.939'],
+            ]]
+
+    lineas = parser._extraer_tabla_balance_8_columnas(Pagina())
+    perdida = parser.parsear_linea(
+        lineas[0], 1, parser.FormatoCodigo.SIN_CODIGO, '.', 1.0
+    )
+    ganancia = parser.parsear_linea(
+        lineas[1], 2, parser.FormatoCodigo.SIN_CODIGO, '.', 1.0
+    )
+
+    assert perdida.nombre == 'COSTO MOTOS'
+    assert perdida.monto == 77285009
+    assert perdida.origen_columna == parser.OrigenColumna.PERDIDA
+    assert ganancia.nombre == 'VENTA MOTOS'
+    assert ganancia.monto == 3669539939
+    assert ganancia.origen_columna == parser.OrigenColumna.GANANCIA
