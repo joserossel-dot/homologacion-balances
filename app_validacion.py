@@ -21,25 +21,52 @@ Funcionalidad:
 """
 
 import json
+import os
 import re
+import time
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 from rapidfuzz import fuzz, process
+from dotenv import load_dotenv
 
 from clasificador_codigo_cuenta import ClasificadorCodigo
+from catalog_selection import opciones_clasificacion
+from gold_standard.builder import GoldBuilder
+from gold_standard.models import GoldRecord
+from gold_standard.promotion import promote as promover_revisiones
+from gold_standard.runtime import RuntimeGoldStorage
+from gold_standard.runtime_manager import RuntimeManager
+from gold_standard.runtime_stats import RuntimeStatistics
 from reglas_especiales import ProcesadorReglasEspeciales, calcular_patrimonio_efectivo
-from parser_universal import ParserPDF, CuentaRaw, OrigenColumna
-from db_repository import RepositorioDiccionario, normalizar_nombre as normalizar_nombre_repo
+from config.regex_rules import REGLAS_REGEX, REGLAS_COMPILADAS
+from parser_universal import ParserPDF, CuentaRaw, OrigenColumna, parsear_excel
+from parsers.column_interpretation import es_ingreso as es_ingreso_col, es_gasto as es_gasto_col
 from extractor_metadata import extraer_metadata, MetadataEmpresa
+from account_qualification import qualify_cuentas as _safe_qualify_cuentas, \
+    safe_mode_enabled as _safe_mode_enabled
+from persistence.neon_store import NeonKnowledgeStore
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIGURACIÓN
 # ─────────────────────────────────────────────────────────────────────────────
 
 BASE_DIR = Path(__file__).parent
+load_dotenv(BASE_DIR / '.env')
 UMBRAL_REVISION = 0.85  # bajo este valor, la cuenta va a la cola de revisión
+USE_LEGACY_ENGINE = False  # True → MotorHibridoLocal (antiguo); False → HomologationPipeline (nuevo, default)
+SHADOW_MODE = True  # True → ejecuta nuevo pipeline en paralelo sin afectar UI, guarda logs en logs/shadow/
+
+
+def _build_date() -> str:
+    configured = os.environ.get("APP_BUILD_DATE")
+    if configured:
+        return configured
+    try:
+        return (BASE_DIR / ".build_date").read_text(encoding="utf-8").strip()
+    except OSError:
+        return "desarrollo-local"
 
 st.set_page_config(
     page_title="Homologación de Balances Tributarios",
@@ -54,60 +81,80 @@ st.set_page_config(
 
 @st.cache_data
 def cargar_catalogo() -> dict:
+    store = NeonKnowledgeStore()
+    if store.enabled:
+        try:
+            catalogo = store.load_catalog()
+            if catalogo:
+                return catalogo
+        except Exception:
+            pass
     with open(BASE_DIR / 'catalogo_maestro.json', encoding='utf-8') as f:
         return json.load(f)
 
 
 @st.cache_data
 def cargar_diccionario_base() -> list[dict]:
+    store = NeonKnowledgeStore()
+    if store.enabled:
+        try:
+            diccionario = store.load_dictionary()
+            if diccionario:
+                return diccionario
+        except Exception:
+            pass
     with open(BASE_DIR / 'diccionario.json', encoding='utf-8') as f:
         return json.load(f)
+
+
+def _persistir_validacion(
+    *, nombre: str, codigo: str, fuente: str, agregar_diccionario: bool,
+    sugerido: str | None = None, metodo: str | None = None,
+    confianza: float | None = None, archivo: str = '',
+) -> bool:
+    """Persiste en Neon; retorna False para que el caller use fallback JSON."""
+    store = NeonKnowledgeStore()
+    if not store.enabled:
+        return False
+    try:
+        store.save_validation(
+            account_name=nombre,
+            validated_code=codigo,
+            source=fuente,
+            suggested_code=sugerido,
+            suggested_method=metodo,
+            suggested_confidence=confianza,
+            source_file=archivo,
+            add_to_dictionary=agregar_diccionario,
+        )
+        cargar_diccionario_base.clear()
+        return True
+    except Exception:
+        st.error("Neon no pudo guardar la validación; se usará respaldo local.")
+        return False
+
+
+def _persistir_catalogo(entry: dict) -> bool:
+    store = NeonKnowledgeStore()
+    if not store.enabled:
+        return False
+    try:
+        store.save_catalog_entry(entry)
+        cargar_catalogo.clear()
+        return True
+    except Exception:
+        st.error("Neon no pudo guardar la categoría; se usará respaldo local.")
+        return False
+
+
+@st.cache_data(ttl=60)
+def _neon_disponible() -> bool:
+    return NeonKnowledgeStore().healthcheck()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # REGLAS REGEX (patrones de mayor cobertura)
 # ─────────────────────────────────────────────────────────────────────────────
-
-REGLAS_REGEX = [
-    (r"\b(caja\s*chica|caja\s*y\s*banco|efectivo\s*y\s*equiv|disponible|caja|banco|cuenta\s*corriente\s*banco|cuenta\s*vista)\b", "AC.01", 0.90),
-    (r"\b(inversion(es)?\s*(corto\s*plazo|cp)|fondos?\s*mutuos?|dep[oó]sito(s)?\s*a\s*plazo|pacto(s)?)\b", "AC.02", 0.92),
-    (r"\b(clientes?|deudore(s)?\s*por\s*venta|cuentas?\s*por\s*cobrar\s*(clientes?)?)\b", "AC.03", 0.90),
-    (r"\b(documento(s)?\s*por\s*cobrar|letras?\s*(por|a)\s*cobrar|pagare(s)?\s*por\s*cobrar|cheques?\s*por\s*cobrar)\b", "AC.04", 0.92),
-    (r"\b(inventario(s)?|existencia(s)?|mercader[ií]a(s)?|stock|materia(s)?\s*prima(s)?|productos?\s*(terminado|en\s*proceso))\b", "AC.05", 0.92),
-    (r"\b(relacionada(s)?\s*(cp|corriente)|cuenta\s*corriente\s*relacionad)\b", "AC.06", 0.88),
-    (r"(cuenta\s+(particular|corriente)\s+(socio|accionista))|(cta\.?\s*(cte|particular)\s+(socio|accionista))|retiro(s)?\s+(de\s+)?socio|dividendo(s)?\s+(provisorio|anticipado)", "AC.06S", 0.93),
-    (r"\b(iva\s*(credito|cf)|ppm|impuesto(s)?\s*por\s*recuperar|anticipo(s)?\s*(a\s*)?proveedor|gasto(s)?\s*anticipado(s)?|deudore(s)?\s*varios|fondos?\s*por\s*rendir)\b", "AC.07", 0.88),
-    (r"\b(activo\s*fijo|propiedad(es)?\s*planta|maquinaria(s)?|veh[ií]culo(s)?|terreno(s)?|construccion(es)?|mueble(s)?\s*y\s*[uú]til(es)?|equipos?\s*(de\s*)?computacion)\b", "ANC.01", 0.90),
-    (r"\b(intangible(s)?|goodwill|marca(s)?|patente(s)?|licencia(s)?|software|llave\s*de\s*negocio)\b", "ANC.03", 0.90),
-    (r"\b(inversion(es)?\s*(permanente(s)?|lp|largo\s*plazo)|accione(s)?\s*en\s*sociedad|participacion(es)?\s*(en\s*)?soci)\b", "ANC.04", 0.90),
-    (r"\b(relacionada(s)?\s*(lp|largo\s*plazo))\b", "ANC.05", 0.88),
-    (r"\b(proveedor(es)?|acreedore(s)?\s*comercial|facturas?\s*por\s*pagar|cuentas?\s*por\s*pagar\s*proveedor)\b", "PC.01", 0.90),
-    (r"\b(obligaciones?\s*bancarias?\s*(cp|corto)?|credito(s)?\s*banc|prestamo(s)?\s*banc|linea\s*de\s*credito|sobregiro)\b", "PC.02", 0.88),
-    (r"\bleasing\s*(cp|corriente|corto)?\b", "PC.03", 0.90),
-    (r"\bfactoring\b", "PC.04", 0.94),
-    (r"\b(iva\s*(debito|df)|impuesto(s)?\s*por\s*pagar|provision\s*impuesto|impuesto\s*(a\s*la\s*)?renta|primera\s*categoria|impuesto\s*unico|ppm\s*por\s*pagar|impt?o\s*por\s*pagar)\b", "PC.05", 0.88),
-    (r"\b(remuneracion(es)?|sueldo(s)?|vacaciones?|honorario(s)?\s*por\s*pagar|gratificacion(es)?|imposicion(es)?|afp|isapre|leyes\s*sociales|finiquito(s)?|indemnizacion)\b", "PC.06", 0.86),
-    (r"\b(relacionada(s)?\s*(cp|corriente)\s*pasivo|cta\s*cte\s*socios?\s*\(?en\s*pasivo)\b", "PC.07", 0.86),
-    (r"\b(anticipo(s)?\s*de\s*cliente(s)?|ingreso(s)?\s*(percibido|recibido).*(adelantado|anticipado)|otros?\s*pasivos?\s*(corrientes?|circulantes?)|provision(es)?\s*varia(s)?|acreedore(s)?\s*vario(s)?)\b", "PC.08", 0.85),
-    (r"\b(obligaciones?\s*bancarias?\s*(lp|largo)|credito(s)?\s*banc.*largo|prestamo(s)?\s*banc.*largo|mutuo(s)?\s*hipotecario(s)?)\b", "PNC.01", 0.88),
-    (r"\bleasing\s*(lp|largo)\b", "PNC.02", 0.90),
-    (r"\b(bono(s)?|debenture(s)?)\b", "PNC.03", 0.90),
-    (r"\b(relacionada(s)?\s*(lp|largo)\s*pasivo)\b", "PNC.04", 0.86),
-    (r"\b(indemnizacion(es)?\s*(por\s*)?a[ñn]os?\s*(de\s*)?servicio|provision(es)?\s*lp|impuesto(s)?\s*diferido(s)?\s*lp)\b", "PNC.05", 0.85),
-    (r"\b(capital\s*(pagado|suscrito|social|propio)?|aporte(s)?\s*(de\s*)?(capital|socios?))\b", "PAT.01", 0.90),
-    (r"\b(reserva(s)?(\s*legal)?|prima\s*de\s*emision)\b", "PAT.02", 0.88),
-    (r"\b(utilidad(es)?\s*(acumulada(s)?|retenida(s)?)|resultado(s)?\s*acumulado(s)?|p[eé]rdida(s)?\s*acumulada(s)?)\b", "PAT.03", 0.90),
-    (r"\butilidad\s*del\s*(ejercicio|periodo|a[ñn]o)|resultado\s*del\s*(ejercicio|periodo)|p[eé]rdida\s*del\s*(ejercicio|periodo)|utilidad\s*[/(]?\s*p[eé]rdida\b", "PAT.04", 0.92),
-    (r"\b(venta(s)?|ingreso(s)?\s*(por\s*venta|operacional|del\s*giro)|facturacion)\b", "ER.01", 0.90),
-    (r"\bcosto(s)?\s*(de\s*)?(venta(s)?|explotacion|produccion|mercader[ií]a)\b", "ER.02", 0.92),
-    (r"\bgasto(s)?\s*(de\s*)?(administracion|general(es)?|gestion)\b", "ER.04", 0.88),
-    (r"\bgasto(s)?\s*(de\s*)?(venta(s)?|comercial(es)?|marketing|distribucion)\b", "ER.05", 0.88),
-    (r"\b(depreciacion|amortizacion)\b", "ER.07", 0.90),
-    (r"\bgasto(s)?\s*financiero(s)?|intere(s|ses)?\s*(pagado|bancario|leasing|factoring)|comision(es)?\s*bancaria(s)?", "ER.09", 0.90),
-    (r"\bimpuesto\s*(a\s*la\s*renta|primera\s*categoria)\b", "ER.10", 0.90),
-    (r"\butilidad\s*neta|resultado\s*neto|net\s*income|ganancia\s*neta", "ER.11", 0.92),
-]
-REGLAS_COMPILADAS = [(re.compile(p, re.IGNORECASE | re.UNICODE), c, conf) for p, c, conf in REGLAS_REGEX]
 
 PATRON_NO_CUENTA = re.compile(
     r'^(comprendido|periodo|per[ií]odo|desde|hasta|rut|r\.u\.t|balance|'
@@ -143,11 +190,400 @@ def propagar_clasificacion_resultados(nombre_original: str, codigo_final: str, m
                 df_res.loc[mask_target, 'metodo'] = metodo
                 df_res.loc[mask_target, 'confianza'] = 1.0
                 df_res.loc[mask_target, 'requiere_revision'] = False
+                if 'origen' in df_res.columns:
+                    df_res.loc[mask_target, 'origen'] = (
+                        'Manual' if any(k in metodo for k in ('humana', 'manual')) else 'Código'
+                    )
+                    df_res.loc[mask_target, 'regla'] = metodo
+                    df_res.loc[mask_target, 'evidencia'] = 'Propagación automática entre balances'
                 st.session_state.resultados[fn] = df_res
                 propagaciones += 1
         
         if propagaciones > 1:
             st.toast(f"Homologación propagada a {propagaciones - 1} otro(s) balance(s) 🔄", icon="🔄")
+
+
+def _nombre_mostrar(row: pd.Series) -> str:
+    return row.get('nombre_revision_usuario', '') or row['nombre_original']
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EXPLICABILIDAD (P6) — trazabilidad auditable de cada decisión.
+# Solo expone información existente: nunca modifica la decisión del motor.
+# ─────────────────────────────────────────────────────────────────────────────
+
+ORIGENES_EXPLICABILIDAD = [
+    'Runtime', 'Gold', 'Código', 'Regex', 'CMCC', 'Semantic', 'Manual', 'Regla', 'Sin clasificar',
+]
+
+_BADGE_ORIGEN_COLORS = {
+    'Runtime': '#7B1FA2', 'Gold': '#C2185B', 'Código': '#1565C0', 'Regex': '#00695C',
+    'CMCC': '#EF6C00', 'Semantic': '#2E7D32', 'Manual': '#37474F',
+    'Regla': '#F9A825', 'Sin clasificar': '#757575',
+}
+
+
+def _badge_origen(origen: str) -> str:
+    color = _BADGE_ORIGEN_COLORS.get(origen or '', '#757575')
+    label = origen or '—'
+    return (
+        f"<span style='background:{color}; color:white; padding:2px 8px; border-radius:4px; "
+        f"font-size:0.72em; font-weight:600;'>{label}</span>"
+    )
+
+
+def _origen_desde_metodo_display(metodo: str) -> str:
+    """Mapea el método de clasificación a la categoría de origen (solo lectura)."""
+    m = (metodo or '').lower()
+    if not m:
+        return 'Sin clasificar'
+    if m in ('sin_clasificar', 'unclassified', 'movement_only'):
+        return 'Sin clasificar'
+    if 'learning' in m or m.startswith('gold_') or m.startswith('runtime_'):
+        return 'Gold'
+    if 'cmcc' in m:
+        return 'CMCC'
+    if 'semantic' in m:
+        return 'Semantic'
+    if 'regex' in m:
+        return 'Regex'
+    if m.startswith('code') or m == 'codigo' or 'diccionario' in m or 'dictionary' in m:
+        return 'Código'
+    if 'decision' in m:
+        return 'Regla'
+    if 'propagad' in m:
+        return 'Código'
+    if any(k in m for k in ('validacion_humana', 'manual', 'excluido', 'lote')):
+        return 'Manual'
+    if 'regla_especial' in m or m == 'regla' or 'regla' in m:
+        return 'Regla'
+    if 'columna_ambiguo' in m:
+        return 'Código'
+    return 'Regla'
+
+
+def _fmt_confianza(val) -> str:
+    if val is None:
+        return '—'
+    if isinstance(val, float) and pd.isna(val):
+        return '—'
+    try:
+        return f"{float(val):.0%}"
+    except (TypeError, ValueError):
+        return str(val)
+
+
+def _learning_runtime_hit(account_name: str, hp) -> bool:
+    """True si el learning_* vino del runtime (consulta read-only)."""
+    try:
+        rt = hp._learning_engine._runtime_lookup(account_name)
+    except Exception:
+        rt = None
+    return rt is not None
+
+
+def _origen_desde_clasif(clasif: dict, account_name: str, hp=None) -> str:
+    """Origen (Runtime/Gold/Código/Regex/CMCC/Semantic) a partir del dict del motor."""
+    metodo = (clasif.get('method') or '').lower()
+    if metodo.startswith('learning_'):
+        if hp is not None and _learning_runtime_hit(account_name, hp):
+            return 'Runtime'
+        return 'Gold'
+    if metodo.startswith('cmcc'):
+        return 'CMCC'
+    if metodo.startswith('semantic'):
+        return 'Semantic'
+    if metodo.startswith('regex'):
+        return 'Regex'
+    if metodo.startswith('code') or metodo.startswith('diccionario') or metodo.startswith('dictionary'):
+        return 'Código'
+    if metodo.startswith('decision'):
+        de = clasif.get('decision_engine') or {}
+        src = (de.get('decision_source') or '').upper()
+        if 'SM' in src:
+            return 'Semantic'
+        if 'REGEX' in src:
+            return 'Regex'
+        if 'DICT' in src:
+            return 'Código'
+        return 'Regla'
+    if metodo in ('', 'unclassified', 'movement_only'):
+        return 'Sin clasificar'
+    return 'Regla'
+
+
+def _resolver_tipo_cuenta(origen_columna, codigo) -> str | None:
+    """Account type (read-only) para etapas sensibles al tipo. Never modifica nada."""
+    try:
+        from parser_universal import OrigenColumna as _OC
+        from parsers.account_type_resolver import AccountTypeResolver
+        origen = _OC(origen_columna) if origen_columna else _OC.DESCONOCIDO
+        return AccountTypeResolver().resolve(origen_columna=origen, codigo=codigo).account_type.value
+    except Exception:
+        return None
+
+
+_CONTRA_ORIGEN = {
+    'activo': 'pasivo',
+    'pasivo': 'activo',
+    'perdida': 'ganancia',
+    'ganancia': 'perdida',
+}
+
+
+def _origen_efectivo(origen_columna, monto) -> str:
+    """Naturaleza contable efectiva, preservando aparte la columna física.
+
+    En balances de 8 columnas un importe negativo representa una contra cuenta:
+    ACTIVO <-> PASIVO y PERDIDA <-> GANANCIA.
+    """
+    origen = getattr(origen_columna, 'value', origen_columna)
+    origen = str(origen or 'desconocido').strip().lower()
+    try:
+        es_negativo = monto is not None and pd.notna(monto) and float(monto) < 0
+    except (TypeError, ValueError):
+        es_negativo = False
+    return _CONTRA_ORIGEN.get(origen, origen) if es_negativo else origen
+
+
+def _etiqueta_origen(origen_columna, monto) -> str:
+    """Etiqueta auditable para la cola: extracción y naturaleza efectiva."""
+    extraido = getattr(origen_columna, 'value', origen_columna)
+    extraido = str(extraido or 'desconocido').strip().upper()
+    efectivo = _origen_efectivo(origen_columna, monto).upper()
+    if efectivo != extraido:
+        return f"{extraido} → {efectivo} (monto negativo)"
+    return extraido
+
+
+def _codigo_compatible_con_origen(codigo: str | None, origen_columna, monto) -> bool:
+    """Impide sugerencias que contradigan la columna efectiva del balance."""
+    tipo = _resolver_tipo_cuenta(_origen_efectivo(origen_columna, monto), None)
+    if not tipo:
+        return True
+    from pipeline.homologation_pipeline import HomologationPipeline
+    return HomologationPipeline._is_code_allowed_for_tipo(codigo, tipo)
+
+
+def _explicar_clasificacion(hp, account_code: str, account_name: str, *,
+                            account_tipo: str | None = None,
+                            origen_columna=None,
+                            metodo_actual: str = '') -> list[dict]:
+    """Reconstrucción read-only de las reglas evaluadas para la UI.
+
+    No ejecuta ni modifica la decisión del motor: re-evalúa cada etapa para
+    auditar la cadena de decisión. Cada lectura va envuelta en try/except para
+    que un fallo en una etapa nunca rompa la UI.
+    """
+    etapas: list[dict] = []
+
+    def _agregar(nombre, result, metodo):
+        if result is None:
+            etapas.append({
+                'regla': nombre, 'coincidio': False, 'resultado': '—',
+                'confianza': '—', 'detalle': 'Sin coincidencia', 'ganadora': False,
+                '_metodo': metodo,
+            })
+            return
+        detalle = result.get('reason') if isinstance(result, dict) else None
+        etapas.append({
+            'regla': nombre, 'coincidio': True,
+            'resultado': result.get('standard_code') or '—',
+            'confianza': _fmt_confianza(result.get('confidence')),
+            'detalle': detalle or 'Coincidencia',
+            'ganadora': False,
+            '_metodo': metodo,
+        })
+
+    try:
+        _agregar('1 · Código de cuenta',
+                 hp._classify_by_code(account_code) if account_code else None, 'code')
+    except Exception:
+        pass
+    try:
+        _agregar('2 · Diccionario (exacto)',
+                 hp._classify_by_dictionary_exact(account_name), 'dictionary_exact')
+    except Exception:
+        pass
+    try:
+        _agregar('3 · Diccionario (fuzzy)',
+                 hp._classify_by_dictionary_fuzzy(account_name), 'dictionary_fuzzy')
+    except Exception:
+        pass
+    try:
+        _regex = None
+        if hp._features.ENABLE_REGEX_FALLBACK:
+            _regex = hp._classify_by_regex(account_name, account_tipo)
+        _agregar('4 · Regex fallback', _regex, 'regex_fallback')
+    except Exception:
+        pass
+    try:
+        _rt = None
+        if hp._learning_engine._runtime_path.exists():
+            _rt = hp._learning_engine._runtime_lookup(account_name)
+        if _rt is not None:
+            _agregar('5 · Runtime (gold runtime)', _rt, f"learning_{_rt.get('source')}")
+    except Exception:
+        pass
+    try:
+        _gold = hp._learning_engine.best_match(account_name, use_runtime=False)
+        if _gold.get('source') != 'none':
+            _agregar('6 · Gold Standard', _gold, f"learning_{_gold.get('source')}")
+    except Exception:
+        pass
+    try:
+        if hp._features.ENABLE_CMCC:
+            _cmcc = hp._cmcc_classifier.classify(account_name)
+            _agregar('7 · CMCC', _cmcc, (_cmcc or {}).get('method', 'cmcc'))
+    except Exception:
+        pass
+    try:
+        if hp._features.ENABLE_SEMANTIC_MATCHER and hp._semantic_matcher is not None:
+            _sm = hp._semantic_matcher.match(account_name, account_tipo)
+            if _sm is not None and not _sm.is_unknown:
+                _agregar(
+                    '8 · Semantic',
+                    {'standard_code': _sm.expected_cmcc,
+                     'confidence': min(_sm.score, 0.99),
+                     'reason': f"tier={_sm.match_tier} concept={_sm.concept_name}"},
+                    f"semantic_{_sm.match_tier}",
+                )
+    except Exception:
+        pass
+
+    ma = (metodo_actual or '').lower()
+    if ma.startswith('learning_'):
+        for e in etapas:
+            if str(e.get('_metodo', '')).startswith('learning_'):
+                e['ganadora'] = True
+                break
+    else:
+        for e in etapas:
+            if e.get('_metodo') == ma:
+                e['ganadora'] = True
+                break
+    return etapas
+
+
+def _mostrar_detalle_cuenta(row: pd.Series, catalogo: dict, hp=None, close_key: str | None = None):
+    if close_key:
+        if st.button('✖ Cerrar detalle', key=f"close_{close_key}"):
+            st.session_state.pop(close_key, None)
+            st.rerun()
+
+    st.markdown('#### 🔍 Detalle de clasificación')
+    nombre = _nombre_mostrar(row)
+    origen = row.get('origen') if 'origen' in row.index else ''
+    origen = origen or _origen_desde_metodo_display(row.get('metodo', ''))
+    regla = row.get('regla') if 'regla' in row.index else ''
+    regla = regla or row.get('metodo', '')
+    evidencia = row.get('evidencia') if 'evidencia' in row.index else ''
+    evidencia = evidencia or row.get('nota', '') or 'Sin evidencia adicional.'
+    tiempo = row.get('tiempo_clasificacion') if 'tiempo_clasificacion' in row.index else None
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown(f"**Nombre original:** {nombre}")
+        nombre_norm = row.get('nombre_normalizado') if 'nombre_normalizado' in row.index else ''
+        st.markdown(f"**Nombre normalizado:** `{nombre_norm or normalizar_nombre(nombre)}`")
+        st.markdown(f"**Código final:** `{row.get('codigo_clasificado', '') or '(sin clasificar)'}`")
+    with c2:
+        st.markdown(f"**Regla ganadora:** `{regla}`")
+        st.markdown(f"**Score:** **{_fmt_confianza(row.get('confianza'))}**")
+        st.markdown(f"**Confianza:** {_fmt_confianza(row.get('confianza'))}")
+        st.markdown(f"**Origen:** {_badge_origen(origen)}", unsafe_allow_html=True)
+        tiempo_txt = f"{tiempo:.2f} ms" if tiempo is not None and pd.notna(tiempo) else '—'
+        st.markdown(f"**Tiempo de clasificación:** {tiempo_txt}")
+        st.markdown(f"**Runtime usado:** {'Sí' if origen == 'Runtime' else 'No'}")
+        st.markdown(f"**Gold usado:** {'Sí' if origen == 'Gold' else 'No'}")
+
+    st.markdown('**Evidencia:**')
+    st.info(evidencia)
+
+    if hp is not None:
+        etapas = _explicar_clasificacion(
+            hp,
+            row.get('codigo_original', '') or '',
+            nombre,
+            origen_columna=row.get('origen_columna'),
+            metodo_actual=regla,
+        )
+        if etapas:
+            st.markdown('**Reglas evaluadas (auditoría read-only):**')
+            df_etapas = pd.DataFrame([
+                {k: v for k, v in e.items() if not k.startswith('_')} for e in etapas
+            ])
+            st.dataframe(df_etapas, use_container_width=True, hide_index=True)
+
+
+def _tab_explicabilidad(df: pd.DataFrame, catalogo: dict, hp=None, archivo_nombre: str = ''):
+    st.subheader('🔍 Explicabilidad de clasificación')
+    st.caption(
+        'Trazabilidad auditable por cuenta: código final, origen, score, regla, evidencia y '
+        'confianza. La auditoría es de solo lectura y no modifica decisiones del motor.'
+    )
+
+    clasificadas = df[
+        (df['codigo_clasificado'] != '') &
+        (df['codigo_clasificado'] != '__EXCLUIR__') &
+        (~df['es_total'])
+    ].copy()
+    if clasificadas.empty:
+        st.info('No hay cuentas clasificadas para auditar.')
+        return
+
+    if 'origen' not in clasificadas.columns:
+        clasificadas['origen'] = clasificadas['metodo'].map(_origen_desde_metodo_display)
+    if 'regla' not in clasificadas.columns:
+        clasificadas['regla'] = clasificadas['metodo']
+    if 'evidencia' not in clasificadas.columns:
+        clasificadas['evidencia'] = ''
+
+    cf1, cf2 = st.columns(2)
+    with cf1:
+        filtro = st.text_input('Buscar cuenta (nombre o código)', key='exp_buscar')
+    with cf2:
+        origenes = ['Todos'] + sorted(o for o in clasificadas['origen'].dropna().unique() if o)
+        sel_origen = st.selectbox('Origen', origenes, key='exp_origen')
+
+    v = clasificadas
+    if filtro:
+        f = filtro.lower()
+        v = v[
+            v['nombre_original'].astype(str).str.lower().str.contains(f, na=False) |
+            v['codigo_clasificado'].astype(str).str.lower().str.contains(f, na=False)
+        ]
+    if sel_origen != 'Todos':
+        v = v[v['origen'] == sel_origen]
+    v = v.sort_values(
+        ['codigo_clasificado', 'monto'],
+        key=lambda x: x.abs() if x.dtype.kind == 'f' else x,
+        ascending=[True, False],
+    )
+
+    st.caption(f"`{archivo_nombre}` · {len(v)} cuenta(s) · filtro origen = {sel_origen}")
+
+    for idx, row in v.iterrows():
+        with st.container(border=True):
+            cc1, cc2, cc3, cc4, cc5 = st.columns([1.2, 2.5, 1, 1, 1.5])
+            with cc1:
+                st.markdown(f"`{row['codigo_clasificado']}`")
+            with cc2:
+                st.markdown(f"**{_nombre_mostrar(row)}**")
+            with cc3:
+                st.markdown(_badge_origen(row.get('origen', '')), unsafe_allow_html=True)
+            with cc4:
+                st.markdown(f"**{_fmt_confianza(row.get('confianza'))}**")
+            with cc5:
+                st.markdown(f"`{row.get('regla', '')}`")
+            if st.button('🔍 Ver detalle', key=f"det_exp_{idx}", use_container_width=True):
+                st.session_state['detalle_explicabilidad_idx'] = idx
+                st.rerun()
+
+    det_idx = st.session_state.get('detalle_explicabilidad_idx')
+    if det_idx is not None and det_idx in v.index:
+        st.divider()
+        _mostrar_detalle_cuenta(v.loc[det_idx], catalogo, hp=hp, close_key='detalle_explicabilidad_idx')
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -172,8 +608,8 @@ class MotorHibridoLocal:
 
         if (cuenta.origen_columna != OrigenColumna.DESCONOCIDO and nombre_norm in self.NOMBRES_AMBIGUOS):
             col = cuenta.origen_columna
-            es_ing = col in (OrigenColumna.GANANCIA, OrigenColumna.ACTIVO)
-            es_gas = col in (OrigenColumna.PERDIDA,  OrigenColumna.PASIVO)
+            es_ing = es_ingreso_col(col)
+            es_gas = es_gasto_col(col)
             MAPA_AMBIGUO = {
                 'arriendos': ('ER.01', 'ER.04'), 'arriendo':  ('ER.01', 'ER.04'),
                 'intereses': ('ER.12', 'ER.09'), 'interes':   ('ER.12', 'ER.09'),
@@ -231,8 +667,8 @@ class MotorHibridoLocal:
 
     def _corregir_por_columna(self, nombre_norm, codigo_actual, origen, monto):
         from parser_universal import OrigenColumna as OC
-        es_ingreso = origen in (OC.GANANCIA, OC.ACTIVO)
-        es_gasto   = origen in (OC.PERDIDA,  OC.PASIVO)
+        es_ingreso = es_ingreso_col(origen)
+        es_gasto   = es_gasto_col(origen)
 
         AMBIGUOS = [
             ('arriendo', 'ER.01', 'ER.04'), ('interes', 'ER.12', 'ER.09'),
@@ -257,32 +693,25 @@ class MotorHibridoLocal:
         return None
 
 
-def parsear_excel(file) -> list[CuentaRaw]:
-    df = pd.read_excel(file, header=None)
-    cuentas = []
-    for i, row in df.iterrows():
-        vals = [v for v in row.tolist() if pd.notna(v)]
-        if not vals: continue
-        textos = [v for v in vals if isinstance(v, str)]
-        numeros = [v for v in vals if isinstance(v, (int, float))]
-        if not textos: continue
-        nombre = max(textos, key=len)
-        if len(nombre) < 3: continue
-        codigo = None
-        primer = str(vals[0])
-        if re.match(r'^[\d.\-]+$', primer) and primer != nombre:
-            codigo = primer
-        monto = numeros[-1] if numeros else None
-        cuentas.append(CuentaRaw(
-            linea=i, codigo=codigo, nombre=nombre, monto=monto,
-            origen_columna=OrigenColumna.DESCONOCIDO, confianza_extraccion=0.9
-        ))
-    return cuentas
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # INTERFAZ DE USUARIO PRINCIPAL (MAIN)
 # ─────────────────────────────────────────────────────────────────────────────
+
+def _save_gold_standard(account_name, account_code, final_code, reviewer="analista"):
+    try:
+        builder = GoldBuilder()
+        record = GoldRecord(
+            account_name=account_name,
+            account_code_original=account_code,
+            final_code=final_code,
+            reviewer=reviewer,
+            source_file=st.session_state.get("archivo_activo_select", ""),
+        )
+        builder.add_or_update(record)
+        builder.close()
+    except Exception:
+        pass
+
 
 def main():
     st.title("📊 Homologación de Balances Tributarios Chilenos")
@@ -300,11 +729,21 @@ def main():
         st.session_state.resultados = {}
     if 'metadata_files' not in st.session_state:
         st.session_state.metadata_files = {}
+    if 'document_intel' not in st.session_state:
+        st.session_state.document_intel = {}
     if 'correcciones' not in st.session_state:
         st.session_state.correcciones = []
 
     with st.sidebar:
         st.header("⚙️ Configuración")
+        commit = os.environ.get("RENDER_GIT_COMMIT", "local")[:8]
+        release_branch = os.environ.get("APP_RELEASE_BRANCH", "desarrollo-local")
+        build_date = _build_date()
+        persistence_label = "Neon conectado" if _neon_disponible() else "JSON local"
+        st.caption(
+            f"Rama `{release_branch}` · Commit `{commit}` · Build `{build_date}` · "
+            f"Persistencia: **{persistence_label}**"
+        )
         archivos = st.file_uploader(
             "Balances tributarios", type=['pdf', 'xlsx', 'xls'], accept_multiple_files=True
         )
@@ -383,42 +822,245 @@ def main():
             st.session_state.resultados.pop(k, None)
             st.session_state.metadata_files.pop(k, None)
 
-    for archivo in archivos:
-        if archivo.name not in st.session_state.resultados:
-            with st.spinner(f"Clasificando cuentas de {archivo.name}..."):
-                lineas_encabezado = _extraer_lineas_encabezado(archivo)
-                meta_indiv = extraer_metadata(lineas_encabezado)
-                st.session_state.metadata_files[archivo.name] = meta_indiv
+    # ── Procesar archivos nuevos ──────────────────────────────────────────────
+    if USE_LEGACY_ENGINE:
+        # LEGACY PIPELINE (MotorHibridoLocal)
+        for archivo in archivos:
+            if archivo.name not in st.session_state.resultados:
+                with st.spinner(f"Clasificando cuentas de {archivo.name}..."):
+                    lineas_encabezado = _extraer_lineas_encabezado(archivo)
+                    meta_indiv = extraer_metadata(lineas_encabezado)
+                    st.session_state.metadata_files[archivo.name] = meta_indiv
 
-                cuentas = _extraer_cuentas(archivo)
-                motor = MotorHibridoLocal(st.session_state.diccionario)
-                filas = []
-                for c in cuentas:
-                    if c.monto is None and not c.codigo: continue
-                    if not c.codigo and PATRON_NO_CUENTA.match(c.nombre.strip()): continue
-                    r = motor.clasificar(c, company_giro_norm)
-                    filas.append({
-                        'linea': c.linea, 'codigo_original': c.codigo or '', 'nombre_original': c.nombre,
-                        'monto': c.monto, 'origen_columna': c.origen_columna.value, 'es_total': c.es_total,
-                        'codigo_clasificado': r['codigo_estandar'] or '', 'metodo': r['metodo'],
-                        'confianza': r['confianza'], 'requiere_revision': r['requiere_revision'],
-                        'nota': r.get('nota_regla_especial', ''), 'confianza_extraccion': c.confianza_extraccion,
-                        'origen_columna_display': c.origen_columna.value,
-                    })
-                df_file = pd.DataFrame(filas)
-                st.session_state.resultados[archivo.name] = df_file
+                    cuentas, doc_ctx = _extraer_cuentas(archivo)
+                    st.session_state.document_intel[archivo.name] = doc_ctx
+                    motor = MotorHibridoLocal(st.session_state.diccionario)
+                    filas = []
+                    for c in cuentas:
+                        if c.monto is None and not c.codigo:
+                            continue
+                        if not c.codigo and PATRON_NO_CUENTA.match(c.nombre.strip()):
+                            continue
+                        _t0_legacy = time.perf_counter()
+                        r = motor.clasificar(c, company_giro_norm)
+                        _t1_legacy = (time.perf_counter() - _t0_legacy) * 1000
+                        origen_efectivo = _origen_efectivo(c.origen_columna, c.monto)
+                        if (r.get('codigo_estandar') and
+                                not _codigo_compatible_con_origen(
+                                    r['codigo_estandar'], c.origen_columna, c.monto)):
+                            r = {
+                                **r,
+                                'codigo_estandar': None,
+                                'metodo': 'sin_clasificar+filtro_columna',
+                                'confianza': 0.0,
+                                'requiere_revision': True,
+                            }
+                        filas.append({
+                            'linea': c.linea,
+                            'codigo_original': c.codigo or '',
+                            'nombre_original': c.nombre,
+                            'nombre_normalizado': normalizar_nombre(c.nombre),
+                            'monto': c.monto,
+                            'origen_columna': c.origen_columna.value,
+                            'origen_columna_efectiva': origen_efectivo,
+                            'es_total': c.es_total,
+                            'codigo_clasificado': r['codigo_estandar'] or '',
+                            'metodo': r['metodo'],
+                            'confianza': r['confianza'],
+                            'requiere_revision': r['requiere_revision'],
+                            'nota': r.get('nota_regla_especial', ''),
+                            'confianza_extraccion': c.confianza_extraccion,
+                            'origen_columna_display': _etiqueta_origen(c.origen_columna, c.monto),
+                            'nombre_revision_usuario': '',
+                            'tipo_revision': '',
+                            'origen': _origen_desde_metodo_display(r['metodo']),
+                            'regla': r['metodo'],
+                            'evidencia': r.get('nota_regla_especial', '') or r['metodo'],
+                            'tiempo_clasificacion': round(_t1_legacy, 3),
+                        })
+                    df_file = pd.DataFrame(filas)
+                    st.session_state.resultados[archivo.name] = df_file
 
+                    # SHADOW MODE — homologación comparativa contra motor legacy
+                    if SHADOW_MODE and Path(archivo.name).suffix.lower() == '.pdf':
+                        import tempfile
+                        from pipeline.homologation_pipeline import HomologationPipeline
+                        from shadow.shadow_logger import ShadowLogger
+                        tmp_shadow = tempfile.NamedTemporaryFile(suffix='.pdf', delete=False)
+                        try:
+                            tmp_shadow.write(archivo.read())
+                            tmp_shadow.close()
+                            sh_path = Path(tmp_shadow.name)
+                            hp_shadow = HomologationPipeline()
+                            sh_summary = hp_shadow.process(sh_path)
+                            logger_sh = ShadowLogger()
+                            comparisons = []
+                            matches = 0
+                            for sh_entry in sh_summary.get("classified", []):
+                                aname = sh_entry["account_name"]
+                                amatch = df_file[df_file["nombre_original"] == aname]
+                                if amatch.empty:
+                                    continue
+                                comparisons.append(logger_sh.build_comparison(
+                                    account_name=aname,
+                                    account_code=sh_entry.get("account_code", ""),
+                                    legacy_code=amatch.iloc[0]["codigo_clasificado"] or None,
+                                    legacy_confidence=amatch.iloc[0]["confianza"],
+                                    new_code=sh_entry.get("final_code") or sh_entry.get("standard_code"),
+                                    new_confidence=sh_entry.get("confidence", 0.0),
+                                    new_method=sh_entry.get("method", ""),
+                                    learning_hit="learning" in sh_entry.get("method", ""),
+                                ))
+                                if comparisons[-1]["match"]:
+                                    matches += 1
+                            total_comp = len(comparisons)
+                            match_rate = matches / total_comp if total_comp else 1.0
+                            logger_sh.log(archivo.name, comparisons, match_rate)
+                        finally:
+                            sh_path.unlink(missing_ok=True)
+                            archivo.seek(0)
+    else:
+        # NEW PIPELINE (HomologationPipeline)
+        import logging as _logging
+        _shadow_logger = _logging.getLogger("homologation_pipeline")
+        from pipeline.homologation_pipeline import HomologationPipeline
+        from adapters.account_adapter import AccountAdapter
+        from interpreters.balance_interpreter import BalanceInterpreter
+
+        hp = HomologationPipeline()
+        for archivo in archivos:
+            if archivo.name not in st.session_state.resultados:
+                with st.spinner(f"Clasificando cuentas de {archivo.name}..."):
+                    _t0 = time.perf_counter()
+                    lineas_encabezado = _extraer_lineas_encabezado(archivo)
+                    meta_indiv = extraer_metadata(lineas_encabezado)
+                    st.session_state.metadata_files[archivo.name] = meta_indiv
+
+                    cuentas, doc_ctx = _extraer_cuentas(archivo)
+                    st.session_state.document_intel[archivo.name] = doc_ctx
+                    total_cuentas = len(cuentas)
+                    filas = []
+                    clasificadas = 0
+                    learning_hits = 0
+                    fallback_count = 0
+
+                    for c in cuentas:
+                        if c.monto is None and not c.codigo:
+                            continue
+                        if not c.codigo and PATRON_NO_CUENTA.match(c.nombre.strip()):
+                            continue
+                        ab = AccountAdapter.from_cuenta_raw(c)
+                        interp = BalanceInterpreter(ab)
+                        classification_amount = interp.classification_amount
+                        origen_efectivo = _origen_efectivo(c.origen_columna, classification_amount)
+                        account_tipo = _resolver_tipo_cuenta(origen_efectivo, c.codigo)
+                        if classification_amount is None:
+                            codigo_clasificado = ""
+                            metodo = "movement_only"
+                            confianza = 0.0
+                            requiere_revision = True
+                            nota = ""
+                            clasif_origen = 'Sin clasificar'
+                            clasif_evidencia = ''
+                            tiempo_clasif_ms = 0.0
+                        else:
+                            clasificadas += 1
+                            _t0_clasif = time.perf_counter()
+                            classification = hp._classify_account(
+                                ab.account_code,
+                                ab.account_name,
+                                account_tipo=account_tipo,
+                            )
+                            tiempo_clasif_ms = round((time.perf_counter() - _t0_clasif) * 1000, 3)
+                            adjustment = hp._rule_processor.aplicar(
+                                nombre_cuenta=ab.account_name,
+                                codigo_clasificado=classification.get("standard_code") or "",
+                                monto=classification_amount,
+                            )
+                            final_code = (
+                                adjustment.codigo_final if adjustment.aplica
+                                else classification.get("standard_code")
+                            )
+                            if (final_code and
+                                    not _codigo_compatible_con_origen(
+                                        final_code, c.origen_columna, classification_amount)):
+                                final_code = None
+                                classification = {
+                                    **classification,
+                                    "standard_code": None,
+                                    "confidence": 0.0,
+                                    "method": "unclassified_type_filter",
+                                    "reason": (
+                                        "Sugerencia descartada por ser incompatible con "
+                                        f"la columna efectiva {account_tipo}"
+                                    ),
+                                }
+                            codigo_clasificado = final_code or ""
+                            metodo = classification.get("method", "")
+                            confianza = classification.get("confidence", 0.0)
+                            requiere_revision = confianza < UMBRAL_REVISION
+                            nota = adjustment.nota if adjustment.aplica else ""
+                            clasif_evidencia = classification.get("reason", "")
+                            clasif_origen = _origen_desde_clasif(classification, ab.account_name, hp)
+                            if metodo.startswith("learning_"):
+                                learning_hits += 1
+                            else:
+                                fallback_count += 1
+
+                        filas.append({
+                            'linea': c.linea,
+                            'codigo_original': c.codigo or '',
+                            'nombre_original': c.nombre,
+                            'nombre_normalizado': normalizar_nombre(c.nombre),
+                            'monto': c.monto,
+                            'origen_columna': c.origen_columna.value,
+                            'origen_columna_efectiva': origen_efectivo,
+                            'es_total': c.es_total,
+                            'codigo_clasificado': codigo_clasificado,
+                            'metodo': metodo,
+                            'confianza': confianza,
+                            'requiere_revision': requiere_revision,
+                            'nota': nota,
+                            'confianza_extraccion': c.confianza_extraccion,
+                            'origen_columna_display': _etiqueta_origen(
+                                c.origen_columna, classification_amount),
+                            'nombre_revision_usuario': '',
+                            'tipo_revision': '',
+                            'origen': clasif_origen,
+                            'regla': metodo,
+                            'evidencia': clasif_evidencia,
+                            'tiempo_clasificacion': tiempo_clasif_ms,
+                        })
+
+                    df_file = pd.DataFrame(filas)
+                    st.session_state.resultados[archivo.name] = df_file
+
+                    _t1 = time.perf_counter()
+                    _shadow_logger.info(
+                        "archivo=%s cuentas=%d clasificadas=%d learning_hits=%d fallback=%d time=%.3fs",
+                        archivo.name, total_cuentas, clasificadas,
+                        learning_hits, fallback_count, _t1 - _t0,
+                    )
+        # P5.5 Runtime Observability: persistir métricas de uso para Runtime Analytics.
+        try:
+            st.session_state["runtime_metrics_last"] = hp._learning_engine.get_metrics()
+        except Exception:  # noqa: BLE001 — observabilidad no debe interrumpir el flujo
+            pass
+    # After processing all uploaded files, propagate classifications across all balances
     if 'propagation_done' not in st.session_state:
+        # Define helper to propagate classifications across balances
         def propagar_entre_balances():
+            """Propaga códigos clasificados entre balances cargados."""
+            # Build mapping from normalized account name to list of (file, index)
             name_map = {}
-            resultados = getattr(st.session_state, "resultados", {})
-            for fname, df in resultados.items():
+            for fname, df in st.session_state.resultados.items():
                 for idx, row in df.iterrows():
                     nombre = row['nombre_original']
-                    if not nombre: continue
+                    if not nombre:
+                        continue
                     norm = normalizar_nombre(nombre)
                     name_map.setdefault(norm, []).append((fname, idx, row['codigo_clasificado']))
-            
+            # Propagar si existe alguna clasificación
             for norm, entries in name_map.items():
                 classified_code = None
                 for fname, idx, cod in entries:
@@ -432,6 +1074,10 @@ def main():
                             st.session_state.resultados[fname].at[idx, 'metodo'] = 'propagado_automático'
                             st.session_state.resultados[fname].at[idx, 'confianza'] = 1.0
                             st.session_state.resultados[fname].at[idx, 'requiere_revision'] = False
+                            if 'origen' in st.session_state.resultados[fname].columns:
+                                st.session_state.resultados[fname].at[idx, 'origen'] = 'Código'
+                                st.session_state.resultados[fname].at[idx, 'regla'] = 'propagado_automático'
+                                st.session_state.resultados[fname].at[idx, 'evidencia'] = 'Propagación automática entre balances'
         propagar_entre_balances()
         st.session_state['propagation_done'] = True
 
@@ -485,6 +1131,11 @@ def main():
         c3.markdown(f"**Giro** \n{giro_empresa or '—'}")
         c4.markdown(f"**Archivo Activo** \n`{archivo_activo_name}`")
 
+    # Sprint 31 — Información del documento (análisis documental, solo lectura)
+    _doc_ctx = st.session_state.document_intel.get(archivo_activo_name)
+    if _doc_ctx is not None:
+        _mostrar_informacion_documento(_doc_ctx)
+
     col_visor, col_trabajo = st.columns([1, 1], gap="medium")
 
     with col_visor:
@@ -494,19 +1145,27 @@ def main():
             pass
 
     with col_trabajo:
-        tab_resumen, tab_revision, tab_balance, tab_diccionario = st.tabs(
-            ["📈 Resumen", "🔍 Cola de Revisión", "📋 Balance Normalizado", "📚 Diccionario"]
+        tab_resumen, tab_revision, tab_balance, tab_diccionario, tab_aprendizaje, tab_analytics, tab_conocimiento, tab_inteligencia, tab_km = st.tabs(
+            ["📈 Resumen", "🔍 Cola de Revisión", "📋 Balance Normalizado",
+             "📚 Diccionario", "🧠 Aprendizaje", "📊 Analytics", "📖 Conocimiento Documental",
+             "📈 Inteligencia del Dataset", "🧠 Knowledge Manager"]
         )
 
         with tab_resumen: _tab_resumen(df)
         with tab_revision: _tab_revision(df, catalogo, motor=MotorHibridoLocal(st.session_state.diccionario), archivo_nombre=archivo_activo_name)
         with tab_balance: _tab_balance(df, catalogo)
         with tab_diccionario: _tab_diccionario()
+        with tab_conocimiento: _tab_conocimiento(archivo_activo, _doc_ctx, meta_activo)
+        with tab_inteligencia: _tab_inteligencia()
+        with tab_km: _tab_knowledge_manager()
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# FUNCIONES AUXILIARES DE INTERFAZ Y PROCESAMIENTO
-# ─────────────────────────────────────────────────────────────────────────────
+        with tab_aprendizaje:
+            _tab_aprendizaje()
+
+        with tab_analytics:
+            st.markdown("Analytics Dashboard (Work in Progress)")
+
 
 def _visor_documento(archivo):
     import tempfile, base64, io, platform, shutil, subprocess, glob
@@ -626,7 +1285,12 @@ def _extraer_lineas_encabezado(archivo) -> list[str]:
         return lineas
 
 
-def _extraer_cuentas(archivo) -> list[CuentaRaw]:
+def _extraer_cuentas(archivo) -> tuple[list[CuentaRaw], object]:
+    """Extrae cuentas y devuelve (cuentas, document_context).
+
+    `document_context` es el DocumentProcessingContext (Sprint 31) cuando el
+    archivo es PDF y el análisis documental corrió; None en caso contrario.
+    """
     suffix = Path(archivo.name).suffix.lower()
     if suffix == '.pdf':
         import tempfile
@@ -636,9 +1300,265 @@ def _extraer_cuentas(archivo) -> list[CuentaRaw]:
         parser = ParserPDF()
         resultado = parser.parsear(tmp_path)
         for adv in resultado.advertencias: st.warning(adv)
-        return resultado.cuentas
+        # GATE 4E: SAFE-R02+R03+R08 (ruido de encabezado/pie, URLs/emails,
+        # duplicados) aplicado ANTES de la clasificación, ÚNICAMENTE con
+        # activación explícita (env SAFE_MODE ON). Con SAFE OFF el
+        # comportamiento es exactamente el previo: se devuelven todas las
+        # cuentas extraídas, sin filtrado.
+        if _safe_mode_enabled():
+            return _safe_qualify_cuentas(resultado.cuentas), \
+                getattr(resultado, 'document_context', None)
+        return resultado.cuentas, getattr(resultado, 'document_context', None)
     else:
-        return parsear_excel(archivo)
+        return parsear_excel(archivo), None
+
+
+def _mostrar_informacion_documento(ctx) -> None:
+    """Sección solo-lectura INFORMACIÓN DEL DOCUMENTO (Sprint 31, FASE 5).
+
+    Muestra la metadata del análisis documental ANTES de los resultados.
+    No modifica ningún resultado: si `ctx` no está disponible, no dibuja nada.
+    """
+    if ctx is None:
+        return
+    try:
+        info = ctx.ui_summary()
+    except Exception:
+        return
+
+    with st.container(border=True):
+        st.markdown("#### 🧾 INFORMACIÓN DEL DOCUMENTO")
+        cols = st.columns(4)
+        items = [
+            ("Documento", info.get("Documento", "—")),
+            ("Formato", info.get("Formato", "—")),
+            ("Columnas", info.get("Columnas", "—")),
+            ("Layout", info.get("Layout", "—")),
+            ("OCR", info.get("OCR", "—")),
+            ("Extractor", info.get("Extractor", "—")),
+            ("Confianza", info.get("Confianza", "—")),
+            ("Familia", info.get("Familia", "—")),
+        ]
+        for i, (label, value) in enumerate(items):
+            with cols[i % 4]:
+                st.markdown(f"**{label}**  \n`{value}`")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CONOCIMIENTO DOCUMENTAL (Sprint 32 — Document Knowledge Base)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@st.cache_resource
+def _cargar_document_kb():
+    """Carga la DKB desde knowledge_base/document_kb.json (None si no existe)."""
+    try:
+        from document_intelligence.knowledge import DocumentKnowledgeBase
+        path = BASE_DIR / "knowledge_base" / "document_kb.json"
+        if not path.exists():
+            return None
+        kb = DocumentKnowledgeBase()
+        kb.load(path)
+        return kb
+    except Exception:
+        return None
+
+
+def _build_fingerprint_archivo(archivo, doc_ctx):
+    """Construye el fingerprint del archivo activo (con caché por nombre)."""
+    if "document_fingerprints" not in st.session_state:
+        st.session_state.document_fingerprints = {}
+    name = archivo.name
+    if name in st.session_state.document_fingerprints:
+        return st.session_state.document_fingerprints[name]
+
+    import tempfile
+    from document_intelligence.knowledge.fingerprint import fingerprint_from_file
+    suffix = Path(archivo.name).suffix.lower()
+    archivo.seek(0)
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        tmp.write(archivo.read())
+        tmp_path = Path(tmp.name)
+    try:
+        fp = fingerprint_from_file(tmp_path, signature=doc_ctx.signature)
+    finally:
+        archivo.seek(0)
+        tmp_path.unlink(missing_ok=True)
+    st.session_state.document_fingerprints[name] = fp
+    return fp
+
+
+def _tab_conocimiento(archivo, doc_ctx, meta_activo) -> None:
+    """Sección CONOCIMIENTO DOCUMENTAL: DKB + matching del documento activo.
+
+    Solo lectura. Si la DKB no está disponible o el matcher falla, muestra
+    un aviso y NO afecta ningún resultado.
+    """
+    if archivo is None or doc_ctx is None:
+        st.info("El análisis documental no está disponible para este archivo.")
+        return
+
+    kb = _cargar_document_kb()
+    if kb is None or not getattr(kb, "profiles", None):
+        st.info(
+            "📖 La Document Knowledge Base aún no existe. "
+            "Ejecuta `python tools/build_document_kb.py` para construirla."
+        )
+        return
+
+    try:
+        fp = _build_fingerprint_archivo(archivo, doc_ctx)
+        company = ""
+        if meta_activo is not None and getattr(meta_activo, "razon_social", ""):
+            company = meta_activo.razon_social
+        from document_intelligence.knowledge import Matcher
+        result = Matcher().match(fp, kb.profiles, company=company)
+    except Exception as exc:  # noqa: BLE001 — el matcher nunca rompe el pipeline
+        st.warning(f"El matcher de la DKB no pudo ejecutarse ({exc}).")
+        return
+
+    profile = result.matched_profile
+    if profile is None:
+        st.info("No se encontraron perfiles similares en la DKB.")
+        return
+
+    st.markdown("#### 📖 Conocimiento Documental")
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Perfil detectado", profile.name, help=profile.description)
+    c2.metric("Empresa", profile.company)
+    c3.metric("Familia", profile.family)
+    c4.metric("Extractor recomendado", profile.recommended_extractor)
+    c5.metric("Similitud", f"{result.similarity:.0f}%")
+
+    st.markdown("**Top 5 perfiles similares**")
+    ranking_rows = []
+    for p, sim in result.ranking[:5]:
+        ranking_rows.append({
+            "Perfil": p.name,
+            "Empresa": p.company,
+            "Familia": p.family,
+            "Similitud": f"{sim:.0f}%",
+            "Frecuencia": p.times_seen,
+        })
+    st.dataframe(ranking_rows, use_container_width=True, hide_index=True)
+
+    st.markdown("**Variantes conocidas**")
+    if profile.known_variants:
+        st.write(", ".join(profile.known_variants))
+    else:
+        st.caption("Sin variantes registradas.")
+
+    st.markdown("**Historial**")
+    h1, h2, h3 = st.columns(3)
+    h1.metric("Primera aparición", profile.first_seen or "—")
+    h2.metric("Última aparición", profile.last_seen or "—")
+    h3.metric("Frecuencia (documentos)", profile.times_seen)
+
+
+@st.cache_resource
+def _cargar_mining_result():
+    """Carga el resultado de minería desde document_mining.json (None si no existe)."""
+    try:
+        path = BASE_DIR / "knowledge_base" / "document_mining.json"
+        if not path.exists():
+            return None
+        from document_intelligence.mining import load_analysis_result
+        return load_analysis_result(path)
+    except Exception:
+        return None
+
+
+def _tab_inteligencia() -> None:
+    """Inteligencia del Dataset: minería del DKB (solo lectura).
+
+    Muestra familias descubiertas, cobertura esperada, representantes,
+    variantes y confianza. NO edita datos.
+    """
+    result = _cargar_mining_result()
+    if result is None:
+        st.info(
+            "📈 La minería del dataset aún no existe. "
+            "Ejecuta `python tools/run_document_mining.py` para generarla."
+        )
+        return
+
+    st.markdown("#### 📈 Inteligencia del Dataset")
+    st.caption("Familias descubiertas por fingerprint (sin empresa ni nombre de archivo).")
+
+    matrix = result.get("matrix", {})
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Familias detectadas", result.get("n_families", 0))
+    c2.metric("Documentos analizados", result.get("n_documents", 0))
+    c3.metric("Similitud media global", f"{matrix.get('mean_similarity', 0):.0f}%")
+    c4.metric("Pares comparados", f"{matrix.get('pairs_computed', 0):,}")
+
+    coverage = result.get("coverage", {}).get("tiers", [])
+    if coverage:
+        st.markdown("**Cobertura esperada**")
+        st.dataframe([{
+            "Top N familias": t["top_n"],
+            "Familias": t["families"],
+            "Documentos": t["documents"],
+            "% acumulado": f"{t['cumulative_pct']}%",
+            "% restante": f"{t['remaining_pct']}%",
+        } for t in coverage], use_container_width=True, hide_index=True)
+
+    familias = result.get("families", [])
+    st.markdown("**Top familias**")
+    if familias:
+        st.dataframe([{
+            "Familia": f["id"],
+            "Empresa principal": f.get("top_company", "") or "—",
+            "Documentos": f["count"],
+            "Similitud interna": f"{f['avg_similarity']:.0f}%",
+            "Layout": f["dominant_layout"],
+            "Código": f["dominant_code_pattern"],
+            "Tipo doc": f["dominant_document_type"],
+        } for f in familias[:10]], use_container_width=True, hide_index=True)
+
+    representantes = result.get("representatives", [])
+    st.markdown("**Representantes**")
+    if representantes:
+        st.dataframe([{
+            "Familia": r["family_id"],
+            "Documento representante": r["file"],
+            "Similitud promedio": f"{r['avg_similarity']:.0f}%",
+            "Documentos": r["n_documents"],
+            "Empresa": r["company"],
+        } for r in representantes[:10]], use_container_width=True, hide_index=True)
+
+    recomendaciones = result.get("recommendations", [])
+    st.markdown("**Recomendación de extractores**")
+    if recomendaciones:
+        top = recomendaciones[0]
+        st.write(
+            f"Desarrollar primero un **`{top['extractor_type']}`** para la familia "
+            f"`{top['family_name']}` ({top['count']} documentos, "
+            f"{top['pct_dataset']}% del dataset)."
+        )
+        if len(recomendaciones) > 1:
+            st.caption("Siguientes candidatas: " + ", ".join(
+                r["family_name"] for r in recomendaciones[1:5]
+            ))
+    else:
+        st.caption("Aún no hay familias con volumen suficiente.")
+
+    variantes = result.get("statistics", {}).get("top_variants", [])
+    if variantes:
+        st.markdown("**Top variantes (empresa · layout)**")
+        st.dataframe([{
+            "Empresa": v["company"],
+            "Layout": v["layout"],
+            "Familias": v["count"],
+        } for v in variantes[:10]], use_container_width=True, hide_index=True)
+
+    problemas = result.get("quality_issues", [])
+    if problemas:
+        st.markdown(f"**Problemas detectados ({len(problemas)})**")
+        st.dataframe([{
+            "Severidad": p["severity"],
+            "Tipo": p["kind"],
+            "Detalle": p["message"],
+        } for p in problemas[:10]], use_container_width=True, hide_index=True)
 
 
 def _tab_resumen(df: pd.DataFrame):
@@ -675,7 +1595,9 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
         st.success("✅ No hay cuentas pendientes de revisión.")
         return
 
-    opciones_codigo = [''] + sorted(catalogo.keys()) + ['➕ NUEVA CATEGORÍA', '🚫 NO INCLUIR']
+    # Catálogo ordenado por grupos de presentación y sin cuentas no
+    # seleccionables (cálculo / TOTAL). Ver catalog_selection.py.
+    opciones_codigo = [''] + opciones_clasificacion(catalogo) + ['➕ NUEVA CATEGORÍA', '🚫 NO INCLUIR']
 
     if 'lote_seleccion' not in st.session_state:
         st.session_state.lote_seleccion = set()
@@ -699,20 +1621,53 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
         if confirmar_lote and n_sel > 0 and cat_lote:
             codigo_lote = '__EXCLUIR__' if cat_lote == '🚫 NO INCLUIR' else (cat_lote if cat_lote != '➕ NUEVA CATEGORÍA' else None)
             if codigo_lote:
+                incompatibles = [
+                    idx_lote for idx_lote in st.session_state.lote_seleccion
+                    if codigo_lote != '__EXCLUIR__'
+                    and not _codigo_compatible_con_origen(
+                        codigo_lote,
+                        df.at[idx_lote, 'origen_columna'],
+                        df.at[idx_lote, 'monto'],
+                    )
+                ]
+                if incompatibles:
+                    st.error(
+                        "La categoría elegida contradice la columna contable de "
+                        f"{len(incompatibles)} cuenta(s). No se aplicó el lote."
+                    )
+                    st.stop()
                 procesados = 0
+                fallback_json_lote = False
                 for idx_lote in list(st.session_state.lote_seleccion):
                     nombre_orig = df.at[idx_lote, 'nombre_original']
+                    codigo_orig = df.at[idx_lote, 'codigo_original']
                     st.session_state.resultados[archivo_nombre].at[idx_lote, 'codigo_clasificado'] = codigo_lote
                     st.session_state.resultados[archivo_nombre].at[idx_lote, 'metodo'] = 'validacion_humana_lote'
                     st.session_state.resultados[archivo_nombre].at[idx_lote, 'confianza'] = 1.0
                     st.session_state.resultados[archivo_nombre].at[idx_lote, 'requiere_revision'] = False
+                    st.session_state.resultados[archivo_nombre].at[idx_lote, 'origen'] = 'Manual'
+                    st.session_state.resultados[archivo_nombre].at[idx_lote, 'regla'] = 'validacion_humana_lote'
+                    st.session_state.resultados[archivo_nombre].at[idx_lote, 'evidencia'] = 'Asignación en lote por analista'
+                    # Gold Standard autoaprendizaje
+                    _save_gold_standard(nombre_orig, codigo_orig, codigo_lote)
+                    persistido = _persistir_validacion(
+                        nombre=nombre_orig,
+                        codigo=codigo_lote,
+                        fuente='validacion_humana_lote',
+                        agregar_diccionario="diccionario" in alcance_lote,
+                        sugerido=df.at[idx_lote, 'codigo_clasificado'] or None,
+                        metodo=df.at[idx_lote, 'metodo'],
+                        confianza=float(df.at[idx_lote, 'confianza']),
+                        archivo=archivo_nombre,
+                    )
                     if "diccionario" in alcance_lote:
                         entrada = {'cuenta_original': nombre_orig, 'codigo_estandar': codigo_lote, 'fuente': 'validacion_humana_lote'}
                         st.session_state.diccionario.append(entrada)
                         st.session_state.correcciones.append(entrada)
+                        fallback_json_lote = fallback_json_lote or not persistido
                     propagar_clasificacion_resultados(nombre_orig, codigo_lote, 'validacion_humana_lote_propagada')
                     procesados += 1
-                if "diccionario" in alcance_lote:
+                if "diccionario" in alcance_lote and fallback_json_lote:
                     with open(BASE_DIR / 'diccionario.json', 'w', encoding='utf-8') as f:
                         json.dump(st.session_state.diccionario, f, ensure_ascii=False, indent=2)
                 st.session_state.lote_seleccion = set()
@@ -729,7 +1684,7 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
     for idx, row in pendientes.iterrows():
         seleccionada = idx in st.session_state.lote_seleccion
         with st.container(border=seleccionada):
-            c0, c1, c2, c3 = st.columns([0.4, 3, 2, 3])
+            c0, c1, c2 = st.columns([0.3, 4, 4])
             with c0:
                 marcado = st.checkbox("", value=seleccionada, key=f"chk_{idx}", label_visibility="collapsed")
                 if marcado and idx not in st.session_state.lote_seleccion:
@@ -738,29 +1693,221 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                     st.session_state.lote_seleccion.discard(idx); st.rerun()
 
             with c1:
-                st.markdown(f"**{row['nombre_original']}**")
-                monto_str = f"{row['monto']:,.0f}" if pd.notna(row['monto']) else "—"
-                st.caption(f"Código: `{row['codigo_original'] or '—'}` · Monto: **{monto_str}**")
+                col_extraida = row.get('origen_columna', 'desconocido')
+                col_actual = row.get(
+                    'origen_columna_efectiva',
+                    _origen_efectivo(col_extraida, row.get('monto')),
+                ).upper()
+                etiqueta_columna = _etiqueta_origen(col_extraida, row.get('monto'))
+                badge_bg = {
+                    'ACTIVO': '#1E90FF', 'PASIVO': '#FF8C00',
+                    'PERDIDA': '#DC143C', 'GANANCIA': '#2E8B57',
+                }.get(col_actual, '#6B7280')
+                st.markdown(
+                    f"<span style='background:{badge_bg}; color:white; "
+                    f"padding:2px 10px; border-radius:4px; font-size:0.75em; "
+                    f"font-weight:600; letter-spacing:0.5px;'>{etiqueta_columna}</span>",
+                    unsafe_allow_html=True,
+                )
+                st.caption("Columna de origen del balance")
+                st.markdown(f"**{_nombre_mostrar(row)}**")
+                monto_val = row['monto']
+                if pd.notna(monto_val):
+                    color = 'blue' if monto_val > 0 else ('red' if monto_val < 0 else 'gray')
+                    st.markdown(
+                        f"<span style='color:{color}; font-weight:bold;'>{monto_val:,.0f}</span>",
+                        unsafe_allow_html=True,
+                    )
+
+                edit_mode = st.checkbox("Editar cuenta", key=f"edit_{idx}")
+
+                if edit_mode:
+                    st.divider()
+                    nuevo_nombre = st.text_input("Nombre", value=_nombre_mostrar(row), key=f"ed_nombre_{idx}")
+                    opciones_nat = ['ACTIVO', 'PASIVO', 'PERDIDA', 'GANANCIA']
+                    idx_nat = opciones_nat.index(col_actual) if col_actual in opciones_nat else 0
+                    nueva_nat = st.selectbox("Columna contable", opciones_nat, index=idx_nat, key=f"ed_nat_{idx}")
+                    monto_inicial = row['monto'] if pd.notna(row['monto']) else 0.0
+                    nuevo_monto = st.number_input("Monto", value=float(monto_inicial), format="%.0f", key=f"ed_monto_{idx}")
+
+                    if st.button("💾 Guardar corrección", key=f"ed_guardar_{idx}", use_container_width=True):
+                        df_mod = st.session_state.resultados[archivo_nombre]
+                        original_col = row.get('origen_columna', '')
+                        original_monto = row['monto']
+                        col_changed = nueva_nat.lower() != original_col
+                        monto_changed = (nuevo_monto != original_monto) if pd.notna(original_monto) else (nuevo_monto != 0)
+
+                        if col_changed or monto_changed:
+                            sel_clave = st.session_state.get(f"sel_{idx}", '')
+                            codigo_final = sel_clave if sel_clave not in ('', '➕ NUEVA CATEGORÍA', '🚫 NO INCLUIR') else ''
+                            df_mod.at[idx, 'nombre_original'] = nuevo_nombre
+                            df_mod.at[idx, 'nombre_revision_usuario'] = ''
+                            df_mod.at[idx, 'origen_columna'] = nueva_nat.lower()
+                            df_mod.at[idx, 'monto'] = nuevo_monto
+                            df_mod.at[idx, 'origen_columna_efectiva'] = _origen_efectivo(
+                                nueva_nat, nuevo_monto)
+                            df_mod.at[idx, 'origen_columna_display'] = _etiqueta_origen(
+                                nueva_nat, nuevo_monto)
+                            if codigo_final:
+                                df_mod.at[idx, 'codigo_clasificado'] = codigo_final
+                            df_mod.at[idx, 'metodo'] = 'manual_revision'
+                            df_mod.at[idx, 'confianza'] = 1.0
+                            df_mod.at[idx, 'requiere_revision'] = False
+                            df_mod.at[idx, 'tipo_revision'] = 'correccion_extraccion'
+                            df_mod.at[idx, 'origen'] = 'Manual'
+                            df_mod.at[idx, 'regla'] = 'manual_revision'
+                            df_mod.at[idx, 'evidencia'] = 'Corrección manual de extracción'
+                            if codigo_final:
+                                _save_gold_standard(nuevo_nombre, row['codigo_original'], codigo_final, reviewer="manual_revision")
+                            propagar_clasificacion_resultados(nuevo_nombre, codigo_final or df_mod.at[idx, 'codigo_clasificado'], 'manual_revision_propagada')
+                            st.toast(f"'{nuevo_nombre[:35]}' corregida ✅", icon="✅")
+                        else:
+                            df_mod.at[idx, 'nombre_revision_usuario'] = nuevo_nombre
+                            df_mod.at[idx, 'tipo_revision'] = 'visual'
+                            st.toast(f"'{nuevo_nombre[:35]}' nombre visual actualizado ✏️", icon="✏️")
+                        st.rerun()
 
             with c2:
                 sugerido = row['codigo_clasificado']
+                if sugerido and not _codigo_compatible_con_origen(
+                        sugerido, row.get('origen_columna'), row.get('monto')):
+                    sugerido = ''
                 st.write(f"Sugerido: **{sugerido or '(ninguno)'}**")
 
-            with c3:
-                default_idx = opciones_codigo.index(sugerido) if sugerido in opciones_codigo else 0
-                seleccion = st.selectbox("Clasificación correcta", opciones_codigo, index=default_idx,
-                                         format_func=lambda c: f"{c} — {catalogo[c]['nombre_estandar']}" if c in catalogo else c, key=f"sel_{idx}")
-                
-                alcance = st.radio("¿Aplicar?", ["Solo este caso", "Agregar al diccionario"], index=1, key=f"alc_{idx}", horizontal=True)
-                if st.button("Confirmar", key=f"btn_{idx}"):
-                    st.session_state.resultados[archivo_nombre].at[idx, 'codigo_clasificado'] = seleccion
-                    st.session_state.resultados[archivo_nombre].at[idx, 'requiere_revision'] = False
-                    if "diccionario" in alcance and seleccion not in ('', '🚫 NO INCLUIR'):
-                        st.session_state.diccionario.append({'cuenta_original': row['nombre_original'], 'codigo_estandar': seleccion, 'fuente': 'manual'})
-                        with open(BASE_DIR / 'diccionario.json', 'w', encoding='utf-8') as f:
-                            json.dump(st.session_state.diccionario, f, ensure_ascii=False, indent=2)
-                    st.session_state.lote_seleccion.discard(idx)
-                    st.rerun()
+                opciones_fila = [opciones_codigo[0]] + [
+                    codigo for codigo in opciones_codigo[1:]
+                    if codigo in ('➕ NUEVA CATEGORÍA', '🚫 NO INCLUIR')
+                    or _codigo_compatible_con_origen(
+                        codigo, row.get('origen_columna'), row.get('monto'))
+                ]
+                default_idx = (opciones_fila.index(sugerido)
+                               if sugerido in opciones_fila else 0)
+                seleccion = st.selectbox(
+                    "Clasificación correcta",
+                    opciones_fila,
+                    index=default_idx,
+                    format_func=lambda c: (
+                        f"{c} — {catalogo[c]['nombre_estandar']}" if c in catalogo
+                        else c if c else "(sin clasificar)"
+                    ),
+                    key=f"sel_{idx}"
+                )
+
+                es_nueva_cat = seleccion == '➕ NUEVA CATEGORÍA'
+                if es_nueva_cat:
+                    st.info("Define la nueva categoría:")
+                    nuevo_codigo = st.text_input("Código (ej: AC.10, ER.17)",
+                                                  key=f"new_cod_{idx}", max_chars=10)
+                    nuevo_nombre_cat = st.text_input("Nombre de la categoría",
+                                                  key=f"new_nom_{idx}")
+                    nuevo_tipo = st.selectbox("Tipo de estado",
+                                              ['balance', 'resultados'],
+                                              key=f"new_tipo_{idx}")
+                    nuevo_cat = st.selectbox(
+                        "Categoría",
+                        ['activo_corriente', 'activo_no_corriente',
+                         'pasivo_corriente', 'pasivo_no_corriente',
+                         'patrimonio', 'resultado'],
+                        key=f"new_cat_{idx}"
+                    )
+
+                if not es_nueva_cat and seleccion not in ('', '🚫 NO INCLUIR'):
+                    alcance = st.radio(
+                        "¿Aplicar esta clasificación?",
+                        ["Solo para este caso",
+                         "Agregar al diccionario (aplica a casos futuros iguales)"],
+                        index=1, key=f"alc_{idx}", horizontal=True
+                    )
+                else:
+                    alcance = "Solo para este caso"
+
+                if st.button("✅ Confirmar", key=f"btn_{idx}"):
+                    codigo_final = None
+
+                    if es_nueva_cat:
+                        if nuevo_codigo and nuevo_nombre_cat:
+                            nueva_entrada = {
+                                'codigo_estandar': nuevo_codigo.strip().upper(),
+                                'nombre_estandar': nuevo_nombre_cat.strip(),
+                                'categoria': nuevo_cat,
+                                'tipo_estado': nuevo_tipo,
+                                'naturaleza': 'deudora' if nuevo_cat.startswith('activo') else 'acreedora',
+                                'signo_normal': 1,
+                                'es_deuda_financiera': False,
+                                'es_activo_liquido': False,
+                                'afecta_ebitda': False,
+                            }
+                            catalogo[nuevo_codigo.strip().upper()] = nueva_entrada
+                            if not _persistir_catalogo(nueva_entrada):
+                                with open(BASE_DIR / 'catalogo_maestro.json', 'w', encoding='utf-8') as f:
+                                    json.dump(catalogo, f, ensure_ascii=False, indent=2)
+                            codigo_final = nuevo_codigo.strip().upper()
+                            st.toast(f"Nueva categoría '{nuevo_nombre_cat}' ({codigo_final}) creada ✨", icon="🆕")
+                        else:
+                            st.error("Debes ingresar código y nombre.")
+
+                    elif seleccion == '🚫 NO INCLUIR':
+                        st.session_state.resultados[archivo_nombre].at[idx, 'codigo_clasificado'] = '__EXCLUIR__'
+                        st.session_state.resultados[archivo_nombre].at[idx, 'metodo'] = 'excluido_analista'
+                        st.session_state.resultados[archivo_nombre].at[idx, 'confianza'] = 1.0
+                        st.session_state.resultados[archivo_nombre].at[idx, 'requiere_revision'] = False
+                        if "diccionario" in alcance:
+                            entrada_exclusion = {
+                                'cuenta_original': _nombre_mostrar(row),
+                                'codigo_estandar': '__EXCLUIR__',
+                                'fuente': 'excluido_analista'
+                            }
+                            st.session_state.diccionario.append(entrada_exclusion)
+                        persistido = _persistir_validacion(
+                            nombre=_nombre_mostrar(row), codigo='__EXCLUIR__',
+                            fuente='excluido_analista',
+                            agregar_diccionario="diccionario" in alcance,
+                            sugerido=row['codigo_clasificado'] or None,
+                            metodo=row['metodo'], confianza=float(row['confianza']),
+                            archivo=archivo_nombre,
+                        )
+                        if "diccionario" in alcance and not persistido:
+                            with open(BASE_DIR / 'diccionario.json', 'w', encoding='utf-8') as f:
+                                json.dump(st.session_state.diccionario, f, ensure_ascii=False, indent=2)
+                        propagar_clasificacion_resultados(row['nombre_original'], '__EXCLUIR__', 'excluido_analista_propagado')
+                        st.session_state.lote_seleccion.discard(idx)
+                        st.toast(f"'{_nombre_mostrar(row)[:35]}' excluida", icon="🚫")
+                        st.rerun()
+
+                    elif seleccion:
+                        codigo_final = seleccion
+
+                    if codigo_final:
+                        st.session_state.resultados[archivo_nombre].at[idx, 'codigo_clasificado'] = codigo_final
+                        st.session_state.resultados[archivo_nombre].at[idx, 'metodo'] = 'validacion_humana'
+                        st.session_state.resultados[archivo_nombre].at[idx, 'confianza'] = 1.0
+                        st.session_state.resultados[archivo_nombre].at[idx, 'requiere_revision'] = False
+                        st.session_state.lote_seleccion.discard(idx)
+                        _save_gold_standard(row['nombre_original'], row['codigo_original'], codigo_final)
+                        persistido = _persistir_validacion(
+                            nombre=row['nombre_original'], codigo=codigo_final,
+                            fuente='validacion_humana',
+                            agregar_diccionario="diccionario" in alcance,
+                            sugerido=row['codigo_clasificado'] or None,
+                            metodo=row['metodo'], confianza=float(row['confianza']),
+                            archivo=archivo_nombre,
+                        )
+                        if "diccionario" in alcance:
+                            nuevo_dic = {
+                                'cuenta_original': row['nombre_original'],
+                                'codigo_estandar': codigo_final,
+                                'fuente': 'validacion_humana'
+                            }
+                            st.session_state.diccionario.append(nuevo_dic)
+                            st.session_state.correcciones.append(nuevo_dic)
+                            if not persistido:
+                                with open(BASE_DIR / 'diccionario.json', 'w', encoding='utf-8') as f:
+                                    json.dump(st.session_state.diccionario, f, ensure_ascii=False, indent=2)
+                            st.toast(f"'{_nombre_mostrar(row)[:35]}' → {codigo_final} guardado 📚", icon="✅")
+                        else:
+                            st.toast(f"'{_nombre_mostrar(row)[:35]}' → {codigo_final} (solo este caso)", icon="✅")
+                        propagar_clasificacion_resultados(row['nombre_original'], codigo_final, 'validacion_humana_propagada')
+                        st.rerun()
 
 
 def _tab_balance(df: pd.DataFrame, catalogo: dict):
@@ -851,10 +1998,11 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict):
             (clasificadas['codigo_clasificado'] != '') &
             (clasificadas['codigo_clasificado'] != '__EXCLUIR__') &
             (~clasificadas['es_total'])
-        ][['codigo_clasificado', 'codigo_original', 'nombre_original', 'monto', 'metodo', 'confianza']].copy()
+        ][['codigo_clasificado', 'codigo_original', 'nombre_original', 'nombre_revision_usuario', 'monto', 'metodo', 'confianza']].copy()
 
+        det['nombre_visual'] = det['nombre_revision_usuario'].where(det['nombre_revision_usuario'] != '', det['nombre_original'])
         det['nombre_estandar'] = det['codigo_clasificado'].map(lambda c: catalogo_local.get(c, {}).get('nombre_estandar', c))
-        detalle_completo = det[['codigo_clasificado', 'nombre_estandar', 'codigo_original', 'nombre_original', 'monto', 'metodo', 'confianza']].copy()
+        detalle_completo = det[['codigo_clasificado', 'nombre_estandar', 'codigo_original', 'nombre_visual', 'monto', 'metodo', 'confianza']].copy()
 
         # Reconstrucción de la lógica de ordenamiento nativo
         detalle_completo = detalle_completo.sort_values(
@@ -864,7 +2012,7 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict):
         )
         detalle_completo.columns = [
             'Código Estándar', 'Nombre Estándar',
-            'Cód. Original', 'Nombre Original',
+            'Cód. Original', 'Nombre',
             'Monto', 'Método Clasificación', 'Confianza'
         ]
         detalle_completo['Monto'] = detalle_completo['Monto'].apply(
@@ -955,14 +2103,16 @@ def _validar_cuadre_utilidad(df: pd.DataFrame, agrupado: pd.DataFrame, clasifica
         MARGEN_BUSQUEDA = max(diferencia * 0.05, 1_000)
         candidatos = clasificadas[(clasificadas['monto'].abs() - diferencia).abs() <= MARGEN_BUSQUEDA].copy()
         if not candidatos.empty:
-            st.dataframe(candidatos[['nombre_original', 'monto', 'codigo_clasificado']], use_container_width=True, hide_index=True)
+            candidatos['_nombre_display'] = candidatos['nombre_revision_usuario'].where(candidatos['nombre_revision_usuario'] != '', candidatos['nombre_original'])
+            st.dataframe(candidatos[['_nombre_display', 'monto', 'codigo_clasificado']], use_container_width=True, hide_index=True)
         else:
             st.info("No se hallaron cuentas directas con el monto de la diferencia.")
 
     with tab_c:
         excluidas = df[df['codigo_clasificado'] == '__EXCLUIR__'].copy()
         if not excluidas.empty:
-            st.dataframe(excluidas[['nombre_original', 'monto']], use_container_width=True, hide_index=True)
+            excluidas['_nombre_display'] = excluidas['nombre_revision_usuario'].where(excluidas['nombre_revision_usuario'] != '', excluidas['nombre_original'])
+            st.dataframe(excluidas[['_nombre_display', 'monto']], use_container_width=True, hide_index=True)
 
 
 def _tab_diccionario():
@@ -994,6 +2144,531 @@ def _tab_diccionario():
         }),
         use_container_width=True, hide_index=True, height=500
     )
+
+
+def _tab_aprendizaje():
+    st.subheader("🧠 Autoaprendizaje — Gold Standard")
+    store = NeonKnowledgeStore()
+    if _neon_disponible():
+        try:
+            stats = store.learning_statistics()
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Diccionario activo", stats["dictionary_entries"])
+            c2.metric("Aprendidas por humanos", stats["human_learned"])
+            c3.metric("Validaciones registradas", stats["validations"])
+            c4.metric("Correcciones", stats["corrections"])
+            st.caption(
+                "Fuente: Neon. Cada validación queda auditada y las entradas agregadas "
+                "al diccionario son consumidas por el pipeline en futuras sesiones."
+            )
+            recientes = store.recent_validations(20)
+            if recientes:
+                st.markdown("#### Actividad reciente")
+                st.dataframe(pd.DataFrame(recientes), use_container_width=True, hide_index=True)
+            else:
+                st.info("Neon está conectado; aún no hay validaciones registradas.")
+            return
+        except Exception:
+            st.warning("No fue posible leer las métricas de Neon; se muestran datos locales.")
+    try:
+        builder = GoldBuilder()
+        stats = builder.statistics()
+        top = builder.top_learned()
+        conflicts = builder.find_conflicts()
+        builder.close()
+    except Exception as e:
+        st.error(f"No se pudieron cargar estadísticas: {e}")
+        return
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Registros aprendidos", stats["total_records"])
+    c2.metric("Coincidencias exactas", stats["exact_hits"])
+    c3.metric("Cuentas con conflicto", stats["conflicts"])
+
+    if stats["total_records"] > 0:
+        st.subheader("🏆 Top 20 cuentas más aprendidas")
+        top_df = pd.DataFrame(top)
+        top_df.columns = ["Cuenta", "Código Final", "Veces Usada", "Último Uso"]
+        top_df["Último Uso"] = top_df["Último Uso"].str[:19]
+        st.dataframe(top_df, use_container_width=True, hide_index=True)
+
+    if conflicts:
+        st.subheader("⚔️ Cuentas con conflicto (múltiples códigos asignados)")
+        cf_df = pd.DataFrame(conflicts)
+        cf_df.columns = ["Cuenta", "Códigos Distintos", "Códigos", "Versiones"]
+        st.dataframe(cf_df, use_container_width=True, hide_index=True)
+    else:
+        st.info("No hay cuentas con conflictos de clasificación.")
+
+    st.divider()
+    st.subheader("🔄 Promoción al Gold Standard (Learning Loop)")
+    st.caption(
+        "Promueve las revisiones humanas (gold_records) a una base RUNTIME separada "
+        "(`gold_standard_runtime.db`). La base del benchmark (2660/2662) NO se modifica. "
+        "Ver `reports/product/P1_learning_loop_design.md`."
+    )
+    pc1, pc2, pc3 = st.columns(3)
+    with pc1:
+        if st.button("🔍 Previsualizar promoción", use_container_width=True):
+            try:
+                res = promover_revisiones(dry_run=True)
+                st.success(
+                    f"Candidatos: {res.candidates} · Promovibles: {res.promotable} · "
+                    f"Conflictos: {res.conflicts} · Duplicados: {res.duplicates} · "
+                    f"Reservados (total): {res.reserved}"
+                )
+                if res.conflict_details:
+                    st.warning("Conflictos (se omiten de la promoción):")
+                    for c in res.conflict_details:
+                        st.write(f"- {c['name']}: candidato={c['candidate_code']} gold={c['existing_codes']}")
+            except Exception as e:
+                st.error(f"No se pudo previsualizar: {e}")
+    with pc2:
+        if st.button("✅ Aplicar a runtime", use_container_width=True):
+            try:
+                res = promover_revisiones(dry_run=False)
+                st.success(
+                    f"Promovidos: {res.promoted} · Conflictos omitidos: {res.conflicts} · "
+                    f"Duplicados: {res.duplicates} · Reservados: {res.reserved}"
+                )
+            except Exception as e:
+                st.error(f"No se pudo aplicar: {e}")
+    with pc3:
+        if st.button("🧹 Borrar runtime", use_container_width=True):
+            try:
+                rt = RuntimeGoldStorage()
+                rt.close()
+                rt.path.unlink(missing_ok=True)
+                st.success("Runtime eliminado. El benchmark sigue intacto.")
+            except Exception as e:
+                st.error(f"No se pudo borrar: {e}")
+
+
+def _km_usuario() -> str:
+    return str(st.session_state.get("km_usuario", "analista"))
+
+
+def _tab_knowledge_manager() -> None:
+    """🧠 Knowledge Manager (P5).
+
+    Administra EXCLUSIVAMENTE ``gold_standard_runtime.db`` a través de
+    ``RuntimeManager`` (única capa de persistencia). La UI no ejecuta SQL ni
+    abre conexiones SQLite. El benchmark (``gold_standard.db``) nunca se escribe.
+    Toda acción (promover, rechazar, rollback) requiere aprobación explícita.
+    """
+    st.subheader("🧠 Knowledge Manager")
+    if _neon_disponible():
+        _tab_neon_knowledge_manager()
+        return
+    st.caption(
+        "Administra exclusivamente `gold_standard_runtime.db` vía `RuntimeManager`. "
+        "El benchmark (`gold_standard.db`) permanece intacto. Eventos auditables: "
+        "PROMOTE / ROLLBACK / REJECT. Estado del candidato: PENDING / APPROVED / "
+        "REJECTED / ROLLED_BACK."
+    )
+
+    runtime_path = BASE_DIR / "gold_standard_runtime.db"
+    gold_path = BASE_DIR / "gold_standard.db"
+    rm = RuntimeManager(runtime_path)
+
+    tab_pend, tab_conf, tab_run, tab_hist, tab_stat, tab_an = st.tabs(
+        ["📥 Promociones pendientes", "⚔️ Conflictos", "🗃️ Runtime",
+         "📜 Historial", "📊 Estadísticas", "📊 Runtime Analytics"]
+    )
+
+    with tab_pend:
+        _km_pendientes(rm, gold_path)
+    with tab_conf:
+        _km_conflictos(rm, gold_path)
+    with tab_run:
+        _km_runtime(rm)
+    with tab_hist:
+        _km_historial(rm)
+    with tab_stat:
+        _km_estadisticas(rm, gold_path)
+    with tab_an:
+        _km_runtime_analytics(rm, gold_path)
+
+
+def _tab_neon_knowledge_manager() -> None:
+    """Gobernanza durable del diccionario cuando Neon es la fuente activa."""
+    store = NeonKnowledgeStore()
+    st.caption(
+        "Fuente durable: Neon. El rollback solo se permite si el cambio elegido "
+        "continúa siendo el estado vigente de la cuenta."
+    )
+    tab_hist, tab_conf, tab_stats = st.tabs(
+        ["📜 Historial", "⚔️ Conflictos", "📊 Estadísticas"]
+    )
+    with tab_hist:
+        history = store.dictionary_history(100)
+        if not history:
+            st.info("Aún no hay cambios humanos en el diccionario Neon.")
+        else:
+            st.dataframe(pd.DataFrame(history), use_container_width=True, hide_index=True)
+            options = {
+                f"#{row['id']} · {row['cuenta_original']} · "
+                f"{row['codigo_anterior'] or 'sin entrada'} → {row['codigo_nuevo'] or 'inactivo'}": row
+                for row in history if row["accion"] != "ROLLBACK"
+            }
+            if options:
+                selected = st.selectbox("Cambio a revertir", list(options))
+                confirm = st.checkbox(
+                    "Confirmo que deseo revertir este cambio vigente",
+                    key="neon_rollback_confirm",
+                )
+                if st.button("↩️ Ejecutar rollback", disabled=not confirm):
+                    row = options[selected]
+                    if store.rollback_dictionary_change(row["id"], reviewer=_km_usuario()):
+                        cargar_diccionario_base.clear()
+                        st.success("Rollback aplicado y registrado en el historial.")
+                        st.rerun()
+                    else:
+                        st.error(
+                            "No se aplicó: el cambio ya no es el estado vigente o no existe."
+                        )
+    with tab_conf:
+        conflicts = store.conflicts()
+        if conflicts:
+            st.warning(f"Se detectaron {len(conflicts)} cuentas con códigos históricos distintos.")
+            st.dataframe(pd.DataFrame(conflicts), use_container_width=True, hide_index=True)
+        else:
+            st.success("No hay conflictos históricos registrados en Neon.")
+    with tab_stats:
+        stats = store.learning_statistics()
+        cols = st.columns(5)
+        labels = [
+            ("Catálogo", "catalog_entries"), ("Diccionario", "dictionary_entries"),
+            ("Aprendidas", "human_learned"), ("Validaciones", "validations"),
+            ("Correcciones", "corrections"),
+        ]
+        for col, (label, key) in zip(cols, labels):
+            col.metric(label, stats[key])
+
+
+def _km_pendientes(rm: RuntimeManager, gold_path: Path) -> None:
+    """TAB 1 — Promociones pendientes: aprobar/rechazar selección múltiple."""
+    st.markdown("#### 📥 Promociones pendientes")
+    try:
+        pend = rm.get_pending_promotions(gold_path)
+    except Exception as e:  # noqa: BLE001
+        st.error(f"No se pudieron cargar los candidatos: {e}")
+        return
+
+    if not pend:
+        st.info("No hay candidatos pendientes de promoción en `gold_records`.")
+        return
+
+    df = pd.DataFrame([{
+        "Cuenta": p["account_name"],
+        "Código sugerido": p["candidate_code"],
+        "Origen": p["origen"] or "—",
+        "Confianza": p["confidence"],
+        "Fecha": (p["fecha"] or "")[:19],
+        "Estado": p["state"],
+        "Clasificación": p["status"],
+        "source_record_id": p["source_record_id"],
+    } for p in pend])
+    df.insert(0, "Seleccionar", False)
+
+    st.caption(
+        "Estado actual derivado de `promotion_history`. Solo los candidatos "
+        "PENDING se promueven; duplicados y conflictos se omiten automáticamente."
+    )
+
+    edited = st.data_editor(
+        df,
+        hide_index=True,
+        disabled=[c for c in df.columns if c not in ("Seleccionar",)],
+        use_container_width=True,
+        key="km_pend_editor",
+        column_config={
+            "Seleccionar": st.column_config.CheckboxColumn("Seleccionar", default=False),
+            "Confianza": st.column_config.NumberColumn("Confianza", format="%.2f"),
+            "source_record_id": None,
+        },
+    )
+
+    if not isinstance(edited, pd.DataFrame):
+        edited = df
+    seleccionadas = edited[edited["Seleccionar"] == True] if "Seleccionar" in edited.columns else edited.iloc[0:0]  # noqa: E712
+    ids = [int(r["source_record_id"]) for _, r in seleccionadas.iterrows()]
+
+    c1, c2, c3 = st.columns([1, 1, 1])
+    with c1:
+        aprobar = st.button("✅ Aprobar selección", use_container_width=True)
+    with c2:
+        rechazar = st.button("❌ Rechazar selección", use_container_width=True)
+    with c3:
+        st.caption(f"{len(ids)} seleccionadas · usuario: `{_km_usuario()}`")
+
+    if aprobar:
+        if not ids:
+            st.warning("Selecciona al menos una fila para aprobar.")
+        else:
+            try:
+                res = rm.promote(gold_path, dry_run=False, source_ids=ids, usuario=_km_usuario())
+                st.success(
+                    f"Promovidos: {res.promoted} · Conflictos omitidos: {res.conflicts} · "
+                    f"Duplicados: {res.duplicates} · Reservados: {res.reserved}"
+                )
+            except Exception as e:  # noqa: BLE001
+                st.error(f"No se pudo aprobar la selección: {e}")
+    if rechazar:
+        if not ids:
+            st.warning("Selecciona al menos una fila para rechazar.")
+        else:
+            try:
+                n = 0
+                for _, r in seleccionadas.iterrows():
+                    rm.reject_promotion(
+                        source_record_id=int(r["source_record_id"]),
+                        account_name=str(r["Cuenta"]),
+                        candidate_code=str(r["Código sugerido"]),
+                        usuario=_km_usuario(),
+                    )
+                    n += 1
+                st.success(f"Rechazos registrados (REJECT): {n}")
+            except Exception as e:  # noqa: BLE001
+                st.error(f"No se pudieron registrar los rechazos: {e}")
+
+
+def _km_conflictos(rm: RuntimeManager, gold_path: Path) -> None:
+    """TAB 2 — Conflictos runtime vs gold."""
+    st.markdown("#### ⚔️ Conflictos (runtime vs gold)")
+    try:
+        conf = rm.get_conflicts(gold_path)
+    except Exception as e:  # noqa: BLE001
+        st.error(f"No se pudieron cargar los conflictos: {e}")
+        return
+
+    if not conf:
+        st.info("No hay conflictos entre runtime y gold oficial.")
+        return
+
+    st.caption(
+        "Misma cuenta normalizada con código distinto en runtime y gold. "
+        "Resolver: mantener runtime (no hacer nada) o rollback (prevalece gold). "
+        "`gold_standard.db` nunca se modifica."
+    )
+    df = pd.DataFrame([{
+        "Cuenta": c["account_name"],
+        "Código runtime": c["codigo_runtime"],
+        "Código gold": c["codigo_gold"],
+    } for c in conf])
+    st.dataframe(df, use_container_width=True, hide_index=True)
+
+    for c in conf:
+        with st.expander(
+            f"⚔️ {c['account_name']} — runtime {c['codigo_runtime']} vs gold {c['codigo_gold']}"
+        ):
+            hist = rm.get_history(account_name=c["account_name"], limit=20)
+            if hist:
+                st.dataframe(pd.DataFrame([{
+                    "Fecha": (h["fecha"] or "")[:19],
+                    "Usuario": h["usuario"],
+                    "Acción": h["accion"],
+                    "Estado": h["state"],
+                    "Código": h["codigo_nuevo"] or h["codigo_anterior"] or "",
+                    "Comentario": h["comentario"],
+                } for h in hist]), use_container_width=True, hide_index=True)
+            else:
+                st.caption("Sin historial para esta cuenta.")
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("🔁 Rollback (prevalece gold)", key=f"km_rb_{c['runtime_id']}"):
+                    try:
+                        ok = rm.rollback(
+                            int(c["runtime_id"]), usuario=_km_usuario(),
+                            comentario="Conflicto resuelto: prevalece gold",
+                        )
+                        st.success("Rollback aplicado y registrado (ROLLBACK)." if ok else "No se pudo aplicar el rollback.")
+                    except Exception as e:  # noqa: BLE001
+                        st.error(f"Error en rollback: {e}")
+            with c2:
+                if st.button("✓ Mantener runtime", key=f"km_keep_{c['runtime_id']}"):
+                    st.info("Runtime mantenido (no se modifica nada).")
+
+
+def _km_runtime(rm: RuntimeManager) -> None:
+    """TAB 3 — Cuentas activas del runtime: filtro, buscador y rollback."""
+    st.markdown("#### 🗃️ Runtime (`gold_standard_runtime.db`)")
+    if not rm.path.exists():
+        st.info("El runtime aún no existe. Promueve candidatos desde la pestaña 'Promociones pendientes'.")
+        return
+    try:
+        rows = rm.load_runtime()
+    except Exception as e:  # noqa: BLE001
+        st.error(f"No se pudieron cargar las cuentas del runtime: {e}")
+        return
+    if not rows:
+        st.info("El runtime existe pero no tiene cuentas activas.")
+        return
+
+    df = pd.DataFrame([{
+        "id": r["id"],
+        "Cuenta": r["nombre_cuenta"],
+        "Código": r["codigo_estandar"],
+        "Normalizado": r["normalized"],
+        "Reviewer": r["reviewer"] or "—",
+        "Fecha": (r["promoted_at"] or "")[:19],
+    } for r in rows])
+
+    q = st.text_input("🔍 Buscar cuenta o código", key="km_runtime_q")
+    if q:
+        ql = q.lower().strip()
+        df = df[df["Cuenta"].str.lower().str.contains(ql)
+                | df["Código"].str.lower().str.contains(ql)
+                | df["Normalizado"].str.lower().str.contains(ql)]
+
+    prefijos = sorted({str(c).split(".")[0] for c in df["Código"]})
+    filtro = st.selectbox("Filtrar por prefijo de código", ["todos"] + prefijos, key="km_runtime_filtro")
+    if filtro != "todos":
+        df = df[df["Código"].astype(str).str.startswith(filtro)]
+
+    st.caption(f"{len(df)} cuentas activas en runtime.")
+    st.dataframe(df, use_container_width=True, hide_index=True)
+
+    st.markdown("**Rollback / Eliminar**")
+    st.caption("Rollback elimina la entrada de runtime y registra el evento ROLLBACK (prevalece gold).")
+    options = {f"{r['Cuenta']} ({r['Código']})": int(r["id"]) for _, r in df.iterrows()}
+    if options:
+        sel_label = st.selectbox("Cuenta", list(options), key="km_runtime_sel")
+        confirm = st.checkbox("Confirmo el rollback de esta cuenta", key="km_runtime_confirm")
+        if st.button("🗑️ Rollback", use_container_width=True, disabled=not confirm):
+            try:
+                ok = rm.rollback(options[sel_label], usuario=_km_usuario(), comentario="Rollback desde Knowledge Manager")
+                st.success("Rollback aplicado y registrado." if ok else "No se pudo aplicar.")
+            except Exception as e:  # noqa: BLE001
+                st.error(f"Error en rollback: {e}")
+
+
+def _km_historial(rm: RuntimeManager) -> None:
+    """TAB 4 — Historial de promotion_history (solo lectura)."""
+    st.markdown("#### 📜 Historial (`promotion_history`)")
+    try:
+        hist = rm.get_history(limit=500)
+    except Exception as e:  # noqa: BLE001
+        st.error(f"No se pudo leer el historial: {e}")
+        return
+    if not hist:
+        st.info("Sin eventos registrados en `promotion_history`.")
+        return
+
+    df = pd.DataFrame([{
+        "Promotion ID": h["promotion_id"][:8],
+        "Fecha": (h["fecha"] or "")[:19],
+        "Usuario": h["usuario"],
+        "Acción": h["accion"],
+        "Estado": h["state"],
+        "Cuenta": h["account_name"],
+        "Código": h["codigo_nuevo"] or h["codigo_anterior"] or "",
+        "Comentario": h["comentario"],
+    } for h in hist])
+
+    q = st.text_input("🔍 Buscar en historial", key="km_hist_q")
+    if q:
+        ql = q.lower()
+        df = df[df.apply(lambda r: ql in " ".join(str(v) for v in r), axis=1)]
+
+    st.caption("Solo lectura. El historial nunca se borra.")
+    st.dataframe(df, use_container_width=True, hide_index=True)
+
+
+def _km_estadisticas(rm: RuntimeManager, gold_path: Path) -> None:
+    """TAB 5 — Estadísticas del runtime y del historial."""
+    st.markdown("#### 📊 Estadísticas")
+    try:
+        s = rm.get_runtime_statistics(gold_path)
+    except Exception as e:  # noqa: BLE001
+        st.error(f"No se pudieron calcular las estadísticas: {e}")
+        return
+
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Runtime size", s["runtime_size"])
+    c2.metric("Promociones (PROMOTE)", s["promotions"])
+    c3.metric("Rechazos (REJECT)", s["rejects"])
+    c4.metric("Rollback (ROLLBACK)", s["rollbacks"])
+    c5.metric("Cobertura", f"{s['coverage']}%")
+
+    st.caption(
+        f"Gold oficial: {s['gold_size']} cuentas · Eventos en historial: "
+        f"{s['history_events']} · Runtime: {s['runtime_size']} cuentas activas."
+    )
+
+
+def _km_runtime_analytics(rm: RuntimeManager, gold_path: Path) -> None:
+    """TAB 6 — 📊 Runtime Analytics: observabilidad completa (P5.5).
+
+    Toda la información sale de ``RuntimeStatistics`` (fuente única); la UI no
+    ejecuta SQL ni abre SQLite. Las métricas de uso provienen del último
+    procesamiento (``session_state``) y los eventos/cobertura de RuntimeManager.
+    No promueve, no revierte, no puebla: solo observa.
+    """
+    st.markdown("#### 📊 Runtime Analytics")
+    st.caption(
+        "Observabilidad del runtime (solo lectura). Métricas de uso del último "
+        "procesamiento + eventos/cobertura de `gold_standard_runtime.db`. "
+        "El benchmark (`gold_standard.db`) no se modifica."
+    )
+
+    snapshot = st.session_state.get("runtime_metrics_last")
+    try:
+        stats = RuntimeStatistics.capture(
+            metrics=snapshot,
+            runtime=rm,
+            gold_db=str(gold_path),
+        )
+    except Exception as e:  # noqa: BLE001
+        st.error(f"No se pudieron calcular las métricas runtime: {e}")
+        return
+
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    c1.metric("💠 Entradas runtime", stats.runtime_size)
+    c2.metric("🚀 Promociones", stats.promotion_count)
+    c3.metric("🔁 Rollbacks", stats.rollback_count)
+    c4.metric("❌ Rejects", stats.reject_count)
+    c5.metric("🎯 Runtime exact", stats.runtime_exact_hits)
+    c6.metric("🌀 Runtime fuzzy", stats.runtime_fuzzy_hits)
+
+    c7, c8, c9, c10, c11, c12 = st.columns(6)
+    c7.metric("🟢 Gold exact", stats.gold_exact_hits)
+    c8.metric("🌫️ Gold fuzzy", stats.gold_fuzzy_hits)
+    c9.metric("⬇️ Fallbacks", stats.fallback_to_gold)
+    c10.metric("Runtime miss", stats.runtime_miss)
+    c11.metric("Requests", stats.total_requests)
+    c12.metric("Historial", stats.history_events)
+
+    st.markdown("#### Cobertura")
+    c13, c14, c15, c16, c17 = st.columns(5)
+    c13.metric("📚 Cobertura runtime (uso)", f"{stats.runtime_usage_pct}%")
+    c14.metric("🏛️ Cobertura gold (uso)", f"{stats.gold_usage_pct}%")
+    c15.metric("🧠 Aprendizaje usado", f"{stats.learning_used_pct}%")
+    c16.metric("📐 Catálogo runtime", f"{stats.runtime_catalog_coverage_pct}%")
+    c17.metric("⬇️ Fallback", f"{stats.fallback_pct}%")
+
+    st.markdown("#### Impacto por promoción")
+    st.caption(
+        "¿Qué promociones realmente generan impacto? Promoción cuyo código "
+        "estándar fue usado por el runtime (hit exacto/fuzzy) durante el "
+        "último procesamiento."
+    )
+    if not stats.promotion_impact:
+        st.info("Sin promociones registradas o sin actividad de uso todavía.")
+    else:
+        df = pd.DataFrame(stats.promotion_impact)
+        df["impacto"] = df["impactful"].map({True: "✅ Impacto", False: "—"})
+        st.dataframe(
+            df[["account_name", "code", "hits", "impacto", "promotion_id"]],
+            use_container_width=True, hide_index=True,
+        )
+
+    if stats.promotion_count:
+        st.caption(
+            f"Promociones con impacto real: **{stats.impactful_promotions}** "
+            f"de {len(stats.promotion_impact)} promociones registradas. "
+            "Promociones sin hits pendientes de adopción."
+        )
 
 
 def _mostrar_resumen_catalogo(catalogo: dict):

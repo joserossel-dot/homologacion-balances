@@ -1,0 +1,100 @@
+{
+  "family_id": "cluster_8582d46baf",
+  "family_name": "company_distribution",
+  "layout": "LIBRE",
+  "document_type": "OTRO",
+  "code_pattern": "COMPACTO",
+  "numeric_pattern": "DECIMAL",
+  "header_rows": 1,
+  "table_start_row": 1,
+  "table_end_row": 9,
+  "columns": [
+    {
+      "key": "NOMBRE",
+      "label": "Nombre",
+      "side": "left",
+      "position": 0,
+      "detection_rate": 1.0,
+      "docs": 1
+    },
+    {
+      "key": "MONTO",
+      "label": "Monto",
+      "side": "right",
+      "position": 1,
+      "detection_rate": 1.0,
+      "docs": 1
+    }
+  ],
+  "code_column": null,
+  "name_column": {
+    "key": "NOMBRE",
+    "label": "Nombre",
+    "side": "left",
+    "position": 0,
+    "detection_rate": 1.0,
+    "docs": 1
+  },
+  "amount_columns": [
+    {
+      "key": "MONTO",
+      "label": "Monto",
+      "side": "right",
+      "position": 1,
+      "detection_rate": 1.0,
+      "docs": 1
+    }
+  ],
+  "totals_pattern": "none:1col",
+  "total_keywords": [],
+  "summary_position": "NONE",
+  "confidence": 0.375,
+  "n_documents": 1,
+  "docs_total": 1,
+  "docs_outliers": 0,
+  "header": {
+    "rows": 1,
+    "row_counts": {
+      "1": 1
+    },
+    "keywords": [
+      "document",
+      "layout",
+      "review",
+      "count",
+      "total",
+      "unique",
+      "companies",
+      "concepts"
+    ]
+  },
+  "footer": {
+    "trailing_rows": 0,
+    "totals_position": "NONE",
+    "total_keywords": [],
+    "keywords": [
+      "agricola",
+      "comino",
+      "estandar",
+      "transp",
+      "libardon",
+      "ltda",
+      "eeff",
+      "nogales"
+    ]
+  },
+  "validation": {
+    "docs_validated": 1,
+    "docs_with_rows": 1,
+    "coverage": 1.0,
+    "precision": 1.0,
+    "columns_rate": 1.0,
+    "columns_detected": 2.0,
+    "columns_expected": 2,
+    "total_account_rows": 9,
+    "total_rows_in_table": 9,
+    "total_rows_lost": 0,
+    "header_match_rate": 1.0
+  },
+  "generated_at": ""
+}

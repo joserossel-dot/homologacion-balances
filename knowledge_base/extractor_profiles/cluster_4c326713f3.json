@@ -1,0 +1,118 @@
+{
+  "family_id": "cluster_4c326713f3",
+  "family_name": "Familia Nogales",
+  "layout": "VERTICAL",
+  "document_type": "ESTADO_RESULTADOS",
+  "code_pattern": "COMPACTO",
+  "numeric_pattern": "ENTERO",
+  "header_rows": 3,
+  "table_start_row": 3,
+  "table_end_row": 67,
+  "columns": [
+    {
+      "key": "NOMBRE",
+      "label": "Nombre",
+      "side": "left",
+      "position": 0,
+      "detection_rate": 1.0,
+      "docs": 30
+    },
+    {
+      "key": "MONTO",
+      "label": "Monto",
+      "side": "right",
+      "position": 1,
+      "detection_rate": 0.7667,
+      "docs": 23
+    }
+  ],
+  "code_column": null,
+  "name_column": {
+    "key": "NOMBRE",
+    "label": "Nombre",
+    "side": "left",
+    "position": 0,
+    "detection_rate": 1.0,
+    "docs": 30
+  },
+  "amount_columns": [
+    {
+      "key": "MONTO",
+      "label": "Monto",
+      "side": "right",
+      "position": 1,
+      "detection_rate": 0.7667,
+      "docs": 23
+    }
+  ],
+  "totals_pattern": "top:1col",
+  "total_keywords": [
+    "total",
+    "resultado",
+    "utilidad",
+    "subtotal",
+    "sumas",
+    "sumas iguales"
+  ],
+  "summary_position": "TOP",
+  "confidence": 0.7311,
+  "n_documents": 30,
+  "docs_total": 103,
+  "docs_outliers": 73,
+  "header": {
+    "rows": 3,
+    "row_counts": {
+      "3": 12,
+      "4": 6,
+      "1": 5,
+      "2": 6,
+      "0": 1
+    },
+    "keywords": [
+      "diciembre",
+      "financieros",
+      "activos",
+      "estados",
+      "corrientes",
+      "chile",
+      "banco",
+      "ltda"
+    ]
+  },
+  "footer": {
+    "trailing_rows": 0,
+    "totals_position": "TOP",
+    "total_keywords": [
+      "total",
+      "resultado",
+      "utilidad",
+      "subtotal",
+      "sumas",
+      "sumas iguales"
+    ],
+    "keywords": [
+      "resultado",
+      "antes",
+      "impuesto",
+      "total",
+      "otros",
+      "gastos",
+      "financieros",
+      "ganancia"
+    ]
+  },
+  "validation": {
+    "docs_validated": 103,
+    "docs_with_rows": 103,
+    "coverage": 0.8088,
+    "precision": 0.634,
+    "columns_rate": 1.0,
+    "columns_detected": 2.0,
+    "columns_expected": 2,
+    "total_account_rows": 6129,
+    "total_rows_in_table": 4245,
+    "total_rows_lost": 1884,
+    "header_match_rate": 0.2136
+  },
+  "generated_at": ""
+}

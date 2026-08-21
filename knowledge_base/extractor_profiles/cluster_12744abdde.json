@@ -1,0 +1,151 @@
+{
+  "family_id": "cluster_12744abdde",
+  "family_name": "Copia Nuevo Ciclo",
+  "layout": "VERTICAL",
+  "document_type": "BALANCE",
+  "code_pattern": "GUION",
+  "numeric_pattern": "SIGNO",
+  "header_rows": 5,
+  "table_start_row": 5,
+  "table_end_row": 199,
+  "columns": [
+    {
+      "key": "CODIGO",
+      "label": "Código",
+      "side": "left",
+      "position": 0,
+      "detection_rate": 1.0,
+      "docs": 1
+    },
+    {
+      "key": "NOMBRE",
+      "label": "Nombre",
+      "side": "left",
+      "position": 1,
+      "detection_rate": 1.0,
+      "docs": 1
+    },
+    {
+      "key": "PASIVO",
+      "label": "Pasivo",
+      "side": "right",
+      "position": 3,
+      "detection_rate": 1.0,
+      "docs": 1
+    },
+    {
+      "key": "PERDIDA",
+      "label": "Pérdidas",
+      "side": "right",
+      "position": 2,
+      "detection_rate": 1.0,
+      "docs": 1
+    },
+    {
+      "key": "GANANCIA",
+      "label": "Ganancias",
+      "side": "right",
+      "position": 1,
+      "detection_rate": 1.0,
+      "docs": 1
+    }
+  ],
+  "code_column": {
+    "key": "CODIGO",
+    "label": "Código",
+    "side": "left",
+    "position": 0,
+    "detection_rate": 1.0,
+    "docs": 1
+  },
+  "name_column": {
+    "key": "NOMBRE",
+    "label": "Nombre",
+    "side": "left",
+    "position": 1,
+    "detection_rate": 1.0,
+    "docs": 1
+  },
+  "amount_columns": [
+    {
+      "key": "PASIVO",
+      "label": "Pasivo",
+      "side": "right",
+      "position": 3,
+      "detection_rate": 1.0,
+      "docs": 1
+    },
+    {
+      "key": "PERDIDA",
+      "label": "Pérdidas",
+      "side": "right",
+      "position": 2,
+      "detection_rate": 1.0,
+      "docs": 1
+    },
+    {
+      "key": "GANANCIA",
+      "label": "Ganancias",
+      "side": "right",
+      "position": 1,
+      "detection_rate": 1.0,
+      "docs": 1
+    }
+  ],
+  "totals_pattern": "middle:3col",
+  "total_keywords": [
+    "total"
+  ],
+  "summary_position": "MIDDLE",
+  "confidence": 0.8583,
+  "n_documents": 1,
+  "docs_total": 2,
+  "docs_outliers": 1,
+  "header": {
+    "rows": 5,
+    "row_counts": {
+      "5": 1
+    },
+    "keywords": [
+      "nuevo",
+      "ciclo",
+      "version",
+      "corte",
+      "saldo",
+      "codigo",
+      "cuenta",
+      "fecha"
+    ]
+  },
+  "footer": {
+    "trailing_rows": 0,
+    "totals_position": "MIDDLE",
+    "total_keywords": [
+      "total"
+    ],
+    "keywords": [
+      "pasivos",
+      "impuestos",
+      "diferidos",
+      "impuesto",
+      "diferido",
+      "pagar",
+      "largo",
+      "plazo"
+    ]
+  },
+  "validation": {
+    "docs_validated": 2,
+    "docs_with_rows": 2,
+    "coverage": 1.0,
+    "precision": 0.8307,
+    "columns_rate": 1.0,
+    "columns_detected": 5.0,
+    "columns_expected": 5,
+    "total_account_rows": 324,
+    "total_rows_in_table": 324,
+    "total_rows_lost": 0,
+    "header_match_rate": 0.5
+  },
+  "generated_at": ""
+}

@@ -1,0 +1,108 @@
+{
+  "family_id": "cluster_660126b656",
+  "family_name": "Prelimiar C&H Jul.2018 BANCOS",
+  "layout": "VERTICAL",
+  "document_type": "ESTADO_RESULTADOS",
+  "code_pattern": "COMPACTO",
+  "numeric_pattern": "ENTERO",
+  "header_rows": 2,
+  "table_start_row": 2,
+  "table_end_row": 47,
+  "columns": [
+    {
+      "key": "NOMBRE",
+      "label": "Nombre",
+      "side": "left",
+      "position": 0,
+      "detection_rate": 1.0,
+      "docs": 2
+    },
+    {
+      "key": "PASIVO",
+      "label": "Pasivo",
+      "side": "right",
+      "position": 1,
+      "detection_rate": 1.0,
+      "docs": 2
+    }
+  ],
+  "code_column": null,
+  "name_column": {
+    "key": "NOMBRE",
+    "label": "Nombre",
+    "side": "left",
+    "position": 0,
+    "detection_rate": 1.0,
+    "docs": 2
+  },
+  "amount_columns": [
+    {
+      "key": "PASIVO",
+      "label": "Pasivo",
+      "side": "right",
+      "position": 1,
+      "detection_rate": 1.0,
+      "docs": 2
+    }
+  ],
+  "totals_pattern": "bottom:1col",
+  "total_keywords": [
+    "utilidad",
+    "total",
+    "resultado"
+  ],
+  "summary_position": "BOTTOM",
+  "confidence": 0.725,
+  "n_documents": 2,
+  "docs_total": 2,
+  "docs_outliers": 0,
+  "header": {
+    "rows": 2,
+    "row_counts": {
+      "2": 2
+    },
+    "keywords": [
+      "activo",
+      "pasivo",
+      "caja",
+      "linea",
+      "credito",
+      "bice",
+      "banco",
+      "corpbanca"
+    ]
+  },
+  "footer": {
+    "trailing_rows": 0,
+    "totals_position": "BOTTOM",
+    "total_keywords": [
+      "utilidad",
+      "total",
+      "resultado"
+    ],
+    "keywords": [
+      "gastos",
+      "bancarios",
+      "factoring",
+      "total",
+      "resultado",
+      "antes",
+      "impuestos",
+      "impuesto"
+    ]
+  },
+  "validation": {
+    "docs_validated": 2,
+    "docs_with_rows": 2,
+    "coverage": 1.0,
+    "precision": 0.9783,
+    "columns_rate": 1.0,
+    "columns_detected": 2.0,
+    "columns_expected": 2,
+    "total_account_rows": 90,
+    "total_rows_in_table": 90,
+    "total_rows_lost": 0,
+    "header_match_rate": 1.0
+  },
+  "generated_at": ""
+}

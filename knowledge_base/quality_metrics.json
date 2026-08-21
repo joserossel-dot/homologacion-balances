@@ -1,0 +1,488 @@
+{
+  "generated_at": "2026-07-27T10:27:47.586366",
+  "source": "knowledge_base/cmcc_knowledge.json",
+  "summary": {
+    "total_codes": 30,
+    "total_variants": 163,
+    "total_families": 6,
+    "conflictive_variants": 1,
+    "low_evidence_codes": 19,
+    "codes_recommended_for_review": [
+      "AC.01",
+      "AC.03",
+      "AC.05",
+      "AC.06",
+      "AC.06S",
+      "AC.07",
+      "ANC.01",
+      "ANC.03",
+      "ANC.07",
+      "ER.04",
+      "ER.09",
+      "ER.14",
+      "PAT.02",
+      "PAT.04",
+      "PC.01",
+      "PC.04",
+      "PC.06",
+      "PNC.01",
+      "PNC.04",
+      "anticipo a proveedores"
+    ]
+  },
+  "duplicate_codes": {
+    "conflicts": [],
+    "total": 0
+  },
+  "repeated_variants": {
+    "repeated": [],
+    "total": 0
+  },
+  "cross_code_variants": {
+    "variants": {
+      "anticipo a proveedores": [
+        "AC.01",
+        "AC.07"
+      ]
+    },
+    "total_conflictive": 1,
+    "details": [
+      {
+        "normalized": "anticipo a proveedores",
+        "codes": [
+          "AC.01",
+          "AC.07"
+        ]
+      }
+    ]
+  },
+  "low_evidence_codes": {
+    "codes": [
+      "AC.01",
+      "AC.03",
+      "AC.05",
+      "AC.06",
+      "AC.06S",
+      "AC.07",
+      "ANC.01",
+      "ANC.03",
+      "ANC.07",
+      "ER.04",
+      "ER.09",
+      "ER.14",
+      "PAT.02",
+      "PAT.04",
+      "PC.01",
+      "PC.04",
+      "PC.06",
+      "PNC.01",
+      "PNC.04"
+    ],
+    "details": [
+      {
+        "codigo": "AC.01",
+        "frecuencia": 22,
+        "confianza": 0.0785,
+        "variantes": 17,
+        "reasons": [
+          "confianza_baja(0.0785)"
+        ]
+      },
+      {
+        "codigo": "AC.03",
+        "frecuencia": 14,
+        "confianza": 0.1429,
+        "variantes": 9,
+        "reasons": [
+          "confianza_baja(0.1429)"
+        ]
+      },
+      {
+        "codigo": "AC.05",
+        "frecuencia": 7,
+        "confianza": 0.1429,
+        "variantes": 7,
+        "reasons": [
+          "confianza_baja(0.1429)"
+        ]
+      },
+      {
+        "codigo": "AC.06",
+        "frecuencia": 1,
+        "confianza": 1.0,
+        "variantes": 1,
+        "reasons": [
+          "frecuencia_baja(1)",
+          "registro_unico"
+        ]
+      },
+      {
+        "codigo": "AC.06S",
+        "frecuencia": 2,
+        "confianza": 0.5,
+        "variantes": 2,
+        "reasons": [
+          "frecuencia_baja(2)"
+        ]
+      },
+      {
+        "codigo": "AC.07",
+        "frecuencia": 15,
+        "confianza": 0.1289,
+        "variantes": 10,
+        "reasons": [
+          "confianza_baja(0.1289)"
+        ]
+      },
+      {
+        "codigo": "ANC.01",
+        "frecuencia": 21,
+        "confianza": 0.093,
+        "variantes": 13,
+        "reasons": [
+          "confianza_baja(0.0930)"
+        ]
+      },
+      {
+        "codigo": "ANC.03",
+        "frecuencia": 1,
+        "confianza": 1.0,
+        "variantes": 1,
+        "reasons": [
+          "frecuencia_baja(1)",
+          "registro_unico"
+        ]
+      },
+      {
+        "codigo": "ANC.07",
+        "frecuencia": 2,
+        "confianza": 1.0,
+        "variantes": 1,
+        "reasons": [
+          "frecuencia_baja(2)"
+        ]
+      },
+      {
+        "codigo": "ER.04",
+        "frecuencia": 22,
+        "confianza": 0.1033,
+        "variantes": 12,
+        "reasons": [
+          "confianza_baja(0.1033)"
+        ]
+      },
+      {
+        "codigo": "ER.09",
+        "frecuencia": 12,
+        "confianza": 0.1389,
+        "variantes": 8,
+        "reasons": [
+          "confianza_baja(0.1389)"
+        ]
+      },
+      {
+        "codigo": "ER.14",
+        "frecuencia": 2,
+        "confianza": 1.0,
+        "variantes": 1,
+        "reasons": [
+          "frecuencia_baja(2)"
+        ]
+      },
+      {
+        "codigo": "PAT.02",
+        "frecuencia": 1,
+        "confianza": 1.0,
+        "variantes": 1,
+        "reasons": [
+          "frecuencia_baja(1)",
+          "registro_unico"
+        ]
+      },
+      {
+        "codigo": "PAT.04",
+        "frecuencia": 2,
+        "confianza": 1.0,
+        "variantes": 1,
+        "reasons": [
+          "frecuencia_baja(2)"
+        ]
+      },
+      {
+        "codigo": "PC.01",
+        "frecuencia": 22,
+        "confianza": 0.0744,
+        "variantes": 18,
+        "reasons": [
+          "confianza_baja(0.0744)"
+        ]
+      },
+      {
+        "codigo": "PC.04",
+        "frecuencia": 1,
+        "confianza": 1.0,
+        "variantes": 1,
+        "reasons": [
+          "frecuencia_baja(1)",
+          "registro_unico"
+        ]
+      },
+      {
+        "codigo": "PC.06",
+        "frecuencia": 21,
+        "confianza": 0.102,
+        "variantes": 12,
+        "reasons": [
+          "confianza_baja(0.1020)"
+        ]
+      },
+      {
+        "codigo": "PNC.01",
+        "frecuencia": 1,
+        "confianza": 1.0,
+        "variantes": 1,
+        "reasons": [
+          "frecuencia_baja(1)",
+          "registro_unico"
+        ]
+      },
+      {
+        "codigo": "PNC.04",
+        "frecuencia": 1,
+        "confianza": 1.0,
+        "variantes": 1,
+        "reasons": [
+          "frecuencia_baja(1)",
+          "registro_unico"
+        ]
+      }
+    ],
+    "total": 19
+  },
+  "incomplete_families": {
+    "incomplete": [
+      {
+        "familia": "PNC",
+        "miembros": 2,
+        "total_frecuencia": 2,
+        "reasons": [
+          "pocos_miembros(2)",
+          "baja_frecuencia_total(2)"
+        ]
+      }
+    ],
+    "total": 1
+  },
+  "hierarchy_inconsistencies": {
+    "issues": [],
+    "total": 0
+  },
+  "similar_variants_diff_codes": {
+    "similar_pairs": [
+      {
+        "variant_a": "Anticipo a Proveedores",
+        "code_a": "AC.01",
+        "variant_b": "Anticipos a Proveedores",
+        "code_b": "AC.05",
+        "similarity": 0.9778
+      },
+      {
+        "variant_a": "Prestamo Bancario Corto Plazo",
+        "code_a": "PC.02",
+        "variant_b": "Prestamo Bancario Largo Plazo",
+        "code_b": "PNC.01",
+        "similarity": 0.8966
+      },
+      {
+        "variant_a": "Intereses pagados",
+        "code_a": "ER.09",
+        "variant_b": "Intereses Ganados",
+        "code_b": "ER.12",
+        "similarity": 0.8824
+      },
+      {
+        "variant_a": "Gastos Pagados por Anticipado",
+        "code_a": "AC.01",
+        "variant_b": "SEGUROS PAGADOS POR ANTICIPADO",
+        "code_b": "AC.07",
+        "similarity": 0.8814
+      },
+      {
+        "variant_a": "Documentos por Pagar",
+        "code_a": "PC.01",
+        "variant_b": "Cuentas por Pagar",
+        "code_b": "PC.07",
+        "similarity": 0.8649
+      },
+      {
+        "variant_a": "Boletas en Garantia",
+        "code_a": "AC.01",
+        "variant_b": "Resp. Boletas en Garantia",
+        "code_b": "ER.01",
+        "similarity": 0.8636
+      },
+      {
+        "variant_a": "Iva Credito Fiscal",
+        "code_a": "AC.07",
+        "variant_b": "Iva Debito Fiscal",
+        "code_b": "PC.05",
+        "similarity": 0.8571
+      },
+      {
+        "variant_a": "OTROS IMPUESTOS POR RECUPERAR",
+        "code_a": "AC.07",
+        "variant_b": "OTROS IMPUESTOS POR PAGAR",
+        "code_b": "PC.05",
+        "similarity": 0.8519
+      }
+    ],
+    "total": 8
+  },
+  "avg_confidence_per_code": {
+    "per_code": {
+      "AC.01": 0.0785,
+      "AC.03": 0.1429,
+      "AC.05": 0.1429,
+      "AC.06": 1.0,
+      "AC.06S": 0.5,
+      "AC.07": 0.1289,
+      "ANC.01": 0.093,
+      "ANC.03": 1.0,
+      "ANC.06": 0.25,
+      "ANC.07": 1.0,
+      "ER.01": 0.375,
+      "ER.04": 0.1033,
+      "ER.07": 0.375,
+      "ER.09": 0.1389,
+      "ER.12": 0.5556,
+      "ER.13": 0.375,
+      "ER.14": 1.0,
+      "PAT.01": 0.1528,
+      "PAT.02": 1.0,
+      "PAT.03": 0.375,
+      "PAT.04": 1.0,
+      "PC.01": 0.0744,
+      "PC.02": 0.1837,
+      "PC.04": 1.0,
+      "PC.05": 0.1667,
+      "PC.06": 0.102,
+      "PC.07": 0.3333,
+      "PC.08": 0.2245,
+      "PNC.01": 1.0,
+      "PNC.04": 1.0
+    },
+    "average": 0.4624
+  },
+  "avg_confidence_per_family": {
+    "per_family": {
+      "AC": {
+        "average_confidence": 0.3322,
+        "member_codes": [
+          "AC.01",
+          "AC.03",
+          "AC.05",
+          "AC.06",
+          "AC.06S",
+          "AC.07"
+        ],
+        "total_members": 6
+      },
+      "ANC": {
+        "average_confidence": 0.5857,
+        "member_codes": [
+          "ANC.01",
+          "ANC.03",
+          "ANC.06",
+          "ANC.07"
+        ],
+        "total_members": 4
+      },
+      "PC": {
+        "average_confidence": 0.2978,
+        "member_codes": [
+          "PC.01",
+          "PC.02",
+          "PC.04",
+          "PC.05",
+          "PC.06",
+          "PC.07",
+          "PC.08"
+        ],
+        "total_members": 7
+      },
+      "PNC": {
+        "average_confidence": 1.0,
+        "member_codes": [
+          "PNC.01",
+          "PNC.04"
+        ],
+        "total_members": 2
+      },
+      "PAT": {
+        "average_confidence": 0.632,
+        "member_codes": [
+          "PAT.01",
+          "PAT.02",
+          "PAT.03",
+          "PAT.04"
+        ],
+        "total_members": 4
+      },
+      "ER": {
+        "average_confidence": 0.4175,
+        "member_codes": [
+          "ER.01",
+          "ER.04",
+          "ER.07",
+          "ER.09",
+          "ER.12",
+          "ER.13",
+          "ER.14"
+        ],
+        "total_members": 7
+      }
+    },
+    "average": 0.5442
+  },
+  "gold_coverage": {
+    "gold_standard_codes": 30,
+    "gold_standard_records": 234,
+    "knowledge_base_codes": 30,
+    "codes_covered": 30,
+    "coverage_pct": 100.0,
+    "missing_from_knowledge_base": [],
+    "extra_in_knowledge_base": [],
+    "covered_codes": [
+      "AC.01",
+      "AC.03",
+      "AC.05",
+      "AC.06",
+      "AC.06S",
+      "AC.07",
+      "ANC.01",
+      "ANC.03",
+      "ANC.06",
+      "ANC.07",
+      "ER.01",
+      "ER.04",
+      "ER.07",
+      "ER.09",
+      "ER.12",
+      "ER.13",
+      "ER.14",
+      "PAT.01",
+      "PAT.02",
+      "PAT.03",
+      "PAT.04",
+      "PC.01",
+      "PC.02",
+      "PC.04",
+      "PC.05",
+      "PC.06",
+      "PC.07",
+      "PC.08",
+      "PNC.01",
+      "PNC.04"
+    ]
+  }
+}

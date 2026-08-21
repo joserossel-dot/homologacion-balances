@@ -1,0 +1,1897 @@
+{
+  "metadata": {
+    "generated_at": "2026-08-01T18:27:42+00:00",
+    "total_codes": 30,
+    "total_records": 234,
+    "total_families": 6
+  },
+  "families": [
+    {
+      "nombre": "AC",
+      "prefijo": "AC",
+      "seccion": "Activo",
+      "miembros": [
+        "AC.01",
+        "AC.03",
+        "AC.05",
+        "AC.06",
+        "AC.06S",
+        "AC.07"
+      ],
+      "total_frecuencia": 61
+    },
+    {
+      "nombre": "ANC",
+      "prefijo": "ANC",
+      "seccion": "Activo No Corriente",
+      "miembros": [
+        "ANC.01",
+        "ANC.03",
+        "ANC.06",
+        "ANC.07"
+      ],
+      "total_frecuencia": 28
+    },
+    {
+      "nombre": "PC",
+      "prefijo": "PC",
+      "seccion": "Pasivo",
+      "miembros": [
+        "PC.01",
+        "PC.02",
+        "PC.04",
+        "PC.05",
+        "PC.06",
+        "PC.07",
+        "PC.08"
+      ],
+      "total_frecuencia": 73
+    },
+    {
+      "nombre": "PNC",
+      "prefijo": "PNC",
+      "seccion": "Pasivo No Corriente",
+      "miembros": [
+        "PNC.01",
+        "PNC.04"
+      ],
+      "total_frecuencia": 2
+    },
+    {
+      "nombre": "PAT",
+      "prefijo": "PAT",
+      "seccion": "Patrimonio",
+      "miembros": [
+        "PAT.01",
+        "PAT.02",
+        "PAT.03",
+        "PAT.04"
+      ],
+      "total_frecuencia": 19
+    },
+    {
+      "nombre": "ER",
+      "prefijo": "ER",
+      "seccion": "Resultado",
+      "miembros": [
+        "ER.01",
+        "ER.04",
+        "ER.07",
+        "ER.09",
+        "ER.12",
+        "ER.13",
+        "ER.14"
+      ],
+      "total_frecuencia": 51
+    }
+  ],
+  "codes": {
+    "AC.01": {
+      "codigo": "AC.01",
+      "nombre": "Disponible",
+      "frecuencia": 22,
+      "variantes": [
+        {
+          "nombre": "Disponible",
+          "frecuencia": 4,
+          "confianza": 0.1818,
+          "source_records": [
+            "demo"
+          ]
+        },
+        {
+          "nombre": "BANCO SANTANDER",
+          "frecuencia": 2,
+          "confianza": 0.0909,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "BANCO BICE",
+          "frecuencia": 2,
+          "confianza": 0.0909,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Anticipo a Proveedores",
+          "frecuencia": 1,
+          "confianza": 0.0455,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Impuesto Diferido por Cobrar",
+          "frecuencia": 1,
+          "confianza": 0.0455,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Gastos Pagados por Anticipado",
+          "frecuencia": 1,
+          "confianza": 0.0455,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Boletas en Garantia",
+          "frecuencia": 1,
+          "confianza": 0.0455,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "CUENTAS CORRIENTES",
+          "frecuencia": 1,
+          "confianza": 0.0455,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "PRESTAMOS AL PERSONAL",
+          "frecuencia": 1,
+          "confianza": 0.0455,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "CUENTA CORRIENTE",
+          "frecuencia": 1,
+          "confianza": 0.0455,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "OTROS DERECHOS",
+          "frecuencia": 1,
+          "confianza": 0.0455,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Banco BBVA",
+          "frecuencia": 1,
+          "confianza": 0.0455,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Impuesto Diferido por Cobrar 0 0 434.140.226 388.984.639 45,155.58?",
+          "frecuencia": 1,
+          "confianza": 0.0455,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Caja Chica",
+          "frecuencia": 1,
+          "confianza": 0.0455,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Caja Cliente",
+          "frecuencia": 1,
+          "confianza": 0.0455,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Vale Vista",
+          "frecuencia": 1,
+          "confianza": 0.0455,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Banco BCI USD",
+          "frecuencia": 1,
+          "confianza": 0.0455,
+          "source_records": [
+            "seed_script"
+          ]
+        }
+      ],
+      "seccion": "Activo",
+      "nivel": 3,
+      "empresas": [],
+      "archivos": [
+        "BALANCE CLASIFICADO AICSA 2019.pdf",
+        "Balance Agricola El Comino dic 2018.pdf",
+        "Balance Agricola Santa Amelia dic 2018.pdf",
+        "Balance Exportadora Agua Santa dic 2018.pdf"
+      ],
+      "naturaleza": "asset",
+      "usage_count": 6,
+      "confianza": 0.0785,
+      "variante_canonica": "Disponible"
+    },
+    "AC.03": {
+      "codigo": "AC.03",
+      "nombre": "Documentos y cuentas por cobrar a empresas",
+      "frecuencia": 14,
+      "variantes": [
+        {
+          "nombre": "CUENTAS POR COBRAR",
+          "frecuencia": 3,
+          "confianza": 0.2143,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Documentos y cuentas por cobrar a empresas",
+          "frecuencia": 3,
+          "confianza": 0.2143,
+          "source_records": [
+            "demo"
+          ]
+        },
+        {
+          "nombre": "Clientes",
+          "frecuencia": 2,
+          "confianza": 0.1429,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Documentos en Cartera",
+          "frecuencia": 1,
+          "confianza": 0.0714,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Documentos en Garantia",
+          "frecuencia": 1,
+          "confianza": 0.0714,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Documentos Protestados",
+          "frecuencia": 1,
+          "confianza": 0.0714,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "TOTAL DEUDORES COMERCIALES Y OTRAS C",
+          "frecuencia": 1,
+          "confianza": 0.0714,
+          "source_records": [
+            "demo"
+          ]
+        },
+        {
+          "nombre": "Deudores comerciales y otras cuentas por cobrar",
+          "frecuencia": 1,
+          "confianza": 0.0714,
+          "source_records": [
+            "demo"
+          ]
+        },
+        {
+          "nombre": "Deudores Comerciales y Otras Cuentas por Cobrar 0 Préstamos que devengan intereses",
+          "frecuencia": 1,
+          "confianza": 0.0714,
+          "source_records": [
+            "demo"
+          ]
+        }
+      ],
+      "seccion": "Activo",
+      "nivel": 3,
+      "empresas": [
+        "2016",
+        "2018 Los Nogales"
+      ],
+      "archivos": [
+        "Balance Agricola El Comino dic 2018.pdf",
+        "Balance Agricola Santa Amelia dic 2018.pdf",
+        "Balance Vecchiola Dic_2016.pdf",
+        "EEFF - 2018 Los Nogales.pdf",
+        "balance general guayacan 2020.pdf"
+      ],
+      "naturaleza": "asset",
+      "usage_count": 7,
+      "confianza": 0.1429,
+      "variante_canonica": "Documentos y cuentas por cobrar a empresas"
+    },
+    "AC.05": {
+      "codigo": "AC.05",
+      "nombre": "Inventarios 309.739.893 Provisiones por beneficios a los empleados, corrientes",
+      "frecuencia": 7,
+      "variantes": [
+        {
+          "nombre": "Anticipos al Personal",
+          "frecuencia": 1,
+          "confianza": 0.1429,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Otros Descuentos al Personal",
+          "frecuencia": 1,
+          "confianza": 0.1429,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Anticipos de Honorarios",
+          "frecuencia": 1,
+          "confianza": 0.1429,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Anticipos a Proveedores",
+          "frecuencia": 1,
+          "confianza": 0.1429,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Anticipo a Prov. - Bio Bio",
+          "frecuencia": 1,
+          "confianza": 0.1429,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "TOTAL INVENTARIOS",
+          "frecuencia": 1,
+          "confianza": 0.1429,
+          "source_records": [
+            "demo"
+          ]
+        },
+        {
+          "nombre": "Inventarios 309.739.893 Provisiones por beneficios a los empleados, corrientes",
+          "frecuencia": 1,
+          "confianza": 0.1429,
+          "source_records": [
+            "demo"
+          ]
+        }
+      ],
+      "seccion": "Activo",
+      "nivel": 3,
+      "empresas": [
+        "2016"
+      ],
+      "archivos": [
+        "Balance Vecchiola Dic_2016.pdf",
+        "balance general guayacan 2020.pdf"
+      ],
+      "naturaleza": "asset",
+      "usage_count": 1,
+      "confianza": 0.1429,
+      "variante_canonica": "Inventarios 309.739.893 Provisiones por beneficios a los empleados, corrientes"
+    },
+    "AC.06": {
+      "codigo": "AC.06",
+      "nombre": "Estimacion Clientes Incobrable",
+      "frecuencia": 1,
+      "variantes": [
+        {
+          "nombre": "Estimacion Clientes Incobrable",
+          "frecuencia": 1,
+          "confianza": 1.0,
+          "source_records": [
+            "seed_script"
+          ]
+        }
+      ],
+      "seccion": "Activo",
+      "nivel": 3,
+      "empresas": [],
+      "archivos": [],
+      "naturaleza": "asset",
+      "usage_count": 1,
+      "confianza": 1.0,
+      "variante_canonica": "Estimacion Clientes Incobrable"
+    },
+    "AC.06S": {
+      "codigo": "AC.06S",
+      "nombre": "Dividendos Distribuidos",
+      "frecuencia": 2,
+      "variantes": [
+        {
+          "nombre": "Dividendos Provisorios",
+          "frecuencia": 1,
+          "confianza": 0.5,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Dividendos Distribuidos",
+          "frecuencia": 1,
+          "confianza": 0.5,
+          "source_records": [
+            "seed_script"
+          ]
+        }
+      ],
+      "seccion": "Activo",
+      "nivel": 3,
+      "empresas": [],
+      "archivos": [],
+      "naturaleza": "asset",
+      "usage_count": 2,
+      "confianza": 0.5,
+      "variante_canonica": "Dividendos Distribuidos"
+    },
+    "AC.07": {
+      "codigo": "AC.07",
+      "nombre": "Iva Credito Fiscal",
+      "frecuencia": 15,
+      "variantes": [
+        {
+          "nombre": "Fondos por Rendir",
+          "frecuencia": 3,
+          "confianza": 0.2,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Iva Credito Fiscal",
+          "frecuencia": 3,
+          "confianza": 0.2,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "OTROS IMPUESTOS POR RECUPERAR",
+          "frecuencia": 2,
+          "confianza": 0.1333,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "ANTICIPO A PROVEEDORES",
+          "frecuencia": 1,
+          "confianza": 0.0667,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "I.V.A. CREDITO FISCAL",
+          "frecuencia": 1,
+          "confianza": 0.0667,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "P.P.M",
+          "frecuencia": 1,
+          "confianza": 0.0667,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "CREDITO SENCE",
+          "frecuencia": 1,
+          "confianza": 0.0667,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "SEGUROS PAGADOS POR ANTICIPADO",
+          "frecuencia": 1,
+          "confianza": 0.0667,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Impuestos por Recuperar",
+          "frecuencia": 1,
+          "confianza": 0.0667,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Dividendos",
+          "frecuencia": 1,
+          "confianza": 0.0667,
+          "source_records": [
+            "seed_script"
+          ]
+        }
+      ],
+      "seccion": "Activo",
+      "nivel": 3,
+      "empresas": [],
+      "archivos": [],
+      "naturaleza": "asset",
+      "usage_count": 5,
+      "confianza": 0.1289,
+      "variante_canonica": "Iva Credito Fiscal"
+    },
+    "ANC.01": {
+      "codigo": "ANC.01",
+      "nombre": "Instalaciones",
+      "frecuencia": 21,
+      "variantes": [
+        {
+          "nombre": "MUEBLES Y UTILES",
+          "frecuencia": 3,
+          "confianza": 0.1429,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "DERECHOS DE AGUA",
+          "frecuencia": 3,
+          "confianza": 0.1429,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Instalaciones",
+          "frecuencia": 2,
+          "confianza": 0.0952,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Terrenos",
+          "frecuencia": 2,
+          "confianza": 0.0952,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "EQUIPOS COMPUTACIONALES",
+          "frecuencia": 2,
+          "confianza": 0.0952,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "MAQUINARIAS Y EQUIPOS",
+          "frecuencia": 2,
+          "confianza": 0.0952,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Muebles de Oficina",
+          "frecuencia": 1,
+          "confianza": 0.0476,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "CUENTA CTE SOCIOS(RETIROS)",
+          "frecuencia": 1,
+          "confianza": 0.0476,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Herramientas",
+          "frecuencia": 1,
+          "confianza": 0.0476,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Bienes en Leasing",
+          "frecuencia": 1,
+          "confianza": 0.0476,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Bienes Raices",
+          "frecuencia": 1,
+          "confianza": 0.0476,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Maquinarias",
+          "frecuencia": 1,
+          "confianza": 0.0476,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Activos en Leasing",
+          "frecuencia": 1,
+          "confianza": 0.0476,
+          "source_records": [
+            "seed_script"
+          ]
+        }
+      ],
+      "seccion": "Activo No Corriente",
+      "nivel": 3,
+      "empresas": [],
+      "archivos": [],
+      "naturaleza": "asset",
+      "usage_count": 9,
+      "confianza": 0.093,
+      "variante_canonica": "Instalaciones"
+    },
+    "ANC.03": {
+      "codigo": "ANC.03",
+      "nombre": "Vehiculos",
+      "frecuencia": 1,
+      "variantes": [
+        {
+          "nombre": "Vehiculos",
+          "frecuencia": 1,
+          "confianza": 1.0,
+          "source_records": [
+            "seed_script"
+          ]
+        }
+      ],
+      "seccion": "Activo No Corriente",
+      "nivel": 3,
+      "empresas": [],
+      "archivos": [],
+      "naturaleza": "asset",
+      "usage_count": 1,
+      "confianza": 1.0,
+      "variante_canonica": "Vehiculos"
+    },
+    "ANC.06": {
+      "codigo": "ANC.06",
+      "nombre": "Intereses Diferidos",
+      "frecuencia": 4,
+      "variantes": [
+        {
+          "nombre": "OTROS ACTIVOS",
+          "frecuencia": 1,
+          "confianza": 0.25,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "OTRAS GARANTIAS",
+          "frecuencia": 1,
+          "confianza": 0.25,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Intereses Diferidos",
+          "frecuencia": 1,
+          "confianza": 0.25,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Impuestos Diferidos",
+          "frecuencia": 1,
+          "confianza": 0.25,
+          "source_records": [
+            "seed_script"
+          ]
+        }
+      ],
+      "seccion": "Activo No Corriente",
+      "nivel": 3,
+      "empresas": [],
+      "archivos": [],
+      "naturaleza": "liability",
+      "usage_count": 2,
+      "confianza": 0.25,
+      "variante_canonica": "Intereses Diferidos"
+    },
+    "ANC.07": {
+      "codigo": "ANC.07",
+      "nombre": "PLANTACIONES",
+      "frecuencia": 2,
+      "variantes": [
+        {
+          "nombre": "PLANTACIONES",
+          "frecuencia": 2,
+          "confianza": 1.0,
+          "source_records": [
+            "seed_script"
+          ]
+        }
+      ],
+      "seccion": "Activo No Corriente",
+      "nivel": 3,
+      "empresas": [],
+      "archivos": [],
+      "naturaleza": "asset",
+      "usage_count": 1,
+      "confianza": 1.0,
+      "variante_canonica": "PLANTACIONES"
+    },
+    "ER.01": {
+      "codigo": "ER.01",
+      "nombre": "Otros Ingresos",
+      "frecuencia": 4,
+      "variantes": [
+        {
+          "nombre": "Otros Ingresos",
+          "frecuencia": 2,
+          "confianza": 0.5,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Arriendos",
+          "frecuencia": 1,
+          "confianza": 0.25,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Resp. Boletas en Garantia",
+          "frecuencia": 1,
+          "confianza": 0.25,
+          "source_records": [
+            "seed_script"
+          ]
+        }
+      ],
+      "seccion": "Resultado",
+      "nivel": 3,
+      "empresas": [],
+      "archivos": [],
+      "naturaleza": "profit",
+      "usage_count": 10,
+      "confianza": 0.375,
+      "variante_canonica": "Otros Ingresos"
+    },
+    "ER.04": {
+      "codigo": "ER.04",
+      "nombre": "Gastos de Viaje y Representación",
+      "frecuencia": 22,
+      "variantes": [
+        {
+          "nombre": "Gastos de Viaje y Representación",
+          "frecuencia": 4,
+          "confianza": 0.1818,
+          "source_records": [
+            "demo"
+          ]
+        },
+        {
+          "nombre": "Comunicaciones",
+          "frecuencia": 3,
+          "confianza": 0.1364,
+          "source_records": [
+            "demo"
+          ]
+        },
+        {
+          "nombre": "Remuneraciones",
+          "frecuencia": 2,
+          "confianza": 0.0909,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Seguros",
+          "frecuencia": 2,
+          "confianza": 0.0909,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Honorarios",
+          "frecuencia": 2,
+          "confianza": 0.0909,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Gastos Notariales",
+          "frecuencia": 2,
+          "confianza": 0.0909,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "TOTAL GASTOS DE ADMINISTRACIÓN",
+          "frecuencia": 2,
+          "confianza": 0.0909,
+          "source_records": [
+            "demo"
+          ]
+        },
+        {
+          "nombre": "GRATIFICACIONES",
+          "frecuencia": 1,
+          "confianza": 0.0455,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Finiquitos",
+          "frecuencia": 1,
+          "confianza": 0.0455,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Gastos Generales",
+          "frecuencia": 1,
+          "confianza": 0.0455,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "INCENTIVOS",
+          "frecuencia": 1,
+          "confianza": 0.0455,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "GASTOS DE TELEFONO",
+          "frecuencia": 1,
+          "confianza": 0.0455,
+          "source_records": [
+            "seed_script"
+          ]
+        }
+      ],
+      "seccion": "Resultado",
+      "nivel": 3,
+      "empresas": [
+        "Soc Com e Inv Campoamor SA"
+      ],
+      "archivos": [
+        "Balance 2015 - Soc Com e Inv Campoamor SA.pdf",
+        "Balance 2016 Abad Garcia y Pons.pdf",
+        "Balance 2016 Asturias Ltda .pdf",
+        "Balance 2016 Campomanes S A .pdf",
+        "Balance General SA JAHUEL 2020 V3.pdf",
+        "balance general guayacan 2020.pdf"
+      ],
+      "naturaleza": "loss",
+      "usage_count": 13,
+      "confianza": 0.1033,
+      "variante_canonica": "Gastos de Viaje y Representación"
+    },
+    "ER.07": {
+      "codigo": "ER.07",
+      "nombre": "Depreciaciones",
+      "frecuencia": 4,
+      "variantes": [
+        {
+          "nombre": "Depreciaciones",
+          "frecuencia": 2,
+          "confianza": 0.5,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "DEPRECIACION",
+          "frecuencia": 1,
+          "confianza": 0.25,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Depreciacion del Ejercicio",
+          "frecuencia": 1,
+          "confianza": 0.25,
+          "source_records": [
+            "seed_script"
+          ]
+        }
+      ],
+      "seccion": "Resultado",
+      "nivel": 3,
+      "empresas": [],
+      "archivos": [],
+      "naturaleza": "liability",
+      "usage_count": 4,
+      "confianza": 0.375,
+      "variante_canonica": "Depreciaciones"
+    },
+    "ER.09": {
+      "codigo": "ER.09",
+      "nombre": "Intereses Bancarios",
+      "frecuencia": 12,
+      "variantes": [
+        {
+          "nombre": "Gastos Bancarios",
+          "frecuencia": 2,
+          "confianza": 0.1667,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "COMISIONES BANCARIAS",
+          "frecuencia": 2,
+          "confianza": 0.1667,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "INTERESES",
+          "frecuencia": 2,
+          "confianza": 0.1667,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Intereses Bancarios",
+          "frecuencia": 2,
+          "confianza": 0.1667,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Gastos Financieros",
+          "frecuencia": 1,
+          "confianza": 0.0833,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Intereses pagados",
+          "frecuencia": 1,
+          "confianza": 0.0833,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Intereses por Leasing",
+          "frecuencia": 1,
+          "confianza": 0.0833,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Diferencia de Cambio",
+          "frecuencia": 1,
+          "confianza": 0.0833,
+          "source_records": [
+            "seed_script"
+          ]
+        }
+      ],
+      "seccion": "Resultado",
+      "nivel": 3,
+      "empresas": [],
+      "archivos": [],
+      "naturaleza": "loss",
+      "usage_count": 5,
+      "confianza": 0.1389,
+      "variante_canonica": "Intereses Bancarios"
+    },
+    "ER.12": {
+      "codigo": "ER.12",
+      "nombre": "Intereses Ganados",
+      "frecuencia": 3,
+      "variantes": [
+        {
+          "nombre": "Intereses Ganados",
+          "frecuencia": 2,
+          "confianza": 0.6667,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "INGRESOS FINANCIEROS",
+          "frecuencia": 1,
+          "confianza": 0.3333,
+          "source_records": [
+            "seed_script"
+          ]
+        }
+      ],
+      "seccion": "Resultado",
+      "nivel": 3,
+      "empresas": [],
+      "archivos": [],
+      "naturaleza": "asset",
+      "usage_count": 2,
+      "confianza": 0.5556,
+      "variante_canonica": "Intereses Ganados"
+    },
+    "ER.13": {
+      "codigo": "ER.13",
+      "nombre": "Otros Gastos",
+      "frecuencia": 4,
+      "variantes": [
+        {
+          "nombre": "Otros Gastos",
+          "frecuencia": 2,
+          "confianza": 0.5,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "MULTAS E INTERESES",
+          "frecuencia": 1,
+          "confianza": 0.25,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Otros Ingresos no Operacionales",
+          "frecuencia": 1,
+          "confianza": 0.25,
+          "source_records": [
+            "seed_script"
+          ]
+        }
+      ],
+      "seccion": "Resultado",
+      "nivel": 3,
+      "empresas": [],
+      "archivos": [],
+      "naturaleza": "liability",
+      "usage_count": 3,
+      "confianza": 0.375,
+      "variante_canonica": "Otros Gastos"
+    },
+    "ER.14": {
+      "codigo": "ER.14",
+      "nombre": "Correccion Monetaria",
+      "frecuencia": 2,
+      "variantes": [
+        {
+          "nombre": "Correccion Monetaria",
+          "frecuencia": 2,
+          "confianza": 1.0,
+          "source_records": [
+            "seed_script"
+          ]
+        }
+      ],
+      "seccion": "Resultado",
+      "nivel": 3,
+      "empresas": [],
+      "archivos": [],
+      "naturaleza": "asset",
+      "usage_count": 6,
+      "confianza": 1.0,
+      "variante_canonica": "Correccion Monetaria"
+    },
+    "PAT.01": {
+      "codigo": "PAT.01",
+      "nombre": "Capital emitido",
+      "frecuencia": 12,
+      "variantes": [
+        {
+          "nombre": "Capital Pagado",
+          "frecuencia": 2,
+          "confianza": 0.1667,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Capital",
+          "frecuencia": 2,
+          "confianza": 0.1667,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "CAPITAL SOCIAL",
+          "frecuencia": 2,
+          "confianza": 0.1667,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "TOTAL CAPITAL EMITIDO",
+          "frecuencia": 2,
+          "confianza": 0.1667,
+          "source_records": [
+            "demo"
+          ]
+        },
+        {
+          "nombre": "Capital emitido",
+          "frecuencia": 2,
+          "confianza": 0.1667,
+          "source_records": [
+            "demo"
+          ]
+        },
+        {
+          "nombre": "Revalorizacion Capital Propio",
+          "frecuencia": 1,
+          "confianza": 0.0833,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Ventas",
+          "frecuencia": 1,
+          "confianza": 0.0833,
+          "source_records": [
+            "seed_script"
+          ]
+        }
+      ],
+      "seccion": "Patrimonio",
+      "nivel": 3,
+      "empresas": [
+        "2016",
+        "2018 Los Nogales"
+      ],
+      "archivos": [
+        "Balance General SA JAHUEL 2020 V3.pdf",
+        "Balance Vecchiola Dic_2016.pdf",
+        "EEFF - 2018 Los Nogales.pdf",
+        "balance general guayacan 2020.pdf"
+      ],
+      "naturaleza": "liability",
+      "usage_count": 9,
+      "confianza": 0.1528,
+      "variante_canonica": "Capital emitido"
+    },
+    "PAT.02": {
+      "codigo": "PAT.02",
+      "nombre": "Otras Reservas",
+      "frecuencia": 1,
+      "variantes": [
+        {
+          "nombre": "Otras Reservas",
+          "frecuencia": 1,
+          "confianza": 1.0,
+          "source_records": [
+            "seed_script"
+          ]
+        }
+      ],
+      "seccion": "Patrimonio",
+      "nivel": 3,
+      "empresas": [],
+      "archivos": [],
+      "naturaleza": "asset",
+      "usage_count": 5,
+      "confianza": 1.0,
+      "variante_canonica": "Otras Reservas"
+    },
+    "PAT.03": {
+      "codigo": "PAT.03",
+      "nombre": "Utilidades Acumuladas",
+      "frecuencia": 4,
+      "variantes": [
+        {
+          "nombre": "Utilidades Acumuladas",
+          "frecuencia": 2,
+          "confianza": 0.5,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Resultados Acumulados",
+          "frecuencia": 1,
+          "confianza": 0.25,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "PERDIDAS ACUMULADAS",
+          "frecuencia": 1,
+          "confianza": 0.25,
+          "source_records": [
+            "seed_script"
+          ]
+        }
+      ],
+      "seccion": "Patrimonio",
+      "nivel": 3,
+      "empresas": [],
+      "archivos": [],
+      "naturaleza": "liability",
+      "usage_count": 6,
+      "confianza": 0.375,
+      "variante_canonica": "Utilidades Acumuladas"
+    },
+    "PAT.04": {
+      "codigo": "PAT.04",
+      "nombre": "Resultado del Ejercicio",
+      "frecuencia": 2,
+      "variantes": [
+        {
+          "nombre": "Resultado del Ejercicio",
+          "frecuencia": 2,
+          "confianza": 1.0,
+          "source_records": [
+            "demo"
+          ]
+        }
+      ],
+      "seccion": "Patrimonio",
+      "nivel": 3,
+      "empresas": [],
+      "archivos": [
+        "Balance General SA JAHUEL 2020 V3.pdf",
+        "balance general guayacan 2020.pdf"
+      ],
+      "naturaleza": "",
+      "usage_count": 1,
+      "confianza": 1.0,
+      "variante_canonica": "Resultado del Ejercicio"
+    },
+    "PC.01": {
+      "codigo": "PC.01",
+      "nombre": "Documentos y cuentas por pagar empresas relacionadas",
+      "frecuencia": 22,
+      "variantes": [
+        {
+          "nombre": "Documentos y cuentas por pagar empresas relacionadas",
+          "frecuencia": 4,
+          "confianza": 0.1818,
+          "source_records": [
+            "demo"
+          ]
+        },
+        {
+          "nombre": "PROVEEDORES",
+          "frecuencia": 2,
+          "confianza": 0.0909,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Proveedores Nacionales",
+          "frecuencia": 1,
+          "confianza": 0.0455,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Facturas por Recibir",
+          "frecuencia": 1,
+          "confianza": 0.0455,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Gastos de Viajes (t)",
+          "frecuencia": 1,
+          "confianza": 0.0455,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Documentos por Pagar",
+          "frecuencia": 1,
+          "confianza": 0.0455,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Otros Documentos por pagar",
+          "frecuencia": 1,
+          "confianza": 0.0455,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "TOTAL CUENTAS POR PAGAR ENTIDADES RE",
+          "frecuencia": 1,
+          "confianza": 0.0455,
+          "source_records": [
+            "demo"
+          ]
+        },
+        {
+          "nombre": "TOTAL CUENTAS POR PAGAR COMERCIALES Y",
+          "frecuencia": 1,
+          "confianza": 0.0455,
+          "source_records": [
+            "demo"
+          ]
+        },
+        {
+          "nombre": "Cuentas por pagar a entidades relacionadas, corrientes",
+          "frecuencia": 1,
+          "confianza": 0.0455,
+          "source_records": [
+            "demo"
+          ]
+        },
+        {
+          "nombre": "Cuentas comerciales y otras cuentas por pagar",
+          "frecuencia": 1,
+          "confianza": 0.0455,
+          "source_records": [
+            "demo"
+          ]
+        },
+        {
+          "nombre": "Cuentas por cobrar a entidades relacionadas 21,831.772.328 Cuentas por Pagar a Entidades Relacionadas",
+          "frecuencia": 1,
+          "confianza": 0.0455,
+          "source_records": [
+            "demo"
+          ]
+        },
+        {
+          "nombre": "Cuentas por cobrar a entidades relacionadas 5.163.998.112 Cuentas por Pagar a Entidades Relacionadas",
+          "frecuencia": 1,
+          "confianza": 0.0455,
+          "source_records": [
+            "demo"
+          ]
+        },
+        {
+          "nombre": "Deudores Comerciales y Otras Cuentas por Cobrar 20.394,861,653 Acreedores Comerciales y Otras Cuentas por Pagar",
+          "frecuencia": 1,
+          "confianza": 0.0455,
+          "source_records": [
+            "demo"
+          ]
+        },
+        {
+          "nombre": "TOTAL CUENTAS POR PAGAR ENTIDADES RELACIONADAS, NO CO 5R4R.7I0E3N.1T5E7S",
+          "frecuencia": 1,
+          "confianza": 0.0455,
+          "source_records": [
+            "demo"
+          ]
+        },
+        {
+          "nombre": "TOTAL CUENTAS POR PAGAR A ENTIDADES RELACIONADAS, COR 3R8IE.5N0T0E.0S00",
+          "frecuencia": 1,
+          "confianza": 0.0455,
+          "source_records": [
+            "demo"
+          ]
+        },
+        {
+          "nombre": "TOTAL CUENTAS POR PAGAR COMERCIALES Y OTRAS CUENTA 4S.9 P5O8.R0 2P4A.2G6A9R",
+          "frecuencia": 1,
+          "confianza": 0.0455,
+          "source_records": [
+            "demo"
+          ]
+        },
+        {
+          "nombre": "Otros Documento y Cuentas por Pagar",
+          "frecuencia": 1,
+          "confianza": 0.0455,
+          "source_records": [
+            "demo"
+          ]
+        }
+      ],
+      "seccion": "Pasivo",
+      "nivel": 3,
+      "empresas": [
+        "2016",
+        "2018 Los Nogales"
+      ],
+      "archivos": [
+        "BALANCE CLASIFICADO AICSA 2019.pdf",
+        "Balance Agricola El Comino dic 2018.pdf",
+        "Balance Agricola Santa Amelia dic 2018.pdf",
+        "Balance General SA JAHUEL 2020 V3.pdf",
+        "Balance Vecchiola Dic_2016.pdf",
+        "EEFF - 2018 Los Nogales.pdf",
+        "balance general guayacan 2020.pdf"
+      ],
+      "naturaleza": "liability",
+      "usage_count": 6,
+      "confianza": 0.0744,
+      "variante_canonica": "Documentos y cuentas por pagar empresas relacionadas"
+    },
+    "PC.02": {
+      "codigo": "PC.02",
+      "nombre": "Linea de credito BCI",
+      "frecuencia": 7,
+      "variantes": [
+        {
+          "nombre": "Linea de credito BCI",
+          "frecuencia": 2,
+          "confianza": 0.2857,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Prestamo Bancario Corto Plazo",
+          "frecuencia": 1,
+          "confianza": 0.1429,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Linea de Credito Security",
+          "frecuencia": 1,
+          "confianza": 0.1429,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Linea de Credito Banco Chile",
+          "frecuencia": 1,
+          "confianza": 0.1429,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Linea de Credito Santander",
+          "frecuencia": 1,
+          "confianza": 0.1429,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Tarjeta de Credito",
+          "frecuencia": 1,
+          "confianza": 0.1429,
+          "source_records": [
+            "seed_script"
+          ]
+        }
+      ],
+      "seccion": "Pasivo",
+      "nivel": 3,
+      "empresas": [],
+      "archivos": [],
+      "naturaleza": "liability",
+      "usage_count": 2,
+      "confianza": 0.1837,
+      "variante_canonica": "Linea de credito BCI"
+    },
+    "PC.04": {
+      "codigo": "PC.04",
+      "nombre": "Acreedores",
+      "frecuencia": 1,
+      "variantes": [
+        {
+          "nombre": "Acreedores",
+          "frecuencia": 1,
+          "confianza": 1.0,
+          "source_records": [
+            "seed_script"
+          ]
+        }
+      ],
+      "seccion": "Pasivo",
+      "nivel": 3,
+      "empresas": [],
+      "archivos": [],
+      "naturaleza": "liability",
+      "usage_count": 1,
+      "confianza": 1.0,
+      "variante_canonica": "Acreedores"
+    },
+    "PC.05": {
+      "codigo": "PC.05",
+      "nombre": "P.P.M. Por Pagar",
+      "frecuencia": 12,
+      "variantes": [
+        {
+          "nombre": "P.P.M. Por Pagar",
+          "frecuencia": 3,
+          "confianza": 0.25,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Iva Debito Fiscal",
+          "frecuencia": 2,
+          "confianza": 0.1667,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Impuestos por pagar",
+          "frecuencia": 2,
+          "confianza": 0.1667,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Provision Impuesto Renta",
+          "frecuencia": 2,
+          "confianza": 0.1667,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Impuesto Único Trabajadores",
+          "frecuencia": 1,
+          "confianza": 0.0833,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "OTROS IMPUESTOS POR PAGAR",
+          "frecuencia": 1,
+          "confianza": 0.0833,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Ppm.por Pagar",
+          "frecuencia": 1,
+          "confianza": 0.0833,
+          "source_records": [
+            "seed_script"
+          ]
+        }
+      ],
+      "seccion": "Pasivo",
+      "nivel": 3,
+      "empresas": [],
+      "archivos": [],
+      "naturaleza": "liability",
+      "usage_count": 6,
+      "confianza": 0.1667,
+      "variante_canonica": "P.P.M. Por Pagar"
+    },
+    "PC.06": {
+      "codigo": "PC.06",
+      "nombre": "Honorarios por Pagar",
+      "frecuencia": 21,
+      "variantes": [
+        {
+          "nombre": "Honorarios por Pagar",
+          "frecuencia": 4,
+          "confianza": 0.1905,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Remuneraciones por Pagar",
+          "frecuencia": 2,
+          "confianza": 0.0952,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Sueldos por Pagar",
+          "frecuencia": 2,
+          "confianza": 0.0952,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Isapres",
+          "frecuencia": 2,
+          "confianza": 0.0952,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Imposiciones Por Pagar",
+          "frecuencia": 2,
+          "confianza": 0.0952,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Honorarios y Asesorias Profesionales",
+          "frecuencia": 2,
+          "confianza": 0.0952,
+          "source_records": [
+            "demo"
+          ]
+        },
+        {
+          "nombre": "Remuneraciones Adm. y Venta",
+          "frecuencia": 2,
+          "confianza": 0.0952,
+          "source_records": [
+            "demo"
+          ]
+        },
+        {
+          "nombre": "Provisión Vacaciones",
+          "frecuencia": 1,
+          "confianza": 0.0476,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Finiquitos por Pagar",
+          "frecuencia": 1,
+          "confianza": 0.0476,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "LEYES SOCIALES",
+          "frecuencia": 1,
+          "confianza": 0.0476,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Admin. Fondos Pens (A.F.P.)",
+          "frecuencia": 1,
+          "confianza": 0.0476,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Remuneraciones Producción",
+          "frecuencia": 1,
+          "confianza": 0.0476,
+          "source_records": [
+            "demo"
+          ]
+        }
+      ],
+      "seccion": "Pasivo",
+      "nivel": 3,
+      "empresas": [],
+      "archivos": [
+        "Balance General SA JAHUEL 2020 V3.pdf",
+        "balance general guayacan 2020.pdf"
+      ],
+      "naturaleza": "liability",
+      "usage_count": 5,
+      "confianza": 0.102,
+      "variante_canonica": "Honorarios por Pagar"
+    },
+    "PC.07": {
+      "codigo": "PC.07",
+      "nombre": "Cuentas por Pagar Factoring",
+      "frecuencia": 3,
+      "variantes": [
+        {
+          "nombre": "Cuentas por Pagar",
+          "frecuencia": 1,
+          "confianza": 0.3333,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Cuentas por Pagar Factoring",
+          "frecuencia": 1,
+          "confianza": 0.3333,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Arriendos por Pagar",
+          "frecuencia": 1,
+          "confianza": 0.3333,
+          "source_records": [
+            "seed_script"
+          ]
+        }
+      ],
+      "seccion": "Pasivo",
+      "nivel": 3,
+      "empresas": [],
+      "archivos": [],
+      "naturaleza": "liability",
+      "usage_count": 1,
+      "confianza": 0.3333,
+      "variante_canonica": "Cuentas por Pagar Factoring"
+    },
+    "PC.08": {
+      "codigo": "PC.08",
+      "nombre": "Provisiones Varias",
+      "frecuencia": 7,
+      "variantes": [
+        {
+          "nombre": "Varios Acreedores",
+          "frecuencia": 2,
+          "confianza": 0.2857,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Provisiones Varias",
+          "frecuencia": 2,
+          "confianza": 0.2857,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Anticipo de Clientes",
+          "frecuencia": 1,
+          "confianza": 0.1429,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Anticipo Clientes",
+          "frecuencia": 1,
+          "confianza": 0.1429,
+          "source_records": [
+            "seed_script"
+          ]
+        },
+        {
+          "nombre": "Acreedores Varios",
+          "frecuencia": 1,
+          "confianza": 0.1429,
+          "source_records": [
+            "seed_script"
+          ]
+        }
+      ],
+      "seccion": "Pasivo",
+      "nivel": 3,
+      "empresas": [],
+      "archivos": [],
+      "naturaleza": "liability",
+      "usage_count": 5,
+      "confianza": 0.2245,
+      "variante_canonica": "Provisiones Varias"
+    },
+    "PNC.01": {
+      "codigo": "PNC.01",
+      "nombre": "Prestamo Bancario Largo Plazo",
+      "frecuencia": 1,
+      "variantes": [
+        {
+          "nombre": "Prestamo Bancario Largo Plazo",
+          "frecuencia": 1,
+          "confianza": 1.0,
+          "source_records": [
+            "seed_script"
+          ]
+        }
+      ],
+      "seccion": "Pasivo No Corriente",
+      "nivel": 3,
+      "empresas": [],
+      "archivos": [],
+      "naturaleza": "asset",
+      "usage_count": 1,
+      "confianza": 1.0,
+      "variante_canonica": "Prestamo Bancario Largo Plazo"
+    },
+    "PNC.04": {
+      "codigo": "PNC.04",
+      "nombre": "Acreedores Largo Plazo",
+      "frecuencia": 1,
+      "variantes": [
+        {
+          "nombre": "Acreedores Largo Plazo",
+          "frecuencia": 1,
+          "confianza": 1.0,
+          "source_records": [
+            "seed_script"
+          ]
+        }
+      ],
+      "seccion": "Pasivo No Corriente",
+      "nivel": 3,
+      "empresas": [],
+      "archivos": [],
+      "naturaleza": "liability",
+      "usage_count": 1,
+      "confianza": 1.0,
+      "variante_canonica": "Acreedores Largo Plazo"
+    }
+  }
+}

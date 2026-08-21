@@ -1,0 +1,141 @@
+{
+  "family_id": "cluster_0a1bebffff",
+  "family_name": "Familia AICSA",
+  "layout": "VERTICAL",
+  "document_type": "BALANCE",
+  "code_pattern": "PUNTO",
+  "numeric_pattern": "CHILENO",
+  "header_rows": 5,
+  "table_start_row": 5,
+  "table_end_row": 101,
+  "columns": [
+    {
+      "key": "NOMBRE",
+      "label": "Nombre",
+      "side": "left",
+      "position": 0,
+      "detection_rate": 1.0,
+      "docs": 7
+    },
+    {
+      "key": "PASIVO",
+      "label": "Pasivo",
+      "side": "right",
+      "position": 3,
+      "detection_rate": 1.0,
+      "docs": 7
+    },
+    {
+      "key": "PERDIDA",
+      "label": "Pérdidas",
+      "side": "right",
+      "position": 2,
+      "detection_rate": 1.0,
+      "docs": 7
+    },
+    {
+      "key": "GANANCIA",
+      "label": "Ganancias",
+      "side": "right",
+      "position": 1,
+      "detection_rate": 1.0,
+      "docs": 7
+    }
+  ],
+  "code_column": null,
+  "name_column": {
+    "key": "NOMBRE",
+    "label": "Nombre",
+    "side": "left",
+    "position": 0,
+    "detection_rate": 1.0,
+    "docs": 7
+  },
+  "amount_columns": [
+    {
+      "key": "PASIVO",
+      "label": "Pasivo",
+      "side": "right",
+      "position": 3,
+      "detection_rate": 1.0,
+      "docs": 7
+    },
+    {
+      "key": "PERDIDA",
+      "label": "Pérdidas",
+      "side": "right",
+      "position": 2,
+      "detection_rate": 1.0,
+      "docs": 7
+    },
+    {
+      "key": "GANANCIA",
+      "label": "Ganancias",
+      "side": "right",
+      "position": 1,
+      "detection_rate": 1.0,
+      "docs": 7
+    }
+  ],
+  "totals_pattern": "top:3col",
+  "total_keywords": [
+    "total",
+    "utilidad",
+    "sumas iguales"
+  ],
+  "summary_position": "TOP",
+  "confidence": 0.8968,
+  "n_documents": 7,
+  "docs_total": 17,
+  "docs_outliers": 10,
+  "header": {
+    "rows": 5,
+    "row_counts": {
+      "5": 5,
+      "1": 2
+    },
+    "keywords": [
+      "giro",
+      "inversiones",
+      "cugat",
+      "dirección",
+      "inmobiliaria",
+      "administradora",
+      "avenida",
+      "españa"
+    ]
+  },
+  "footer": {
+    "trailing_rows": 1,
+    "totals_position": "TOP",
+    "total_keywords": [
+      "total",
+      "utilidad",
+      "sumas iguales"
+    ],
+    "keywords": [
+      "dividendos",
+      "provisorios",
+      "déficit",
+      "acumulado",
+      "desarrollo",
+      "total",
+      "patrimonio",
+      "pasivos"
+    ]
+  },
+  "validation": {
+    "docs_validated": 17,
+    "docs_with_rows": 17,
+    "coverage": 0.9129,
+    "precision": 0.2474,
+    "columns_rate": 0.9412,
+    "columns_detected": 3.76,
+    "columns_expected": 4,
+    "total_account_rows": 502,
+    "total_rows_in_table": 408,
+    "total_rows_lost": 94,
+    "header_match_rate": 0.5882
+  },
+  "generated_at": ""
+}

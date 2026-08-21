@@ -13,6 +13,7 @@ Pipeline:
      y columna de origen (activo/pasivo/pérdida/ganancia) cuando exista
 """
 
+import logging
 import re
 import shutil
 import subprocess
@@ -21,10 +22,39 @@ import zipfile
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
+import pandas as pd
 import pdfplumber
 from PIL import Image
+
+
+logger = logging.getLogger("parser_universal")
+
+
+# Feature flag: cuando está en False, se usa la heurística fija ULTIMAS_COLS.
+# Cuando está en True, LayoutDetector analiza los encabezados del documento
+# para determinar el orden real de columnas.
+ENABLE_DYNAMIC_LAYOUT = False
+
+# OBSOLETO desde Fase A: ParserPDF ya no ejecuta AccountTypeResolver.
+# Se conserva solo para compatibilidad (imports/tests). Sin efecto.
+ENABLE_ACCOUNT_TYPE_RESOLVER = False
+
+# Umbral de confianza para aplicar corrección de rotación 180°
+# sobre texto nativo. Por debajo de este umbral se usa el flujo normal.
+ROTATION_CORRECTION_THRESHOLD = 0.7
+
+# Umbral de confianza para usar LayoutDetector desde ExtractionContext.
+# Si la confianza del layout detectado por DocumentAnalyzer supera este
+# umbral, ParserPDF usa el orden de columnas del contexto en lugar de la
+# heurística estándar (ULTIMAS_COLS).
+LAYOUT_CONFIDENCE_THRESHOLD = 0.8
+
+# OBSOLETO desde Fase A: la resolución de tipo_cuenta ya no se activa desde
+# ExtractionContext dentro de ParserPDF. Se conserva solo para compatibilidad
+# (imports/tests). Sin efecto.
+ACCOUNT_TYPE_CONFIDENCE_THRESHOLD = 0.7
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -49,6 +79,20 @@ class OrigenColumna(str, Enum):
     DESCONOCIDO = 'desconocido'
 
 
+# Mapeo de strings de LayoutDetector a enum OrigenColumna.
+# Solo se incluyen columnas informativas para asignación de monto.
+_LAYOUT_COLUMN_MAP: dict[str, OrigenColumna] = {
+    "activo": OrigenColumna.ACTIVO,
+    "pasivo": OrigenColumna.PASIVO,
+    "perdida": OrigenColumna.PERDIDA,
+    "ganancia": OrigenColumna.GANANCIA,
+    "patrimonio": OrigenColumna.PASIVO,
+    "deudor": OrigenColumna.DEUDOR,
+    "acreedor": OrigenColumna.ACREEDOR,
+    "saldo": OrigenColumna.DESCONOCIDO,
+}
+
+
 @dataclass
 class CuentaRaw:
     linea: int
@@ -58,6 +102,7 @@ class CuentaRaw:
     origen_columna: OrigenColumna = OrigenColumna.DESCONOCIDO
     es_total: bool = False
     confianza_extraccion: float = 1.0  # baja si viene de OCR
+    tipo_cuenta: Optional[str] = None  # DEPRECATED (Fase A): NO lo escribe ParserPDF; se puebla post-parseo.
 
 
 @dataclass
@@ -69,6 +114,41 @@ class ResultadoParseo:
     rotacion_aplicada: int           # 0 o 90
     cuentas: list[CuentaRaw] = field(default_factory=list)
     advertencias: list[str] = field(default_factory=list)
+    # Sprint 31: contexto del análisis documental previo al parseo.
+    # None cuando no se ejecutó (Excel) o cuando el análisis falló.
+    document_context: Optional[Any] = None
+    # Sprint 34: SOLO anotación de qué extractor se seleccionó (id, familia,
+    # confidence, fallback, tiempo). NO cambia la extracción: None cuando no
+    # hubo análisis documental o cuando el análisis de extractor falló.
+    extractor_info: Optional[dict] = None
+
+
+@dataclass
+class ExtractionContext:
+    """Contexto de extracción producido por DocumentAnalyzer.
+
+    Contiene pistas estructurales sobre el documento que ParserPDF
+    puede usar para adaptar su estrategia de extracción.
+
+    rotation_hint:   rotación detectada por DocumentAnalyzer (0, 90, 180)
+    rotation_confidence: confianza de la detección de rotación
+    needs_ocr:       si el documento requiere OCR (None = dejar que ParserPDF decida)
+    layout_hint:     orden de columnas detectado por LayoutDetector
+    format_hint:     formato de código detectado
+    confidence:      confianza general del análisis
+    """
+    rotation_hint: int = 0
+    rotation_confidence: float = 0.0
+    needs_ocr: Optional[bool] = None
+    layout_hint: Optional[list[str]] = None
+    layout_confidence: float = 0.0
+    format_hint: Optional[FormatoCodigo] = None
+    confidence: float = 1.0
+    analysis_source: Optional[str] = None
+    # Líneas ya separadas por un extractor especializado (doble columna).
+    # Si vienen seteadas, ParserPDF las usa en lugar de re-extraer el texto
+    # plano del PDF, reutilizando íntegramente el pipeline de parseo.
+    lineas_presplit: Optional[list[str]] = None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -123,7 +203,9 @@ def validar_archivo(path: Path) -> tuple[bool, str]:
 
 PATRON_GUION = re.compile(r'^\d+(-\d+){2,}$')
 PATRON_PUNTO = re.compile(r'^\d+(\.\d+){2,}$')
-PATRON_COMPACTO = re.compile(r'^\d{6,10}$')
+# COMPACTO acepta códigos de 5 a 10 dígitos (p. ej. 11010 CAJAS / 21010 OBLIG).
+# Antes era 6-10: los códigos de 5 dígitos quedaban como SIN_CODIGO.
+PATRON_COMPACTO = re.compile(r'^\d{5,10}$')
 
 
 def detectar_formato_codigo(codigos_muestra: list[str]) -> FormatoCodigo:
@@ -332,8 +414,23 @@ def verificar_cuadre_balance(cuentas: list[CuentaRaw]) -> tuple[bool, dict, list
 PATRONES_CODIGO_LINEA = {
     FormatoCodigo.GUION:    re.compile(r'^(\d+(?:-\d+){2,})\s+(.+)'),
     FormatoCodigo.PUNTO:    re.compile(r'^(\d+(?:\.\d+){2,})\s+(.+)'),
-    FormatoCodigo.COMPACTO: re.compile(r'^(\d{6,10})\s+(.+)'),
+    FormatoCodigo.COMPACTO: re.compile(r'^(\d{5,10})\s+(.+)'),
 }
+
+# PQ-2 (FG1/FG2) — recuperación de códigos perdidos en documentos SIN_CODIGO.
+# Se prueban SOLO después de los tres patrones estándar y SOLO en la rama de
+# auto-detección por línea, por lo que no alteran la extracción de documentos
+# con formato GUION/PUNTO/COMPACTO detectado. Reutilizan el resto del flujo
+# (montos y columnas) aguas abajo en parsear_linea.
+#
+# FG1 — código con UN solo separador (guión o punto): 1101-51, 13216-0000.
+#   La guarda `\d{4,6}` al inicio excluye RUT (7-8 dígitos) y fechas cortas.
+_PATRON_AUX_UNISEP = re.compile(r'^(\d{4,6}[-.]\d{1,6})\s+(.+)')
+# FG2 — código compacto concatenado al nombre sin espacio: 11090BANCO, 10423CTA.
+#    El lookahead `(?=[A-Z...])` parte en la frontera dígito → letra y exige que
+#    el código sea de 4 a 6 dígitos seguidos inmediatamente por una letra.
+_PATRON_AUX_CONCATENADO = re.compile(r'^(\d{4,6})(?=[A-ZÁÉÍÓÚÑ])(.+)')
+PATRONES_CODIGO_AUXILIARES = (_PATRON_AUX_UNISEP, _PATRON_AUX_CONCATENADO)
 
 PATRON_MONTOS = re.compile(r'(-?\(?[\d.,]{1,18}\)?)')
 _OCR_CERO = re.compile(r'^[oO]$')
@@ -349,6 +446,55 @@ PATRON_TOTAL = re.compile(
     re.IGNORECASE
 )
 
+# ── Filtro de líneas basura (FASE 24B.2) ─────────────────────────────────
+# Cada patrón matchea la línea COMPLETA para no filtrar substrings dentro
+# de nombres de cuentas contables.
+
+GARBAGE_PATTERNS: list[re.Pattern] = [
+    # URLs
+    re.compile(r'^https?://\S+$', re.I),
+    re.compile(r'^www\.\S+\.\S+$', re.I),
+    # Emails
+    re.compile(r'^\S+@\S+\.\S+$'),
+    # Teléfonos chilenos (+56 9 XXXX XXXX / (2) XXXX XXXX)
+    re.compile(r'^\+56[\s-]?\d[\s\d-]{7,}\d$'),
+    re.compile(r'^\(\d{1,4}\)[\s-]?\d[\s\d-]{6,}\d$'),
+    # RUTs sueltos
+    re.compile(r'^\s*\d{1,2}\.\d{3}\.\d{3}[-][0-9kK]\s*$', re.I),
+    # Indicadores de página / folio
+    re.compile(r'^\s*(?:P[aá]gina|P[aá]g|Pag|Folio|Hoja|N°|No\.?)\s*\d+(?:\s*(?:de|/)\s*\d+)?\s*$', re.I),
+    # Etiquetas administrativas de encabezado (RUT, Domicilio, Teléfono, etc.)
+    re.compile(r'^\s*(?:RUT|Domicilio|Comuna|Ciudad|Direcci[oó]n|Tel[eé]fono|Email?|Fax)\s*:.*$', re.I),
+    re.compile(r'^\s*Fecha\s*(?:de\s*)?(?:emi[só]i[oó]n|creaci[oó]n)\s*:.*$', re.I),
+    # Notas al pie
+    re.compile(r'^\s*(?:Notas?\s+\d+(?:\s*(?:a|l|y|al)\s*\d+)?|Ver\s+Notas?\s+\d+(?:\s*(?:a|l|y|al)\s*\d+)?)\s*$', re.I),
+    # Firmas / cargos
+    re.compile(r'^\s*(?:Firma|Representante|Contador|Auditor|Revisor|Preparado)\b.*$', re.I),
+    # Firmas de auditoría / consultoría
+    re.compile(r'^\s*(?:Deloitte|Ernst\s*Young|PwC|Pricewaterhouse(?:Coopers)?|KPMG|BDO|Grant\s*Thornton|Baker\s*Tilly|Mazars)\b.*$', re.I),
+    # Líneas decorativas / separadores
+    re.compile(r'^[-=*_]{4,}$'),
+    re.compile(r'^\s*-\s*\d+\s*-\s*$'),
+    # Fechas sueltas (dd de mes de aaaa o dd/mm/aaaa)
+    re.compile(r'^\s*\d{1,2}\s*de\s+\w+\s+de\s+\d{4}\s*$', re.I),
+    re.compile(r'^\s*\d{1,2}/\d{1,2}/\d{2,4}\s*$'),
+]
+
+
+def _es_linea_basura(linea: str) -> bool:
+    """Retorna True si la línea completa es basura (URL, teléfono, encabezado,
+    pie de página, dirección, etc.). No filtra cuentas contables porque los
+    patrones matchean la totalidad de la línea, no substrings.
+    """
+    for patron in GARBAGE_PATTERNS:
+        if patron.match(linea):
+            return True
+    return False
+
+# OCR confunde '.' y ',' dentro de códigos de cuenta tipo X.XX.XX.XX,
+# produciendo cosas como "1.1.01,01" o "1,1,08,05". Se detecta un prefijo
+# de 3-5 grupos cortos de dígitos separados por '.' o ',' al inicio de la
+# línea y se normaliza a '.' antes de cualquier otro procesamiento.
 PATRON_CODIGO_OCR = re.compile(r'^(\d{1,2}[.,]){2,4}\d{1,2}(?=\s)')
 
 
@@ -366,9 +512,13 @@ def parsear_linea(
     formato_codigo: FormatoCodigo,
     separador_miles: str,
     confianza_base: float = 1.0,
+    column_order: Optional[list[OrigenColumna]] = None,
 ) -> Optional[CuentaRaw]:
     linea = linea.strip()
     if len(linea) < 4:
+        return None
+
+    if _es_linea_basura(linea):
         return None
 
     codigo = None
@@ -387,6 +537,16 @@ def parsear_linea(
                 codigo = m.group(1)
                 resto = m.group(2)
                 break
+        # PQ-2 (FG1/FG2): códigos con un solo separador o compactos concatenados
+        # al nombre. Solo si ninguno de los patrones estándar coincidió (no
+        # altera documentos con formato ya detectado).
+        if codigo is None:
+            for patron in PATRONES_CODIGO_AUXILIARES:
+                m = patron.match(linea)
+                if m:
+                    codigo = m.group(1)
+                    resto = m.group(2)
+                    break
 
     tokens = resto.split()
     descartados_finales = 0
@@ -416,59 +576,35 @@ def parsear_linea(
 
     es_total = bool(PATRON_TOTAL.match(nombre))
 
-    ULTIMAS_COLS = [OrigenColumna.ACTIVO, OrigenColumna.PASIVO,
+    # Determinar orden de columnas: si ENABLE_DYNAMIC_LAYOUT está activo
+    # y se proporcionó un column_order con confianza suficiente, usarlo.
+    # Fallback: heurística actual (últimas 4 columnas = Activo/Pasivo/Pérdida/Ganancia).
+    if column_order and ENABLE_DYNAMIC_LAYOUT:
+        columnas = column_order
+    else:
+        columnas = [OrigenColumna.ACTIVO, OrigenColumna.PASIVO,
                     OrigenColumna.PERDIDA, OrigenColumna.GANANCIA]
 
+    n_col = len(columnas)
     monto_principal = None
     origen = OrigenColumna.DESCONOCIDO
 
     if montos_tokens:
         n = len(montos_tokens)
-        
-        if n >= 4:
-            cola = montos_tokens[-4:]
-            for tok, et in zip(cola, ULTIMAS_COLS):
-                val = parsear_monto(tok, separador_miles)
-                if val is not None and val != 0:
-                    monto_principal = val
-                    origen = et
-                    break
-            if monto_principal is None:
-                monto_principal = parsear_monto(cola[0], separador_miles)
-                origen = ULTIMAS_COLS[0]
-                
-        else:
-            for tok in reversed(montos_tokens):
-                val = parsear_monto(tok, separador_miles)
-                if val is not None and val != 0:
-                    monto_principal = val
-                    break
-            if monto_principal is None and montos_tokens:
-                monto_principal = parsear_monto(montos_tokens[-1], separador_miles)
+        k = min(n_col, n)
+        cola = montos_tokens[-k:]
+        etiquetas = columnas[-k:]
 
-            if codigo:
-                digito_raiz = codigo.replace('.', '').replace('-', '').strip()[0]
-                if digito_raiz == '1':
-                    origen = OrigenColumna.ACTIVO
-                elif digito_raiz == '2':
-                    origen = OrigenColumna.PASIVO
-                elif digito_raiz == '3':
-                    origen = OrigenColumna.PASIVO if 'capital' in nombre.lower() or 'patrimonio' in nombre.lower() else OrigenColumna.PERDIDA
-                elif digito_raiz == '4':
-                    origen = OrigenColumna.PERDIDA
-                elif digito_raiz == '5':
-                    origen = OrigenColumna.GANANCIA
-            
-            if origen == OrigenColumna.DESCONOCIDO:
-                nom_lower = nombre.lower()
-                if any(x in nom_lower for x in ['caja', 'banco', 'clientes', 'iva', 'activo', 'fijo', 'existencias', 'ppm']):
-                    origen = OrigenColumna.ACTIVO
-                elif any(x in nom_lower for x in ['proveedores', 'acreedores', 'capital', 'retenciones', 'pasivo', 'letras por pagar']):
-                    origen = OrigenColumna.PASIVO
-                elif any(x in nom_lower for x in ['gasto', 'costo', 'arriendo', 'remuneraciones', 'perdida', 'patente', 'honorarios']):
-                    origen = OrigenColumna.PERDIDA
-                elif any(x in nom_lower for x in ['venta', 'ingreso', 'ganancia', 'utilidad', 'percibido']):
-                    origen = OrigenColumna.GANANCIA
+        for tok, et in zip(cola, etiquetas):
+            val = parsear_monto(tok, separador_miles)
+            if val is not None and val != 0:
+                monto_principal = val
+                origen = et
+                break
+
+        if monto_principal is None:
+            monto_principal = parsear_monto(cola[0], separador_miles)
+            origen = etiquetas[0]
 
     return CuentaRaw(
         linea=numero_linea,
@@ -487,7 +623,11 @@ def parsear_linea(
 
 class ParserPDF:
 
-    def parsear(self, path: Path) -> ResultadoParseo:
+    def parsear(
+        self,
+        path: Path,
+        context: Optional[ExtractionContext] = None,
+    ) -> ResultadoParseo:
         ok, msg = validar_archivo(path)
         if not ok:
             return ResultadoParseo(
@@ -496,14 +636,35 @@ class ParserPDF:
                 advertencias=[f"VALIDACIÓN FALLIDA: {msg}"]
             )
 
-        lineas, requirio_ocr, rotacion = self._extraer_lineas(path)
+        # Sprint 31 — Análisis documental ANTES del parseo.
+        # Lee solo las primeras páginas, produce un FormatSignature y decide
+        # extractor vía ExtractorFactory. NO cambia la extracción: si el
+        # análisis falla, se continúa exactamente como antes (backward
+        # compatibility).
+        advertencias_iniciales: list[str] = []
+        try:
+            documento_ctx = self._analizar_documento(path)
+        except Exception as exc:  # noqa: BLE001 — backward compatibility
+            logger.debug(
+                "Análisis documental falló (%s); usando flujo clásico.",
+                exc, exc_info=True,
+            )
+            documento_ctx = None
+        if documento_ctx is not None:
+            logger.info("\n" + documento_ctx.to_log_block())
+            for w in documento_ctx.warnings:
+                if w not in advertencias_iniciales:
+                    advertencias_iniciales.append(w)
+
+        lineas, requirio_ocr, rotacion = self._extraer_lineas(path, context)
 
         if not lineas:
             return ResultadoParseo(
                 archivo=path.name, formato_codigo=FormatoCodigo.SIN_CODIGO,
                 separador_miles='.', requirio_ocr=requirio_ocr,
                 rotacion_aplicada=rotacion,
-                advertencias=["No se pudo extraer texto (ni nativo ni OCR)"]
+                advertencias=["No se pudo extraer texto (ni nativo ni OCR)"],
+                document_context=documento_ctx,
             )
 
         lineas = [normalizar_codigo_ocr(l) for l in lineas]
@@ -516,16 +677,143 @@ class ParserPDF:
             muestra_montos.extend(PATRON_MONTOS.findall(l))
         separador = detectar_separador_miles(muestra_montos)
 
+        # 3b. Detectar layout de columnas
+        # Prioridad:
+        #   1) ExtractionContext (de DocumentAnalyzer) si confianza suficiente
+        #   2) Perfil de familia aprendido (Sprint 36, solo si ENABLE_DYNAMIC_LAYOUT)
+        #   3) LayoutDetector interno (solo si ENABLE_DYNAMIC_LAYOUT)
+        #   4) Heurística estándar (ULTIMAS_COLS) por defecto
+        advertencias = list(advertencias_iniciales)
+        column_order: Optional[list[OrigenColumna]] = None
+        layout_columns: Optional[list[str]] = None
+
+        # Sprint 36 — detección anticipada de familia/extractor (se reutiliza
+        # en _anotar_extractor para no detectar dos veces). Gated por
+        # ENABLE_DYNAMIC_LAYOUT: si falla, todo continúa como antes.
+        detectado_extractor: Optional[dict] = None
+        if ENABLE_DYNAMIC_LAYOUT and documento_ctx is not None:
+            try:
+                from document_intelligence.extractors.factory import (
+                    SpecializedExtractorFactory,
+                )
+                detectado_extractor = SpecializedExtractorFactory().detect(
+                    path, documento_ctx,
+                )
+            except Exception as exc:  # noqa: BLE001 — fallback deliberado
+                logger.debug(
+                    "Detección anticipada de extractor falló; "
+                    "se sigue con heurística estándar: %s", exc,
+                )
+
+        if context and context.layout_hint and context.layout_confidence >= LAYOUT_CONFIDENCE_THRESHOLD:
+            layout_columns = list(context.layout_hint)
+            cols = []
+            for c in layout_columns:
+                oc = _LAYOUT_COLUMN_MAP.get(c)
+                if oc is not None:
+                    cols.append(oc)
+            if len(cols) >= 2:
+                column_order = cols
+                advertencias.append(
+                    f"LayoutDetector (context): {len(cols)} columnas "
+                    f"({', '.join(c.value for c in cols)}), "
+                    f"confianza={context.layout_confidence:.2f}"
+                )
+            else:
+                advertencias.append(
+                    "LayoutDetector detectó columnas en contexto pero ninguna "
+                    "fue reconocida — usando heurística estándar."
+                )
+        elif detectado_extractor is not None and detectado_extractor.get(
+            "family_id"
+        ) not in (None, "", "DESCONOCIDO"):
+            # Perfil de familia aprendido (Sprint 36): el orden de columnas
+            # proviene del training (Sprint 35) para la familia detectada.
+            # Se aplica con cualquier familia match de confianza, tenga o no
+            # extractor registrado (los perfiles existen para las 23 familias).
+            try:
+                from document_intelligence.extractors.profile_driven import (
+                    profile_layout_hint,
+                )
+                hint = profile_layout_hint(
+                    path, documento_ctx,
+                    family_id=detectado_extractor.get("family_id", ""),
+                    lines=lineas,
+                )
+            except Exception as exc:  # noqa: BLE001 — fallback deliberado
+                hint = None
+                logger.debug(
+                    "Perfil de familia no aplicable (%s); heurística estándar.",
+                    exc,
+                )
+            if hint:
+                cols = []
+                for c in hint:
+                    oc = _LAYOUT_COLUMN_MAP.get(c)
+                    if oc is not None:
+                        cols.append(oc)
+                if len(cols) >= 2:
+                    column_order = cols
+                    layout_columns = list(hint)
+                    advertencias.append(
+                        f"Perfil de familia "
+                        f"({detectado_extractor.get('family_id', '')}): "
+                        f"{len(cols)} columnas "
+                        f"({', '.join(c.value for c in cols)})"
+                    )
+                else:
+                    advertencias.append(
+                        "Perfil de familia sin columnas aprovechables — "
+                        "usando heurística estándar."
+                    )
+            else:
+                advertencias.append(
+                    "Perfil de familia no aplicable o sin cobertura — "
+                    "usando heurística estándar."
+                )
+        elif ENABLE_DYNAMIC_LAYOUT:
+            from parsers.layout_detector import LayoutDetector
+            detector = LayoutDetector()
+            layout = detector.detect(lineas)
+            if layout.confidence >= 0.5:
+                layout_columns = list(layout.columns)
+                cols = []
+                for c in layout.columns:
+                    oc = _LAYOUT_COLUMN_MAP.get(c)
+                    if oc is not None:
+                        cols.append(oc)
+                if len(cols) >= 2:
+                    column_order = cols
+                    advertencias.append(
+                        f"LayoutDetector: {len(cols)} columnas "
+                        f"({', '.join(c.value for c in cols)}), "
+                        f"confianza={layout.confidence:.2f}"
+                    )
+                else:
+                    advertencias.append(
+                        "LayoutDetector detectó columnas pero ninguna "
+                        "fue reconocida — usando heurística estándar."
+                    )
+            else:
+                advertencias.append(
+                    f"LayoutDetector: confianza insuficiente "
+                    f"({layout.confidence:.2f}) — usando heurística estándar."
+                )
+
+        # 4. Parsear todas las líneas
         confianza = 0.75 if requirio_ocr else 1.0
         cuentas = []
-        advertencias = []
         for i, l in enumerate(lineas):
-            c = parsear_linea(l, i, formato_codigo, separador, confianza)
+            c = parsear_linea(l, i, formato_codigo, separador, confianza,
+                              column_order=column_order)
             if c:
                 cuentas.append(c)
 
-        cuadra_ok, totales, alertas_cuadre = verificar_cuadre_balance(cuentas)
-        advertencias.extend(alertas_cuadre)
+        # NOTA (Fase A): la resolución de tipo_cuenta se eliminó de ParserPDF.
+        # El parser es un extractor pasivo: NO escribe CuentaRaw.tipo_cuenta.
+        # La resolución contable ocurre fuera del parser (HomologationPipeline
+        # o reportes vía AccountTypeResolver).
+        # Ver reports/cuenta_raw_architecture/fase_a_impact_analysis.md.
 
         if requirio_ocr:
             advertencias.append(
@@ -533,7 +821,13 @@ class ParserPDF:
                 "Confianza de extracción reducida a 0.75 — recomendar revisión humana."
             )
 
-        return ResultadoParseo(
+        if not requirio_ocr and rotacion == 180 and context and context.rotation_confidence >= ROTATION_CORRECTION_THRESHOLD:
+            advertencias.append(
+                f"Documento corregido desde rotación 180° "
+                f"(confianza={context.rotation_confidence:.2f})"
+            )
+
+        resultado = ResultadoParseo(
             archivo=path.name,
             formato_codigo=formato_codigo,
             separador_miles=separador,
@@ -541,22 +835,124 @@ class ParserPDF:
             rotacion_aplicada=rotacion,
             cuentas=cuentas,
             advertencias=advertencias,
+            document_context=documento_ctx,
         )
+        self._anotar_extractor(resultado, detectado_extractor)
+        return resultado
 
-    def _extraer_lineas(self, path: Path) -> tuple[list[str], bool, int]:
+    def _anotar_extractor(
+        self,
+        resultado: ResultadoParseo,
+        detectado: Optional[dict] = None,
+    ) -> None:
+        """Sprint 34 — anota `extractor_info` SIN cambiar la extracción.
+
+        `detectado` es el resultado de la detección anticipada del Sprint 36
+        (si ENABLE_DYNAMIC_LAYOUT la computó antes del bucle de parseo);
+        si viene None se detecta aquí. Si la factory falla, `extractor_info`
+        queda en None y el parseo continúa exactamente igual (backward
+        compatibility / fallback obligatorio).
+        """
+        if resultado.document_context is None:
+            return
+        try:
+            if detectado is None:
+                from document_intelligence.extractors.factory import (
+                    SpecializedExtractorFactory,
+                )
+                detectado = SpecializedExtractorFactory().detect(
+                    resultado.document_context.pdf_path,
+                    resultado.document_context,
+                )
+            resultado.extractor_info = detectado
+        except Exception as exc:  # noqa: BLE001 — fallback deliberado
+            logger.debug(
+                "Anotación de extractor falló; se omite: %s", exc, exc_info=True,
+            )
+
+    def _analizar_documento(self, path: Path) -> Optional[Any]:
+        """Sprint 31 — análisis documental previo al parseo.
+
+        Nunca lanza excepción: si el análisis falla retorna None y el flujo
+        continúa exactamente como antes (backward compatibility).
+        """
+        try:
+            from document_intelligence.context import analyze_document_preview
+            return analyze_document_preview(path)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug(
+                "Document Intelligence no disponible (%s); "
+                "usando flujo clásico.", exc, exc_info=True,
+            )
+            return None
+
+    def _extraer_lineas(
+        self,
+        path: Path,
+        context: Optional[ExtractionContext] = None,
+    ) -> tuple[list[str], bool, int]:
+        # Sprint F: si un extractor especializado ya separó las líneas
+        # (p. ej. doble columna ACTIVO|PASIVO), usarlas directamente. Se
+        # reutiliza íntegramente el pipeline de parseo posterior (formato,
+        # separador, parsear_linea); no se duplica ninguna lógica.
+        if context is not None and context.lineas_presplit:
+            lineas = [l for l in context.lineas_presplit if l.strip()]
+            if lineas:
+                return lineas, False, 0
+
         lineas: list[str] = []
 
         with pdfplumber.open(path) as pdf:
             n_paginas = len(pdf.pages)
             for page in pdf.pages:
                 texto = page.extract_text() or ""
-                if texto.strip():
+                if not texto.strip():
+                    continue
+                # Sprint F — doble columna: si la página parece tener dos
+                # columnas de cuenta (pre-filtro barato sobre el texto plano),
+                # intentar la separación estructural por coordenadas (x0).
+                # Si el análisis no confirma, se conserva el texto plano tal
+                # cual (comportamiento universal idéntico).
+                page_lineas: Optional[list[str]] = None
+                try:
+                    from document_intelligence.extractors.double_column import (
+                        _prefiltro_sugiere,
+                        separar_page,
+                    )
+                    if _prefiltro_sugiere(texto):
+                        page_lineas = separar_page(page)
+                except Exception as exc:  # noqa: BLE001 — fallback seguro
+                    logger.debug(
+                        "Detección de doble columna no disponible (%s); "
+                        "universal.", exc,
+                    )
+                if page_lineas:
+                    lineas.extend(l for l in page_lineas if l.strip())
+                else:
                     lineas.extend(texto.split('\n'))
 
         if lineas:
+            if self._debe_corregir_rotacion(context):
+                lineas = [ParserPDF._reverse_line(l) for l in lineas]
+                return lineas, False, 180
             return lineas, False, 0
 
         return self._ocr_documento(path, n_paginas)
+
+    @staticmethod
+    def _debe_corregir_rotacion(context: Optional[ExtractionContext]) -> bool:
+        if not context:
+            return False
+        return (
+            context.rotation_hint == 180
+            and context.rotation_confidence >= ROTATION_CORRECTION_THRESHOLD
+        )
+
+    @staticmethod
+    def _reverse_line(linea: str) -> str:
+        if not linea.strip():
+            return linea
+        return " ".join(w[::-1] for w in linea.split())
 
     def _ocr_documento(self, path: Path, n_paginas: int) -> tuple[list[str], bool, int]:
         lineas: list[str] = []
@@ -590,6 +986,33 @@ class ParserPDF:
                 lineas.extend(texto.split('\n'))
 
         return lineas, True, rotacion_global or 0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EXCEL PARSER (extraído de app_validacion para eliminar import circular)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def parsear_excel(file) -> list[CuentaRaw]:
+    df = pd.read_excel(file, header=None)
+    cuentas = []
+    for i, row in df.iterrows():
+        vals = [v for v in row.tolist() if pd.notna(v)]
+        if not vals: continue
+        textos = [v for v in vals if isinstance(v, str)]
+        numeros = [v for v in vals if isinstance(v, (int, float))]
+        if not textos: continue
+        nombre = max(textos, key=len)
+        if len(nombre) < 3: continue
+        codigo = None
+        primer = str(vals[0])
+        if re.match(r'^[\d.\-]+$', primer) and primer != nombre:
+            codigo = primer
+        monto = numeros[-1] if numeros else None
+        cuentas.append(CuentaRaw(
+            linea=i, codigo=codigo, nombre=nombre, monto=monto,
+            origen_columna=OrigenColumna.DESCONOCIDO, confianza_extraccion=0.9
+        ))
+    return cuentas
 
 
 # ─────────────────────────────────────────────────────────────────────────────

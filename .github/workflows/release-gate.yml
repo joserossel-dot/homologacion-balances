@@ -1,0 +1,53 @@
+name: Release gate
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - codex/release-operativa-neon
+
+jobs:
+  certify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Poetry
+        run: pip install poetry
+      - name: Install dependencies
+        run: poetry install --sync --no-interaction
+      - name: Validate package and release configuration
+        run: |
+          poetry check
+          python -m py_compile app_validacion.py persistence/neon_store.py pipeline/homologation_pipeline.py
+          git diff --check
+      - name: Run certified functional suite
+        run: >-
+          pytest -q
+          tests/test_neon_store.py
+          tests/test_neon_preflight.py
+          tests/test_manual_revision.py
+          tests/test_learning_engine.py
+          tests/test_learning_runtime.py
+          tests/test_document_kb.py
+          tests/test_document_mining.py
+          tests/test_structure_engine.py
+          tests/test_coverage_engine.py
+          tests/test_self_qa_engine.py
+          tests/test_cmcc_pipeline.py
+          tests/test_cmcc_review_pipeline.py
+          tests/test_ui_knowledge_manager.py
+          -k "not test_no_se_crea_runtime_en_import"
+      - name: Require Neon secret
+        run: test -n "$DATABASE_URL"
+      - name: Verify Neon and pipeline knowledge
+        run: python scripts/neon_preflight.py
+      - name: Record certified commit
+        run: echo "CERTIFIED_COMMIT=$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
