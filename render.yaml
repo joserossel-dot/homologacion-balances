@@ -13,3 +13,5 @@ services:
         value: "1"
       - key: APP_RELEASE_BRANCH
         value: codex/release-operativa-neon
+      - key: QUALITY_CONTROL_ENFORCE_EXPORT
+        value: "false"

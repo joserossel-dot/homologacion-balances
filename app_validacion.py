@@ -2596,6 +2596,34 @@ def _mostrar_resumen_cuadratura(
             st.rerun()
 
 
+def _mostrar_control_calidad_operativo(control) -> None:
+    """Presenta Structure, Coverage y Self-QA sin mezclarlo con clasificación."""
+    st.subheader("🛡️ Control posterior de calidad")
+    mode_label = "Aplicado a exportación" if control.mode == "enforced" else "Shadow mode"
+    coverage = control.coverage
+    monetary = coverage.get("monetary", {})
+    semantic = coverage.get("semantic", {})
+    qa_state = control.self_qa.get("approval_state", "SIN_DATOS")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Estructura", control.structure.get("column_layout", "—"))
+    c2.metric("Cobertura monetaria", f"{float(monetary.get('coverage_pct', 0)):.1%}")
+    c3.metric("Cobertura de cuentas", f"{float(semantic.get('overall', 0)):.1%}")
+    c4.metric("Self-QA", str(qa_state).replace("_", " "))
+    st.caption(
+        f"{mode_label}. Los motores auxiliares sólo leen una copia del resultado; "
+        "no pueden modificar clasificaciones ni montos."
+    )
+    if control.requires_review:
+        st.warning("Revisión requerida: " + "; ".join(control.reasons) + ".")
+    else:
+        st.success("Los controles posteriores no detectaron motivos para reabrir la revisión.")
+    if not control.export_allowed:
+        st.error(
+            "Exportación bloqueada por el control posterior. Corrige los motivos "
+            "indicados en la cola de revisión y vuelve a este balance."
+        )
+
+
 def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
     clasificadas = df[(df['codigo_clasificado'] != '') & (df['codigo_clasificado'] != '__EXCLUIR__') & (~df['es_total'])].copy()
     clasificadas = _con_saldo_relevante(clasificadas)
@@ -2638,6 +2666,16 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
 
     diagnostico = _diagnosticar_cuadratura(df, agrupado, clasificadas)
     _mostrar_resumen_cuadratura(diagnostico, df, archivo_nombre)
+    from pipeline.operational_quality import analyze_operational_quality
+    enforce_export = os.environ.get(
+        "QUALITY_CONTROL_ENFORCE_EXPORT", "false",
+    ).strip().lower() in {"1", "true", "yes", "on"}
+    quality_control = analyze_operational_quality(
+        df, balance_squared=diagnostico['cuadra'],
+        enforce_export=enforce_export,
+    )
+    st.session_state.setdefault("quality_controls", {})[archivo_nombre] = quality_control
+    _mostrar_control_calidad_operativo(quality_control)
 
     resultado_periodo_display = resultado_periodo or 0.0
     r1, r2, r3 = st.columns(3)
@@ -2797,7 +2835,8 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
 
     st.download_button(
         "⬇️ Descargar balance normalizado (Excel)", data=buf.getvalue(),
-        file_name=f"{nombre_archivo}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        file_name=f"{nombre_archivo}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        disabled=not quality_control.export_allowed,
     )
 
     _validar_cuadre_utilidad(df, agrupado, clasificadas)
