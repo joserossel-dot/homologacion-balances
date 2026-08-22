@@ -1708,10 +1708,21 @@ def _extraer_cuentas(archivo) -> tuple[list[CuentaRaw], object]:
             st.session_state.extraction_pending[archivo.name] = resultado
             return [], document_context
         if certificacion is not None and certificacion.estado == 'certificada':
-            st.success(
-                "Extracción certificada: las ocho columnas reproducen los "
-                "subtotales impresos."
+            resultado_ejercicio = getattr(
+                certificacion, 'resultado_ejercicio', None,
             )
+            tipo_resultado = getattr(certificacion, 'tipo_resultado', None)
+            if resultado_ejercicio is not None and tipo_resultado:
+                st.success(
+                    "Extracción certificada: las cuentas reproducen el subtotal "
+                    f"y el cierre impreso. {tipo_resultado.capitalize()} del "
+                    f"ejercicio: ${abs(resultado_ejercicio):,.0f}."
+                )
+            else:
+                st.success(
+                    "Extracción certificada: las ocho columnas reproducen los "
+                    "subtotales impresos."
+                )
         elif certificacion is not None and certificacion.estado == 'parcial':
             st.warning(
                 "La ecuación final del balance está cuadrada, pero la extracción "

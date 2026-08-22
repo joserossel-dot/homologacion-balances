@@ -544,6 +544,48 @@ def test_certificacion_valida_totales_iguales_si_estan_presentes():
     assert certification.totales_finales_validos is True
 
 
+def test_certificacion_reconoce_resultado_puente_hasta_sumas_iguales():
+    details = [
+        parser.parsear_linea(
+            "110101 ACTIVO 100 0 100 0 100 0 0 0",
+            1, parser.FormatoCodigo.COMPACTO, ".",
+        ),
+        parser.parsear_linea(
+            "210101 PASIVO 0 60 0 60 0 60 0 0",
+            2, parser.FormatoCodigo.COMPACTO, ".",
+        ),
+        parser.parsear_linea(
+            "310101 GANANCIA 0 40 0 40 0 0 0 40",
+            3, parser.FormatoCodigo.COMPACTO, ".",
+        ),
+    ]
+    subtotal = parser.parsear_linea(
+        "SUMAS 100 100 100 100 100 60 0 40",
+        4, parser.FormatoCodigo.COMPACTO, ".",
+    )
+    bridge = parser.parsear_linea(
+        "PERDIDA O GANANCIA 0 0 0 0 0 40 40 0",
+        5, parser.FormatoCodigo.COMPACTO, ".",
+    )
+    final = parser.parsear_linea(
+        "SUMAS IGUALES 100 100 100 100 100 100 40 40",
+        6, parser.FormatoCodigo.COMPACTO, ".",
+    )
+
+    certification = parser.certificar_extraccion_columnas(
+        [*details, subtotal, bridge, final], metodo="coordinates_10_columns",
+    )
+
+    assert bridge.es_total is True
+    assert certification.estado == "certificada"
+    assert certification.diferencias == {
+        column: 0.0 for column in parser.RAW_MONETARY_COLUMNS
+    }
+    assert certification.totales_finales_validos is True
+    assert certification.resultado_ejercicio == 40
+    assert certification.tipo_resultado == "utilidad"
+
+
 def test_gate_documental_detiene_anexo_identificado_como_otro():
     signature = SimpleNamespace(
         document_type=SimpleNamespace(value="OTRO"),

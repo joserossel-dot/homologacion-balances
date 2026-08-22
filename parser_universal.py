@@ -323,6 +323,8 @@ class CertificacionExtraccion:
     filas_evaluadas: int = 0
     filas_inconsistentes: list[int] = field(default_factory=list)
     totales_finales_validos: Optional[bool] = None
+    resultado_ejercicio: Optional[float] = None
+    tipo_resultado: Optional[str] = None
 
 
 @dataclass
@@ -799,6 +801,7 @@ def certificar_extraccion_columnas(
         if cuenta.es_total and cuenta.montos_columnas
         and (
             "totales iguales" in normalized_name(cuenta)
+            or "sumas iguales" in normalized_name(cuenta)
             or normalized_name(cuenta) in {"totales", "total general"}
         )
     ]
@@ -817,9 +820,7 @@ def certificar_extraccion_columnas(
         if cuenta.es_total and cuenta.montos_columnas
         and (
             "subtotal" in normalized_name(cuenta)
-            or normalized_name(cuenta) in {
-                "sumas", "sumas iguales",
-            }
+            or normalized_name(cuenta) == "sumas"
             or normalized_name(cuenta).startswith("total acumulado")
         )
     ]
@@ -866,6 +867,14 @@ def certificar_extraccion_columnas(
     ]
     subtotal_referencia = acumulados[-1] if acumulados else candidatos[-1]
     total_impreso = subtotal_referencia.montos_columnas
+    puentes_resultado = [
+        cuenta for cuenta in cuentas
+        if cuenta.es_total and cuenta.montos_columnas
+        and normalized_name(cuenta) in {
+            "perdida o ganancia", "resultado", "utilidad",
+            "perdida neta", "perdida neto",
+        }
+    ]
     calculados = {column: 0.0 for column in RAW_MONETARY_COLUMNS}
     filas = 0
     for cuenta in filas_detalle:
@@ -900,7 +909,51 @@ def certificar_extraccion_columnas(
         )
     if totales_finales_validos is False:
         razones.append("La fila TOTALES IGUALES no está cuadrada en sus pares de columnas.")
-    failed = bool(fallidas or filas_inconsistentes or totales_finales_validos is False)
+    resultado_ejercicio: Optional[float] = None
+    tipo_resultado: Optional[str] = None
+    puente_invalido = False
+    if puentes_resultado:
+        puente = puentes_resultado[-1]
+        resultado_balance = (
+            float(total_impreso.get("activo", 0.0) or 0.0)
+            - float(total_impreso.get("pasivo", 0.0) or 0.0)
+        )
+        resultado_estado = (
+            float(total_impreso.get("ganancia", 0.0) or 0.0)
+            - float(total_impreso.get("perdida", 0.0) or 0.0)
+        )
+        if abs(resultado_balance - resultado_estado) > tolerancia_absoluta:
+            puente_invalido = True
+            razones.append(
+                "El resultado derivado del balance no coincide con el resultado "
+                "derivado de Pérdidas y Ganancias."
+            )
+        else:
+            resultado_ejercicio = round(resultado_balance, 2)
+            tipo_resultado = "utilidad" if resultado_balance >= 0 else "perdida"
+
+        if finales:
+            final_values = finales[-1].montos_columnas
+            bridge_values = puente.montos_columnas
+            cierre_reproducido = all(
+                abs(
+                    float(total_impreso.get(column, 0.0) or 0.0)
+                    + float(bridge_values.get(column, 0.0) or 0.0)
+                    - float(final_values.get(column, 0.0) or 0.0)
+                ) <= tolerancia_absoluta
+                for column in RAW_MONETARY_COLUMNS
+            )
+            if not cierre_reproducido:
+                puente_invalido = True
+                razones.append(
+                    "La fila PÉRDIDA O GANANCIA no conecta el subtotal con "
+                    "la fila SUMAS IGUALES."
+                )
+
+    failed = bool(
+        fallidas or filas_inconsistentes
+        or totales_finales_validos is False or puente_invalido
+    )
     filas_derivadas = [cuenta.linea for cuenta in filas_detalle if cuenta.columnas_derivadas]
     total_derivado = bool(subtotal_referencia.columnas_derivadas)
     if (filas_derivadas or total_derivado) and not failed:
@@ -922,6 +975,8 @@ def certificar_extraccion_columnas(
         filas_evaluadas=filas,
         filas_inconsistentes=filas_inconsistentes,
         totales_finales_validos=totales_finales_validos,
+        resultado_ejercicio=resultado_ejercicio,
+        tipo_resultado=tipo_resultado,
     )
 
 
@@ -1168,7 +1223,8 @@ def normalizar_token_ocr(token: str) -> str:
     return re.sub(r"(?<=\d):(?=\d)", ".", token)
 
 PATRON_TOTAL = re.compile(
-    r'^(total(es)?|sub-?total(es)?|sumas?( iguales)?|resultado|utilidad|perdida neto)\b',
+    r'^(total(es)?|sub-?total(es)?|sumas?( iguales)?|resultado|utilidad|'
+    r'perdida(?: o ganancia| net[ao])?)\b',
     re.IGNORECASE
 )
 
