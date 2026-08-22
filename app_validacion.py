@@ -1563,6 +1563,8 @@ def _aplicar_correcciones_extraccion(
         if row is None or not cuenta.montos_columnas:
             corrected.append(cuenta)
             continue
+        if bool(row.get("excluir", False)):
+            continue
         amounts = {
             column: numeric(row.get(column, 0))
             for column in RAW_MONETARY_COLUMNS
@@ -1582,6 +1584,7 @@ def _aplicar_correcciones_extraccion(
             montos_columnas=amounts,
             monto=amount,
             origen_columna=origin,
+            es_total=bool(row.get("total", cuenta.es_total)),
             columnas_derivadas=derived,
         ))
     certification = certificar_extraccion_columnas(
@@ -1596,9 +1599,8 @@ def _mostrar_correccion_extraccion(filename: str) -> None:
     if resultado is None:
         return
     st.error(
-        "La lectura OCR no pudo certificar las ocho columnas. Corrige los "
-        "importes marcados usando el documento original; la clasificación "
-        "permanecerá bloqueada hasta recuperar la cuadratura."
+        "La extracción aún no puede certificarse. La clasificación está pausada "
+        "para evitar que una lectura incorrecta llegue al balance homologado."
     )
     rows = []
     certification = getattr(resultado, "certificacion_extraccion", None)
@@ -1611,6 +1613,7 @@ def _mostrar_correccion_extraccion(filename: str) -> None:
             "codigo": cuenta.codigo or "",
             "cuenta": cuenta.nombre,
             "inconsistente": int(cuenta.linea) in inconsistent,
+            "excluir": False,
             **{
                 column: float(cuenta.montos_columnas.get(column, 0.0) or 0.0)
                 for column in RAW_MONETARY_COLUMNS
@@ -1627,17 +1630,64 @@ def _mostrar_correccion_extraccion(filename: str) -> None:
     c3.metric("Estado", "Bloqueada")
     if certification is not None and certification.razones:
         st.caption(" ".join(certification.razones))
+        diferencias = getattr(certification, "diferencias", {}) or {}
+        impresos = getattr(certification, "totales_impresos", {}) or {}
+        calculados = getattr(certification, "totales_calculados", {}) or {}
+        columnas_con_diferencia = [
+            column for column, value in diferencias.items() if abs(value) > 10
+        ]
+        if columnas_con_diferencia:
+            st.markdown("#### Qué no coincide")
+            labels = {
+                "debitos": "Débitos", "creditos": "Créditos",
+                "saldo_deudor": "Saldo deudor", "saldo_acreedor": "Saldo acreedor",
+                "activo": "Activo", "pasivo": "Pasivo",
+                "perdida": "Pérdidas", "ganancia": "Ganancias",
+            }
+            st.dataframe(pd.DataFrame([
+                {
+                    "Columna": labels.get(column, column),
+                    "Suma de cuentas": float(calculados.get(column, 0) or 0),
+                    "Control extraído": float(impresos.get(column, 0) or 0),
+                    "Diferencia": float(diferencias[column]),
+                }
+                for column in columnas_con_diferencia
+            ]), use_container_width=True, hide_index=True)
+
+    st.markdown("#### Qué debe hacer el analista")
+    st.markdown(
+        "1. Revise primero las filas señaladas en **Revisar** contra el PDF.  \n"
+        "2. Si una fila es un pie de página, firma o texto legal, marque **Excluir**.  \n"
+        "3. Si una fila corresponde a SUBTOTAL, UTILIDAD/PÉRDIDA o TOTALES, "
+        "active **Subtotal/total**.  \n"
+        "4. Corrija una cifra únicamente cuando sea distinta de la impresa. "
+        "Después pulse **Verificar y continuar**."
+    )
+    if inconsistent:
+        nombres_inconsistentes = source[source["inconsistente"]][
+            ["linea", "cuenta"]
+        ].copy()
+        st.warning(
+            "Estas son las filas concretas que rompen una identidad contable:"
+        )
+        st.dataframe(
+            nombres_inconsistentes.rename(columns={"linea": "Fila", "cuenta": "Cuenta"}),
+            use_container_width=True, hide_index=True,
+        )
     edited = st.data_editor(
         source,
         hide_index=True,
         use_container_width=True,
-        disabled=["linea", "codigo", "cuenta", "inconsistente", "total"],
+        disabled=["linea", "codigo", "cuenta", "inconsistente"],
         key=f"extraction_editor_{filename}",
         column_config={
             "linea": st.column_config.NumberColumn("Fila", format="%d"),
             "codigo": "Código",
             "cuenta": "Cuenta",
             "inconsistente": st.column_config.CheckboxColumn("Revisar"),
+            "excluir": st.column_config.CheckboxColumn(
+                "Excluir", help="Úselo sólo para pies, firmas, notas o texto que no sea una cuenta."
+            ),
             "debitos": st.column_config.NumberColumn("Debe", format="%.0f"),
             "creditos": st.column_config.NumberColumn("Haber", format="%.0f"),
             "saldo_deudor": st.column_config.NumberColumn("Saldo deudor", format="%.0f"),
@@ -1646,7 +1696,10 @@ def _mostrar_correccion_extraccion(filename: str) -> None:
             "pasivo": st.column_config.NumberColumn("Pasivo", format="%.0f"),
             "perdida": st.column_config.NumberColumn("Pérdidas", format="%.0f"),
             "ganancia": st.column_config.NumberColumn("Ganancias", format="%.0f"),
-            "total": "Subtotal/total",
+            "total": st.column_config.CheckboxColumn(
+                "Subtotal/total",
+                help="Marque filas de control; no se sumarán como cuentas.",
+            ),
         },
     )
     if st.button("🔎 Verificar correcciones y continuar", type="primary"):
@@ -1722,6 +1775,16 @@ def _extraer_cuentas(archivo) -> tuple[list[CuentaRaw], object]:
                 st.success(
                     "Extracción certificada: las ocho columnas reproducen los "
                     "subtotales impresos."
+                )
+            reconstruidas = getattr(
+                certificacion, 'columnas_total_reconstruidas', [],
+            )
+            if reconstruidas:
+                st.info(
+                    "El PDF truncaba el último dígito del control de "
+                    + " y ".join(reconstruidas)
+                    + ". El sistema lo reconstruyó con la suma exacta de las "
+                    "cuentas y verificó las otras seis columnas."
                 )
         elif certificacion is not None and certificacion.estado == 'parcial':
             st.warning(

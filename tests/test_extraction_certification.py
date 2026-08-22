@@ -586,6 +586,45 @@ def test_certificacion_reconoce_resultado_puente_hasta_sumas_iguales():
     assert certification.tipo_resultado == "utilidad"
 
 
+def test_certificacion_reconstruye_digito_final_truncado_en_controles_pdf():
+    rows = [
+        parser.parsear_linea(
+            "CAJA 10.764.254.525 0 10.764.254.525 0 10.764.254.525 0 0 0",
+            1, parser.FormatoCodigo.SIN_CODIGO, ".",
+        ),
+        parser.parsear_linea(
+            "CAPITAL 0 10.764.254.525 0 10.764.254.525 0 10.764.254.525 0 0",
+            2, parser.FormatoCodigo.SIN_CODIGO, ".",
+        ),
+        parser.parsear_linea(
+            "SUBTOTAL 1.076.425.452 1.076.425.452 10.764.254.525 10.764.254.525 "
+            "10.764.254.525 10.764.254.525 0 0",
+            3, parser.FormatoCodigo.SIN_CODIGO, ".",
+        ),
+        parser.parsear_linea(
+            "TOTALES 1.076.425.452 1.076.425.452 10.764.254.525 10.764.254.525 "
+            "10.764.254.525 10.764.254.525 0 0",
+            4, parser.FormatoCodigo.SIN_CODIGO, ".",
+        ),
+    ]
+
+    certification = parser.certificar_extraccion_columnas(rows)
+
+    assert certification.estado == "certificada"
+    assert certification.diferencias["debitos"] == 0
+    assert certification.diferencias["creditos"] == 0
+    assert certification.columnas_total_reconstruidas == ["debitos", "creditos"]
+
+
+def test_descarta_pie_articulo_codigo_tributario_con_numero_en_columna():
+    row = parser.parsear_linea(
+        "Artículo Código Tributario : Balance confeccionado 0 0 0 0 100 0 0 0",
+        61, parser.FormatoCodigo.SIN_CODIGO, ".",
+    )
+
+    assert row is None
+
+
 def test_gate_documental_detiene_anexo_identificado_como_otro():
     signature = SimpleNamespace(
         document_type=SimpleNamespace(value="OTRO"),

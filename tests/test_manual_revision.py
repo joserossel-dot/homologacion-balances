@@ -7,6 +7,7 @@ import streamlit as st
 from app_validacion import (
     MotorHibridoLocal,
     _alternativas_revision,
+    _aplicar_correcciones_extraccion,
     _codigo_compatible_con_origen,
     _con_saldo_relevante,
     _diagnosticar_cuadratura,
@@ -18,6 +19,7 @@ from app_validacion import (
     _reabrir_incompatibles,
     propagar_clasificacion_resultados,
 )
+from parser_universal import CuentaRaw, OrigenColumna
 from reglas_especiales import ProcesadorReglasEspeciales, calcular_patrimonio_efectivo
 
 
@@ -69,6 +71,43 @@ class TestAlternativasRevision:
 
         assert [item['codigo'] for item in alternativas] == ['AC.03']
         assert alternativas[0]['score'] == 1.0
+
+
+def test_editor_excluye_ruido_y_permite_marcar_control():
+    cuentas = [
+        CuentaRaw(
+            linea=1, codigo=None, nombre="Artículo Código Tributario",
+            monto=100, origen_columna=OrigenColumna.ACTIVO,
+            montos_columnas={
+                "debitos": 0, "creditos": 0, "saldo_deudor": 0,
+                "saldo_acreedor": 0, "activo": 100, "pasivo": 0,
+                "perdida": 0, "ganancia": 0,
+            },
+        ),
+        CuentaRaw(
+            linea=2, codigo=None, nombre="SUMAS", monto=100,
+            origen_columna=OrigenColumna.ACTIVO,
+            montos_columnas={
+                "debitos": 100, "creditos": 0, "saldo_deudor": 100,
+                "saldo_acreedor": 0, "activo": 100, "pasivo": 0,
+                "perdida": 0, "ganancia": 0,
+            },
+        ),
+    ]
+    edited = pd.DataFrame([
+        {"linea": 1, "excluir": True, "total": False},
+        {
+            "linea": 2, "excluir": False, "total": True,
+            "debitos": 100, "creditos": 0, "saldo_deudor": 100,
+            "saldo_acreedor": 0, "activo": 100, "pasivo": 0,
+            "perdida": 0, "ganancia": 0,
+        },
+    ])
+
+    corrected, _ = _aplicar_correcciones_extraccion(cuentas, edited)
+
+    assert [cuenta.nombre for cuenta in corrected] == ["SUMAS"]
+    assert corrected[0].es_total is True
 
 
 def _nombre_mostrar(row: pd.Series) -> str:

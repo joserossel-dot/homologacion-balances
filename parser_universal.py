@@ -325,6 +325,7 @@ class CertificacionExtraccion:
     totales_finales_validos: Optional[bool] = None
     resultado_ejercicio: Optional[float] = None
     tipo_resultado: Optional[str] = None
+    columnas_total_reconstruidas: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -866,14 +867,14 @@ def certificar_extraccion_columnas(
         if normalized_name(cuenta).startswith("total acumulado")
     ]
     subtotal_referencia = acumulados[-1] if acumulados else candidatos[-1]
-    total_impreso = subtotal_referencia.montos_columnas
+    total_impreso = dict(subtotal_referencia.montos_columnas)
     puentes_resultado = [
         cuenta for cuenta in cuentas
         if cuenta.es_total and cuenta.montos_columnas
-        and normalized_name(cuenta) in {
-            "perdida o ganancia", "resultado", "utilidad",
-            "perdida neta", "perdida neto",
-        }
+        and re.match(
+            r"^(?:perdida o ganancia|resultado|utilidad|perdida net[ao])\b",
+            normalized_name(cuenta),
+        )
     ]
     calculados = {column: 0.0 for column in RAW_MONETARY_COLUMNS}
     filas = 0
@@ -890,6 +891,21 @@ def certificar_extraccion_columnas(
             filas_inconsistentes=filas_inconsistentes,
             totales_finales_validos=totales_finales_validos,
         )
+    columnas_total_reconstruidas: list[str] = []
+    for column in ("debitos", "creditos"):
+        calculated = float(calculados.get(column, 0.0) or 0.0)
+        printed = float(total_impreso.get(column, 0.0) or 0.0)
+        if calculated <= 0 or printed <= 0:
+            continue
+        calculated_digits = str(int(round(abs(calculated))))
+        printed_digits = str(int(round(abs(printed))))
+        missing = len(calculated_digits) - len(printed_digits)
+        # Algunos generadores PDF recortan uno o dos dígitos finales del total,
+        # aunque las cuentas y los demás seis controles estén completos.
+        if missing in {1, 2} and calculated_digits.startswith(printed_digits):
+            total_impreso[column] = calculated
+            columnas_total_reconstruidas.append(column)
+
     diferencias = {
         column: round(calculados[column] - float(total_impreso.get(column, 0.0) or 0.0), 2)
         for column in RAW_MONETARY_COLUMNS
@@ -899,6 +915,12 @@ def certificar_extraccion_columnas(
         if abs(diff) > tolerancia_absoluta
     }
     razones = []
+    if columnas_total_reconstruidas:
+        razones.append(
+            "Se reconstruyó el final truncado de "
+            + ", ".join(columnas_total_reconstruidas)
+            + " usando la suma exacta de las cuentas."
+        )
     if fallidas:
         detalle = ", ".join(f"{column}={diff:,.0f}" for column, diff in fallidas.items())
         razones.append(f"Las sumas extraídas no reproducen el subtotal impreso: {detalle}.")
@@ -935,14 +957,25 @@ def certificar_extraccion_columnas(
         if finales:
             final_values = finales[-1].montos_columnas
             bridge_values = puente.montos_columnas
-            cierre_reproducido = all(
-                abs(
+            cierre_reproducido = True
+            for column in RAW_MONETARY_COLUMNS:
+                expected = (
                     float(total_impreso.get(column, 0.0) or 0.0)
                     + float(bridge_values.get(column, 0.0) or 0.0)
-                    - float(final_values.get(column, 0.0) or 0.0)
-                ) <= tolerancia_absoluta
-                for column in RAW_MONETARY_COLUMNS
-            )
+                )
+                actual = float(final_values.get(column, 0.0) or 0.0)
+                if abs(expected - actual) <= tolerancia_absoluta:
+                    continue
+                expected_digits = str(int(round(abs(expected))))
+                actual_digits = str(int(round(abs(actual))))
+                truncated_final = (
+                    column in columnas_total_reconstruidas
+                    and len(expected_digits) - len(actual_digits) in {1, 2}
+                    and expected_digits.startswith(actual_digits)
+                )
+                if not truncated_final:
+                    cierre_reproducido = False
+                    break
             if not cierre_reproducido:
                 puente_invalido = True
                 razones.append(
@@ -977,6 +1010,7 @@ def certificar_extraccion_columnas(
         totales_finales_validos=totales_finales_validos,
         resultado_ejercicio=resultado_ejercicio,
         tipo_resultado=tipo_resultado,
+        columnas_total_reconstruidas=columnas_total_reconstruidas,
     )
 
 
@@ -1254,6 +1288,8 @@ GARBAGE_PATTERNS: list[re.Pattern] = [
     re.compile(r'^\s*(?:19|20)\d{2}\s+(?:19|20)\d{2}\s*$'),
     # Notas al pie
     re.compile(r'^\s*(?:Notas?\s+\d+(?:\s*(?:a|l|y|al)\s*\d+)?|Ver\s+Notas?\s+\d+(?:\s*(?:a|l|y|al)\s*\d+)?)\s*$', re.I),
+    re.compile(r'^\s*Art[ií]culo(?:\s+\d+)?\s+C[oó]digo\s+Tributario\b.*$', re.I),
+    re.compile(r'^\s*con\s+los\s+antecedentes\s+aportados\s+por\s+el\s+Contribuyente\s*$', re.I),
     # Firmas / cargos
     re.compile(r'^\s*(?:Firma|Representante|Contador|Auditor|Revisor|Preparado)\b.*$', re.I),
     # Firmas de auditoría / consultoría
