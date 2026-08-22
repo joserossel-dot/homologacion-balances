@@ -24,6 +24,7 @@ import json
 import os
 import re
 import time
+from dataclasses import replace
 from pathlib import Path
 
 import pandas as pd
@@ -45,7 +46,10 @@ from reglas_especiales import (
     es_cuenta_socios,
 )
 from config.regex_rules import REGLAS_REGEX, REGLAS_COMPILADAS
-from parser_universal import ParserPDF, CuentaRaw, OrigenColumna, parsear_excel
+from parser_universal import (
+    ParserPDF, CuentaRaw, OrigenColumna, RAW_MONETARY_COLUMNS,
+    certificar_extraccion_columnas, parsear_excel,
+)
 from parsers.column_interpretation import es_ingreso as es_ingreso_col, es_gasto as es_gasto_col
 from parsers.account_type_resolver import is_contra_asset_name
 from extractor_metadata import extraer_metadata, MetadataEmpresa
@@ -827,6 +831,10 @@ def main():
         st.session_state.metadata_files = {}
     if 'document_intel' not in st.session_state:
         st.session_state.document_intel = {}
+    if 'extraction_pending' not in st.session_state:
+        st.session_state.extraction_pending = {}
+    if 'extraction_resolved' not in st.session_state:
+        st.session_state.extraction_resolved = {}
     if 'correcciones' not in st.session_state:
         st.session_state.correcciones = []
 
@@ -868,6 +876,8 @@ def main():
         st.info("⬆️ Carga uno o más archivos en la barra lateral para comenzar.")
         st.session_state.resultados = {}
         st.session_state.metadata_files = {}
+        st.session_state.extraction_pending = {}
+        st.session_state.extraction_resolved = {}
         st.session_state.metadata_confirmada = False
         _mostrar_resumen_catalogo(catalogo)
         return
@@ -917,6 +927,11 @@ def main():
         if k not in nombres_subidos:
             st.session_state.resultados.pop(k, None)
             st.session_state.metadata_files.pop(k, None)
+    for state_key in ('extraction_pending', 'extraction_resolved'):
+        state = st.session_state.get(state_key, {})
+        for k in list(state.keys()):
+            if k not in nombres_subidos:
+                state.pop(k, None)
 
     # ── Procesar archivos nuevos ──────────────────────────────────────────────
     if USE_LEGACY_ENGINE:
@@ -928,7 +943,11 @@ def main():
                     meta_indiv = extraer_metadata(lineas_encabezado)
                     st.session_state.metadata_files[archivo.name] = meta_indiv
 
-                    cuentas, doc_ctx = _extraer_cuentas(archivo)
+                    if archivo.name in st.session_state.extraction_resolved:
+                        cuentas = st.session_state.extraction_resolved.pop(archivo.name)
+                        doc_ctx = st.session_state.document_intel.get(archivo.name)
+                    else:
+                        cuentas, doc_ctx = _extraer_cuentas(archivo)
                     st.session_state.document_intel[archivo.name] = doc_ctx
                     motor = MotorHibridoLocal(st.session_state.diccionario)
                     filas = []
@@ -969,7 +988,9 @@ def main():
                             'codigo_clasificado': r['codigo_estandar'] or '',
                             'metodo': r['metodo'],
                             'confianza': r['confianza'],
-                            'requiere_revision': r['requiere_revision'],
+                            'requiere_revision': (
+                                r['requiere_revision'] or bool(c.columnas_derivadas)
+                            ),
                             'nota': r.get('nota_regla_especial', ''),
                             'confianza_extraccion': c.confianza_extraccion,
                             'origen_columna_display': _etiqueta_origen(c.origen_columna, c.monto),
@@ -1042,7 +1063,11 @@ def main():
                     meta_indiv = extraer_metadata(lineas_encabezado)
                     st.session_state.metadata_files[archivo.name] = meta_indiv
 
-                    cuentas, doc_ctx = _extraer_cuentas(archivo)
+                    if archivo.name in st.session_state.extraction_resolved:
+                        cuentas = st.session_state.extraction_resolved.pop(archivo.name)
+                        doc_ctx = st.session_state.document_intel.get(archivo.name)
+                    else:
+                        cuentas, doc_ctx = _extraer_cuentas(archivo)
                     st.session_state.document_intel[archivo.name] = doc_ctx
                     total_cuentas = len(cuentas)
                     filas = []
@@ -1114,6 +1139,7 @@ def main():
                             requiere_revision = (
                                 confianza < UMBRAL_REVISION
                                 or (adjustment.aplica and adjustment.requiere_revision)
+                                or bool(c.columnas_derivadas)
                             )
                             nota = adjustment.nota if adjustment.aplica else ""
                             clasif_evidencia = classification.get("reason", "")
@@ -1240,7 +1266,10 @@ def main():
         meta_activo = None
 
     if df.empty:
-        st.warning(f"No se extrajeron cuentas del archivo {archivo_activo_name}.")
+        if archivo_activo_name in st.session_state.extraction_pending:
+            _mostrar_correccion_extraccion(archivo_activo_name)
+        else:
+            st.warning(f"No se extrajeron cuentas del archivo {archivo_activo_name}.")
         st.stop()
 
     with st.container(border=True):
@@ -1437,6 +1466,130 @@ def _documento_no_es_balance(signature) -> bool:
     )
 
 
+def _aplicar_correcciones_extraccion(
+    cuentas: list[CuentaRaw], edited: pd.DataFrame,
+) -> tuple[list[CuentaRaw], object]:
+    """Aplica importes editados y vuelve a certificar las ocho columnas."""
+    rows = {int(row["linea"]): row for _, row in edited.iterrows()}
+    corrected: list[CuentaRaw] = []
+    origin_by_column = {
+        "activo": OrigenColumna.ACTIVO,
+        "pasivo": OrigenColumna.PASIVO,
+        "perdida": OrigenColumna.PERDIDA,
+        "ganancia": OrigenColumna.GANANCIA,
+    }
+
+    def numeric(value) -> float:
+        parsed = pd.to_numeric(value, errors="coerce")
+        return 0.0 if pd.isna(parsed) else float(parsed)
+
+    for cuenta in cuentas:
+        row = rows.get(int(cuenta.linea))
+        if row is None or not cuenta.montos_columnas:
+            corrected.append(cuenta)
+            continue
+        amounts = {
+            column: numeric(row.get(column, 0))
+            for column in RAW_MONETARY_COLUMNS
+        }
+        amount = None
+        origin = OrigenColumna.DESCONOCIDO
+        for column in ("activo", "pasivo", "perdida", "ganancia"):
+            if amounts[column] != 0:
+                amount = amounts[column]
+                origin = origin_by_column[column]
+                break
+        derived = list(cuenta.columnas_derivadas)
+        if amounts != cuenta.montos_columnas and "correccion_humana" not in derived:
+            derived.append("correccion_humana")
+        corrected.append(replace(
+            cuenta,
+            montos_columnas=amounts,
+            monto=amount,
+            origen_columna=origin,
+            columnas_derivadas=derived,
+        ))
+    certification = certificar_extraccion_columnas(
+        corrected, metodo="revision_humana_8_columnas",
+    )
+    return corrected, certification
+
+
+def _mostrar_correccion_extraccion(filename: str) -> None:
+    """Editor seguro previo a homologación para extracciones OCR fallidas."""
+    resultado = st.session_state.extraction_pending.get(filename)
+    if resultado is None:
+        return
+    st.error(
+        "La lectura OCR no pudo certificar las ocho columnas. Corrige los "
+        "importes marcados usando el documento original; la clasificación "
+        "permanecerá bloqueada hasta recuperar la cuadratura."
+    )
+    rows = []
+    certification = getattr(resultado, "certificacion_extraccion", None)
+    inconsistent = set(getattr(certification, "filas_inconsistentes", []) or [])
+    for cuenta in resultado.cuentas:
+        if not cuenta.montos_columnas:
+            continue
+        rows.append({
+            "linea": cuenta.linea,
+            "codigo": cuenta.codigo or "",
+            "cuenta": cuenta.nombre,
+            "inconsistente": int(cuenta.linea) in inconsistent,
+            **{
+                column: float(cuenta.montos_columnas.get(column, 0.0) or 0.0)
+                for column in RAW_MONETARY_COLUMNS
+            },
+            "total": bool(cuenta.es_total),
+        })
+    if not rows:
+        st.warning("OCR no produjo filas tabulares que puedan corregirse.")
+        return
+    source = pd.DataFrame(rows)
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Filas extraídas", len(source))
+    c2.metric("Filas inconsistentes", len(inconsistent))
+    c3.metric("Estado", "Bloqueada")
+    if certification is not None and certification.razones:
+        st.caption(" ".join(certification.razones))
+    edited = st.data_editor(
+        source,
+        hide_index=True,
+        use_container_width=True,
+        disabled=["linea", "codigo", "cuenta", "inconsistente", "total"],
+        key=f"extraction_editor_{filename}",
+        column_config={
+            "linea": st.column_config.NumberColumn("Fila", format="%d"),
+            "codigo": "Código",
+            "cuenta": "Cuenta",
+            "inconsistente": st.column_config.CheckboxColumn("Revisar"),
+            "debitos": st.column_config.NumberColumn("Debe", format="%.0f"),
+            "creditos": st.column_config.NumberColumn("Haber", format="%.0f"),
+            "saldo_deudor": st.column_config.NumberColumn("Saldo deudor", format="%.0f"),
+            "saldo_acreedor": st.column_config.NumberColumn("Saldo acreedor", format="%.0f"),
+            "activo": st.column_config.NumberColumn("Activo", format="%.0f"),
+            "pasivo": st.column_config.NumberColumn("Pasivo", format="%.0f"),
+            "perdida": st.column_config.NumberColumn("Pérdidas", format="%.0f"),
+            "ganancia": st.column_config.NumberColumn("Ganancias", format="%.0f"),
+            "total": "Subtotal/total",
+        },
+    )
+    if st.button("🔎 Verificar correcciones y continuar", type="primary"):
+        corrected, certification = _aplicar_correcciones_extraccion(
+            resultado.cuentas, edited,
+        )
+        if certification.estado == "fallida":
+            st.error("La extracción aún no cuadra; no se habilitó la homologación.")
+            if certification.razones:
+                st.caption(" ".join(certification.razones))
+        else:
+            st.session_state.extraction_resolved[filename] = corrected
+            st.session_state.extraction_pending.pop(filename, None)
+            st.session_state.resultados.pop(filename, None)
+            st.success("Extracción validada. Iniciando clasificación…")
+            st.rerun()
+
+
 def _extraer_cuentas(archivo) -> tuple[list[CuentaRaw], object]:
     """Extrae cuentas y devuelve (cuentas, document_context).
 
@@ -1477,6 +1630,7 @@ def _extraer_cuentas(archivo) -> tuple[list[CuentaRaw], object]:
                     f"Filas con inconsistencias internas: {muestra}"
                     + ("…" if len(certificacion.filas_inconsistentes) > 12 else "")
                 )
+            st.session_state.extraction_pending[archivo.name] = resultado
             return [], document_context
         if certificacion is not None and certificacion.estado == 'certificada':
             st.success(

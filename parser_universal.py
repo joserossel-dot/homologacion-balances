@@ -181,6 +181,17 @@ def _extraer_tabla_balance_por_coordenadas(
             xmid = (float(word["x0"]) + float(word["x1"])) / 2
             token_normalizado = normalizar_token_ocr(token).replace("$", "")
             es_monto = token == "-" or bool(PATRON_MONTOS.fullmatch(token_normalizado))
+            # En tablas escaneadas Tesseract suele leer el cero aislado como
+            # pequeños glifos sin dígitos (``o``, ``]``, ``»``...). Sólo los
+            # aceptamos dentro de la vecindad de una columna monetaria para no
+            # convertir palabras legítimas del nombre en importes.
+            distancia_columna = min(abs(xmid - center) for center in amount_centers)
+            es_cero_en_celda = (
+                distancia_columna <= 32
+                and _es_token_cero_ocr_en_celda(token)
+            )
+            if es_cero_en_celda:
+                es_monto = True
             if not es_monto or float(word["x1"]) < text_boundary:
                 text_words.append(word)
                 continue
@@ -1141,12 +1152,20 @@ PATRONES_CODIGO_AUXILIARES = (_PATRON_AUX_UNISEP, _PATRON_AUX_CONCATENADO)
 
 PATRON_MONTOS = re.compile(r'(-?\(?[\d.,]{1,18}\)?)')
 _OCR_CERO = re.compile(r'^[oO]$')
+_OCR_CERO_EN_CELDA = re.compile(r'^(?:[oO]|[\]\[»«|!lI]{1,3}|[sS][eE][oO])$')
+
+
+def _es_token_cero_ocr_en_celda(token: str) -> bool:
+    """Reconoce únicamente ruido típico de un cero en una celda numérica."""
+    return bool(_OCR_CERO_EN_CELDA.fullmatch(token.strip()))
 
 
 def normalizar_token_ocr(token: str) -> str:
     if _OCR_CERO.match(token):
         return '0'
-    return token
+    # Los dos puntos aparecen como sustituto del punto de miles en escaneos
+    # tenues (p. ej. ``3.732:989.407``). Se limita al contexto entre dígitos.
+    return re.sub(r"(?<=\d):(?=\d)", ".", token)
 
 PATRON_TOTAL = re.compile(
     r'^(total(es)?|sub-?total(es)?|sumas?( iguales)?|resultado|utilidad|perdida neto)\b',
@@ -1467,6 +1486,30 @@ def parsear_linea(
     if len(montos_tokens) == len(RAW_MONETARY_COLUMNS):
         for column, token in zip(RAW_MONETARY_COLUMNS, montos_tokens):
             montos_columnas[column] = float(parsear_monto(token, separador_miles) or 0.0)
+        if confianza_base < 1.0:
+            def error_identidades(values: dict[str, float]) -> float:
+                return abs(
+                    (values["debitos"] - values["creditos"])
+                    - (values["saldo_deudor"] - values["saldo_acreedor"])
+                ) + abs(
+                    values["saldo_deudor"] + values["saldo_acreedor"]
+                    - values["activo"] - values["pasivo"]
+                    - values["perdida"] - values["ganancia"]
+                )
+
+            # En OCR de tablas, un cero aislado se confunde con mucha
+            # frecuencia con 2, 3, 5, 6 o 9. Sólo se corrige cuando eliminar
+            # ese dígito mejora estrictamente las dos identidades contables;
+            # nunca se aplica a extracción nativa ni a importes mayores.
+            for column in RAW_MONETARY_COLUMNS:
+                if not 0 < abs(montos_columnas[column]) < 10:
+                    continue
+                error_antes = error_identidades(montos_columnas)
+                candidato = dict(montos_columnas)
+                candidato[column] = 0.0
+                if error_identidades(candidato) < error_antes:
+                    montos_columnas[column] = 0.0
+                    columnas_derivadas.append(column)
         debit = montos_columnas["debitos"]
         credit = montos_columnas["creditos"]
         debtor = montos_columnas["saldo_deudor"]
@@ -1514,7 +1557,6 @@ def parsear_linea(
             elif creditor == 0 and debtor != 0:
                 montos_columnas["saldo_acreedor"] = debtor
                 columnas_derivadas.append("saldo_acreedor")
-
     return CuentaRaw(
         linea=numero_linea,
         codigo=codigo,

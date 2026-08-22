@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pandas as pd
+
 import app_validacion as app
 import parser_universal as parser
 from clasificador_codigo_cuenta import ClasificadorCodigo
@@ -69,6 +71,29 @@ def test_extractor_coordenadas_preserva_codigo_nombre_y_ocho_columnas():
         "debitos": 100.0, "creditos": 0.0,
         "saldo_deudor": 100.0, "saldo_acreedor": 0.0,
         "activo": 100.0, "pasivo": 0.0,
+        "perdida": 0.0, "ganancia": 0.0,
+    }
+
+
+def test_extractor_coordenadas_recupera_ceros_ocr_sin_contaminar_nombre():
+    page = FakePage([
+        _header(),
+        _row(20, "110101", "CUENTAS SOCIOS", [
+            "3.732:989.407", "seo", "3.732.989.407", "]", "3.732.989.407", "»", "o", "O",
+        ]),
+    ])
+
+    lines, _ = parser._extraer_tabla_balance_por_coordenadas(page)
+    cuenta = parser.parsear_linea(
+        lines[0], 1, parser.FormatoCodigo.COMPACTO, ".", 1.0,
+    )
+
+    assert cuenta is not None
+    assert cuenta.nombre == "CUENTAS SOCIOS"
+    assert cuenta.montos_columnas == {
+        "debitos": 3732989407.0, "creditos": 0.0,
+        "saldo_deudor": 3732989407.0, "saldo_acreedor": 0.0,
+        "activo": 3732989407.0, "pasivo": 0.0,
         "perdida": 0.0, "ganancia": 0.0,
     }
 
@@ -216,6 +241,62 @@ def test_parsear_linea_elimina_movimiento_fantasma_con_tres_evidencias():
     assert cuenta.montos_columnas["creditos"] == 2730292
     assert cuenta.columnas_derivadas == ["debitos"]
 
+
+def test_parsear_linea_ocr_corrige_digito_fantasma_solo_si_mejora_identidad():
+    cuenta = parser.parsear_linea(
+        "3202007 Aseo 81.135 0 81.135 0 9 0 81.135 9",
+        1, parser.FormatoCodigo.COMPACTO, ".", confianza_base=0.75,
+    )
+
+    assert cuenta is not None
+    assert cuenta.montos_columnas["activo"] == 0
+    assert cuenta.montos_columnas["ganancia"] == 0
+    assert set(cuenta.columnas_derivadas) == {"activo", "ganancia"}
+
+
+def test_parsear_linea_nativa_preserva_importe_pequeno_real():
+    cuenta = parser.parsear_linea(
+        "3202007 Ajuste 9 0 9 0 0 0 9 0",
+        1, parser.FormatoCodigo.COMPACTO, ".", confianza_base=1.0,
+    )
+
+    assert cuenta is not None
+    assert cuenta.montos_columnas["debitos"] == 9
+    assert cuenta.montos_columnas["perdida"] == 9
+    assert cuenta.columnas_derivadas == []
+
+
+def test_correccion_humana_recertifica_y_actualiza_origen_efectivo():
+    details = [
+        parser.parsear_linea(
+            "110101 Caja 100 0 100 0 90 0 0 0",
+            1, parser.FormatoCodigo.COMPACTO, ".",
+        ),
+        parser.parsear_linea(
+            "210101 Proveedores 0 40 0 40 0 40 0 0",
+            2, parser.FormatoCodigo.COMPACTO, ".",
+        ),
+        parser.parsear_linea(
+            "410101 Ventas 0 60 0 60 0 0 0 60",
+            3, parser.FormatoCodigo.COMPACTO, ".",
+        ),
+        parser.parsear_linea(
+            "Sumas 100 100 100 100 100 40 0 60",
+            4, parser.FormatoCodigo.COMPACTO, ".",
+        ),
+    ]
+    assert all(details)
+    frame = pd.DataFrame([
+        {"linea": c.linea, **c.montos_columnas} for c in details
+    ])
+    frame.loc[frame["linea"] == 1, "activo"] = 100
+
+    corrected, certification = app._aplicar_correcciones_extraccion(details, frame)
+
+    assert certification.estado == "parcial"
+    assert corrected[0].monto == 100
+    assert corrected[0].origen_columna == parser.OrigenColumna.ACTIVO
+    assert "correccion_humana" in corrected[0].columnas_derivadas
 
 def test_total_acumulado_completa_par_de_saldos_y_certifica_detalle():
     lines = [
