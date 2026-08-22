@@ -1792,6 +1792,11 @@ class ParserPDF:
                 return lineas, False, 0
 
         lineas: list[str] = []
+        # Conserva el layout monetario detectado entre paginas nativas. Debe
+        # existir incluso cuando la primera pagina no contiene una tabla de
+        # ocho columnas; de lo contrario el fallback por coordenadas intentaba
+        # leer una variable local aun no inicializada.
+        coordinate_centers: Optional[list[float]] = None
 
         with pdfplumber.open(path) as pdf:
             n_paginas = len(pdf.pages)

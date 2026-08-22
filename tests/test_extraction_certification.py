@@ -83,6 +83,43 @@ def test_extractor_reutiliza_layout_en_paginas_sin_encabezado():
     assert lines == ["210101 PROVEEDORES 0 5 0 5 0 5 0 0"]
 
 
+def test_extraer_lineas_inicializa_layout_antes_del_fallback(monkeypatch, tmp_path):
+    class NativePage:
+        def extract_text(self):
+            return "110101 CAJA 100"
+
+    class NativePdf:
+        pages = [NativePage()]
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    observed_centers = []
+
+    monkeypatch.setattr(parser.pdfplumber, "open", lambda _path: NativePdf())
+    monkeypatch.setattr(parser, "_extraer_tabla_balance_8_columnas", lambda _page: [])
+
+    def coordinate_fallback(_page, centers=None):
+        observed_centers.append(centers)
+        return [], centers
+
+    monkeypatch.setattr(
+        parser, "_extraer_tabla_balance_por_coordenadas", coordinate_fallback,
+    )
+
+    lines, used_ocr, rotation = parser.ParserPDF()._extraer_lineas(
+        tmp_path / "balance.pdf",
+    )
+
+    assert observed_centers == [None]
+    assert lines == ["110101 CAJA 100"]
+    assert used_ocr is False
+    assert rotation == 0
+
+
 def test_extractor_acepta_sinonimos_y_filas_sin_codigo():
     page = FakePage([
         _alternate_header(),
