@@ -960,6 +960,9 @@ def main():
                             'nombre_original': c.nombre,
                             'nombre_normalizado': normalizar_nombre(c.nombre),
                             'monto': c.monto,
+                            'monto_periodo_actual': c.montos_periodos.get('actual'),
+                            'monto_periodo_anterior': c.montos_periodos.get('anterior'),
+                            'columnas_derivadas': ', '.join(c.columnas_derivadas),
                             'origen_columna': c.origen_columna.value,
                             'origen_columna_efectiva': origen_efectivo,
                             'es_total': c.es_total,
@@ -1126,6 +1129,9 @@ def main():
                             'nombre_original': c.nombre,
                             'nombre_normalizado': normalizar_nombre(c.nombre),
                             'monto': c.monto,
+                            'monto_periodo_actual': c.montos_periodos.get('actual'),
+                            'monto_periodo_anterior': c.montos_periodos.get('anterior'),
+                            'columnas_derivadas': ', '.join(c.columnas_derivadas),
                             'origen_columna': c.origen_columna.value,
                             'origen_columna_efectiva': origen_efectivo,
                             'es_total': c.es_total,
@@ -1421,6 +1427,16 @@ def _extraer_lineas_encabezado(archivo) -> list[str]:
         return lineas
 
 
+def _documento_no_es_balance(signature) -> bool:
+    """Gate conservador para anexos/otros con señal documental suficiente."""
+    document_type = getattr(getattr(signature, 'document_type', None), 'value', '')
+    return bool(
+        document_type == 'OTRO'
+        and not bool(getattr(signature, 'has_headers', False))
+        and float(getattr(signature, 'confidence', 0.0) or 0.0) >= 0.30
+    )
+
+
 def _extraer_cuentas(archivo) -> tuple[list[CuentaRaw], object]:
     """Extrae cuentas y devuelve (cuentas, document_context).
 
@@ -1436,6 +1452,51 @@ def _extraer_cuentas(archivo) -> tuple[list[CuentaRaw], object]:
         parser = ParserPDF()
         resultado = parser.parsear(tmp_path)
         for adv in resultado.advertencias: st.warning(adv)
+        document_context = getattr(resultado, 'document_context', None)
+        signature = getattr(document_context, 'signature', None)
+        if _documento_no_es_balance(signature):
+            st.error(
+                "El archivo fue identificado como anexo u otro documento, no "
+                "como balance. Se detuvo la homologación para evitar interpretar "
+                "sus filas con una estructura contable incorrecta."
+            )
+            return [], document_context
+        certificacion = getattr(resultado, 'certificacion_extraccion', None)
+        if certificacion is not None and certificacion.estado == 'fallida':
+            st.error(
+                "La extracción no reproduce los totales impresos del balance. "
+                "El documento no será homologado hasta corregir filas o columnas."
+            )
+            if certificacion.razones:
+                st.caption(" ".join(certificacion.razones))
+            if certificacion.filas_inconsistentes:
+                muestra = ", ".join(
+                    str(linea) for linea in certificacion.filas_inconsistentes[:12]
+                )
+                st.caption(
+                    f"Filas con inconsistencias internas: {muestra}"
+                    + ("…" if len(certificacion.filas_inconsistentes) > 12 else "")
+                )
+            return [], document_context
+        if certificacion is not None and certificacion.estado == 'certificada':
+            st.success(
+                "Extracción certificada: las ocho columnas reproducen los "
+                "subtotales impresos."
+            )
+        elif certificacion is not None and certificacion.estado == 'parcial':
+            st.warning(
+                "La ecuación final del balance está cuadrada, pero la extracción "
+                "de las cuentas intermedias no está certificada. Todas las cuentas "
+                "deben pasar por revisión humana antes de usar el resultado."
+            )
+            if certificacion.razones:
+                st.caption(" ".join(certificacion.razones))
+        elif certificacion is not None and certificacion.estado == 'no_evaluable':
+            st.info(
+                "Este formato todavía no dispone de totales independientes para "
+                "certificar automáticamente la extracción. Revise sus cuentas "
+                "antes de confirmar la homologación."
+            )
         # GATE 4E: SAFE-R02+R03+R08 (ruido de encabezado/pie, URLs/emails,
         # duplicados) aplicado ANTES de la clasificación, ÚNICAMENTE con
         # activación explícita (env SAFE_MODE ON). Con SAFE OFF el
@@ -1443,8 +1504,8 @@ def _extraer_cuentas(archivo) -> tuple[list[CuentaRaw], object]:
         # cuentas extraídas, sin filtrado.
         if _safe_mode_enabled():
             return _safe_qualify_cuentas(resultado.cuentas), \
-                getattr(resultado, 'document_context', None)
-        return resultado.cuentas, getattr(resultado, 'document_context', None)
+                document_context
+        return resultado.cuentas, document_context
     else:
         return parsear_excel(archivo), None
 
@@ -1854,6 +1915,18 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                     st.markdown(
                         f"<span style='color:{color}; font-weight:bold;'>{monto_val:,.0f}</span>",
                         unsafe_allow_html=True,
+                    )
+                monto_anterior = row.get('monto_periodo_anterior')
+                if pd.notna(monto_anterior):
+                    st.caption(
+                        f"Período seleccionado: actual · "
+                        f"Anterior: {float(monto_anterior):,.0f}"
+                    )
+                columnas_derivadas = str(row.get('columnas_derivadas') or '').strip()
+                if columnas_derivadas:
+                    st.warning(
+                        "Dato reconstruido contablemente: "
+                        f"{columnas_derivadas}. Requiere confirmación humana."
                     )
 
                 edit_mode = st.checkbox("Editar cuenta", key=f"edit_{idx}")

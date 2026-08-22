@@ -110,6 +110,19 @@ class TestNombreMostrar:
         assert row_base['nombre_original'] == original
 
 
+def test_periodo_actual_cero_no_entra_a_revision_aunque_anterior_tenga_saldo():
+    df = pd.DataFrame([{
+        'monto': 0.0,
+        'monto_periodo_actual': 0.0,
+        'monto_periodo_anterior': 2_631_606.0,
+        'requiere_revision': True,
+        'codigo_clasificado': '',
+        'es_total': False,
+    }])
+
+    assert _pendientes_revision(df).empty
+
+
 class TestOrigenContableEnRevision:
     def test_monto_positivo_conserva_columna_extraida(self):
         assert _origen_efectivo('perdida', 41840145) == 'perdida'
