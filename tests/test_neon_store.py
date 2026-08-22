@@ -24,6 +24,11 @@ def test_normaliza_nombre_contable():
     assert normalize_account_name("  IVA Crédito   Fiscal ") == "iva credito fiscal"
 
 
+def test_normaliza_nombre_ignora_rayas_y_puntuacion_ocr():
+    assert normalize_account_name("— Fondo Fijo") == "fondo fijo"
+    assert normalize_account_name("Fondo-Fijo") == "fondo fijo"
+
+
 def test_sin_database_url_el_store_esta_deshabilitado(monkeypatch):
     monkeypatch.delenv("DATABASE_URL", raising=False)
     assert not NeonKnowledgeStore().enabled

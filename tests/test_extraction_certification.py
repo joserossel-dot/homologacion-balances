@@ -120,6 +120,20 @@ def test_extraer_lineas_inicializa_layout_antes_del_fallback(monkeypatch, tmp_pa
     assert rotation == 0
 
 
+def test_parsear_linea_elimina_raya_ocr_antes_del_nombre():
+    for dash in ("-", "–", "—", "−"):
+        cuenta = parser.parsear_linea(
+            f"11010100 {dash} Fondo Fijo 400.000 0 400.000 0 400.000 0 0 0",
+            1,
+            parser.FormatoCodigo.COMPACTO,
+            ".",
+            1.0,
+        )
+
+        assert cuenta is not None
+        assert cuenta.nombre == "Fondo Fijo"
+
+
 def test_extractor_acepta_sinonimos_y_filas_sin_codigo():
     page = FakePage([
         _alternate_header(),

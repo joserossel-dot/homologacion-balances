@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import unicodedata
 from pathlib import Path
 from typing import Any, Callable
@@ -11,6 +12,7 @@ from typing import Any, Callable
 def normalize_account_name(value: str) -> str:
     text = unicodedata.normalize("NFD", str(value or "").strip().lower())
     text = "".join(char for char in text if unicodedata.category(char) != "Mn")
+    text = re.sub(r"[^a-z0-9 ]+", " ", text)
     return " ".join(text.split())
 
 

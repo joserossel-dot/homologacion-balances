@@ -1391,7 +1391,8 @@ def parsear_linea(
             break
 
     nombre_tokens = tokens[:i + 1]
-    nombre = ' '.join(nombre_tokens).strip(' .-')
+    # La raya visual entre codigo y descripcion no forma parte de la cuenta.
+    nombre = ' '.join(nombre_tokens).strip(' .-–—−')
 
     if not nombre or len(nombre) < 3:
         return None
