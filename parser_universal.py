@@ -47,6 +47,128 @@ def _sin_acentos(texto: str) -> str:
     )
 
 
+def detectar_años_y_monedas(lineas: list[str]) -> tuple[list[str], list[str]]:
+    años = []
+    monedas = []
+    patron_año = re.compile(r'\b(20\d{2})\b')
+    
+    for l in lineas[:60]:
+        l_norm = _sin_acentos(l).lower()
+        matches = patron_año.findall(l_norm)
+        for m in matches:
+            if m not in años:
+                años.append(m)
+        if 'actual' in l_norm and 'actual' not in años:
+            años.append('actual')
+        if 'anterior' in l_norm and 'anterior' not in años:
+            años.append('anterior')
+        if 'acumulado' in l_norm and 'acumulado' not in años:
+            años.append('acumulado')
+            
+        # Scan tokens in order to preserve header column order
+        tokens_lower = [t.lower() for t in l.split()]
+        for t in tokens_lower:
+            if any(w in t for w in ('usd', 'dolar', 'us$', 'dolares')):
+                if 'USD' not in monedas:
+                    monedas.append('USD')
+            elif any(w in t for w in ('clp', 'peso', 'clp$', 'pesos')):
+                if 'CLP' not in monedas:
+                    monedas.append('CLP')
+                
+    if not monedas:
+        for l in lineas[:60]:
+            if '$' in l:
+                monedas.append('CLP')
+                break
+    return años, monedas
+
+
+def split_side_by_side(line: str) -> list[str]:
+    tokens = line.split()
+    if len(tokens) < 6:
+        return [line]
+        
+    # Classify tokens
+    types = []
+    for t in tokens:
+        t_stripped = t.replace('$', '').replace('(', '').replace(')', '').strip(' .-–—−,[]')
+        is_num = False
+        if re.search(r'\d', t_stripped) or t in ('-', '—', '−') or t_stripped in ('', '-', '—', '−'):
+            is_num = True
+        types.append('N' if is_num else 'T')
+        
+    # Collapsed groups
+    groups = []  # list of (type, start_idx, end_idx)
+    current_type = None
+    start_idx = 0
+    for idx, t_type in enumerate(types):
+        if t_type != current_type:
+            if current_type is not None:
+                groups.append((current_type, start_idx, idx))
+            current_type = t_type
+            start_idx = idx
+    if current_type is not None:
+        groups.append((current_type, start_idx, len(types)))
+        
+    # Build the collapsed pattern string
+    pattern = "".join(g[0] for g in groups)
+    
+    # Check if we have a side-by-side transition 'TNTN'
+    if "TNTN" in pattern:
+        t_count = 0
+        split_token_idx = -1
+        for g_idx, (g_type, g_start, g_end) in enumerate(groups):
+            if g_type == 'T':
+                t_count += 1
+                if t_count == 2:
+                    split_token_idx = g_start
+                    break
+        if split_token_idx != -1:
+            # Check if the token immediately preceding split_token_idx is a code
+            if split_token_idx > 0:
+                prev_tok = tokens[split_token_idx - 1]
+                if re.match(r'^\d+[\d.\-]*$', prev_tok) and len(prev_tok) >= 3:
+                    split_token_idx -= 1
+            left_line = " ".join(tokens[:split_token_idx]).strip(' .-–—−')
+            right_line = " ".join(tokens[split_token_idx:]).strip(' .-–—−')
+            return [left_line, right_line]
+            
+    return [line]
+
+
+def asociar_lineas_verticales(lineas: list[str]) -> list[str]:
+    new_lines = []
+    skip = False
+    
+    for idx in range(len(lineas)):
+        if skip:
+            skip = False
+            continue
+            
+        l_curr = lineas[idx].strip()
+        if not l_curr:
+            new_lines.append("")
+            continue
+            
+        has_digits_curr = re.search(r'\d{3,}', l_curr)
+        
+        if not has_digits_curr and idx + 1 < len(lineas):
+            l_next = lineas[idx + 1].strip()
+            cleaned_next = re.sub(r'[\d\s.,$()\-—−_\[\]]', '', l_next)
+            
+            if cleaned_next == "" and l_next and re.search(r'\d', l_next):
+                merged = f"{l_curr} {l_next}"
+                new_lines.append(merged)
+                skip = True
+                continue
+                
+        new_lines.append(lineas[idx])
+        
+    return new_lines
+
+
+
+
 def _extraer_tabla_balance_8_columnas(page) -> list[str]:
     """Reconstruye tablas nativas donde los guiones preservan columnas vacías.
 
@@ -496,22 +618,45 @@ def detectar_separador_miles(montos_muestra: list[str]) -> str:
 def parsear_monto(valor: str, separador_miles: str) -> Optional[float]:
     if valor is None:
         return None
-    v = valor.strip().replace(' ', '')
-    if v in ('', '-', '0', '0.00', '0,00'):
-        return 0.0 if v != '' and v != '-' else None
+    v = valor.strip().replace(' ', '').replace('$', '').replace('CLP', '').replace('USD', '')
+    if v in ('', '-', '—', '−', '0', '0.00', '0,00'):
+        return 0.0
 
     negativo = False
     if v.startswith('(') and v.endswith(')'):
         negativo = True
-        v = v[1:-1]
+        v = v[1:-1].strip()
     if v.startswith('-'):
         negativo = True
-        v = v[1:]
+        v = v[1:].strip()
+    if v.endswith('-'):
+        negativo = True
+        v = v[:-1].strip()
+
+    v = v.replace('(', '').replace(')', '')
 
     if separador_miles == '.':
         v = v.replace('.', '').replace(',', '.')
-    else:
+    elif separador_miles == ',':
         v = v.replace(',', '')
+    else:
+        if '.' in v and ',' in v:
+            if v.rfind('.') > v.rfind(','):
+                v = v.replace(',', '')
+            else:
+                v = v.replace('.', '').replace(',', '.')
+        elif ',' in v:
+            parts = v.split(',')
+            if len(parts) == 2 and len(parts[1]) == 3:
+                v = v.replace(',', '')
+            else:
+                v = v.replace(',', '.')
+        elif '.' in v:
+            parts = v.split('.')
+            if len(parts) == 2 and len(parts[1]) == 3:
+                v = v.replace('.', '')
+            elif len(parts) > 2:
+                v = v.replace('.', '')
 
     try:
         num = float(v)
@@ -1434,6 +1579,8 @@ def parsear_linea(
     confianza_base: float = 1.0,
     column_order: Optional[list[OrigenColumna]] = None,
     periodo_comparativo: bool = False,
+    years: Optional[list[str]] = None,
+    currencies: Optional[list[str]] = None,
 ) -> Optional[CuentaRaw]:
     linea = linea.strip()
     if len(linea) < 4:
@@ -1543,13 +1690,61 @@ def parsear_linea(
     origen = OrigenColumna.DESCONOCIDO
     montos_periodos: dict[str, float] = {}
 
+    # Dynamic year/currency mapping
+    if (years or currencies) and montos_tokens:
+        n_vals = len(montos_tokens)
+        active_years = years if years else []
+        active_currencies = currencies if currencies else []
+        
+        # Determine if we map primarily by currencies or by years
+        if len(active_currencies) >= 2:
+            # Map columns to currencies
+            for idx, curr in enumerate(active_currencies[:n_vals]):
+                val = parsear_monto(montos_tokens[idx], separador_miles)
+                if val is not None:
+                    val_f = float(val)
+                    montos_periodos[curr] = val_f
+                    # Also map with year if we have a year
+                    if len(active_years) >= 1:
+                        montos_periodos[f"{active_years[0]}_{curr}"] = val_f
+            main_curr = "CLP" if "CLP" in montos_periodos else active_currencies[0]
+            monto_principal = montos_periodos.get(main_curr)
+        else:
+            # Map columns to years
+            for idx, yr in enumerate(active_years[:n_vals]):
+                val = parsear_monto(montos_tokens[idx], separador_miles)
+                if val is not None:
+                    val_f = float(val)
+                    montos_periodos[yr] = val_f
+                    # If we have a single currency (e.g. USD), also map it
+                    if len(active_currencies) == 1:
+                        curr = active_currencies[0]
+                        montos_periodos[f"{yr}_{curr}"] = val_f
+                        montos_periodos[curr] = val_f
+                        
+            if "actual" not in montos_periodos and len(active_years) >= 1:
+                montos_periodos["actual"] = montos_periodos.get(active_years[0], 0.0)
+            if "anterior" not in montos_periodos and len(active_years) >= 2:
+                montos_periodos["anterior"] = montos_periodos.get(active_years[1], 0.0)
+            monto_principal = montos_periodos.get("actual")
+            
+            # If single currency and we have actual/anterior, populate them too
+            if len(active_currencies) == 1:
+                curr = active_currencies[0]
+                if "actual" in montos_periodos:
+                    montos_periodos[f"actual_{curr}"] = montos_periodos["actual"]
+                if "anterior" in montos_periodos:
+                    montos_periodos[f"anterior_{curr}"] = montos_periodos["anterior"]
+                if monto_principal is not None:
+                    montos_periodos[curr] = monto_principal
+
     if periodo_comparativo and len(montos_tokens) >= 3 and re.fullmatch(
         r"\d{1,2}(?:\.\d{1,2}){2,}", montos_tokens[-1],
     ):
         # Referencia de nota (6.1.2, 12.3.1), no un tercer período monetario.
         montos_tokens.pop()
 
-    if periodo_comparativo and len(montos_tokens) >= 2:
+    if not montos_periodos and periodo_comparativo and len(montos_tokens) >= 2:
         actual_token, anterior_token = montos_tokens[-2:]
         actual = float(parsear_monto(actual_token, separador_miles) or 0.0)
         anterior = float(parsear_monto(anterior_token, separador_miles) or 0.0)
@@ -1858,15 +2053,25 @@ class ParserPDF:
                     f"({layout.confidence:.2f}) — usando heurística estándar."
                 )
 
+        # Scan years and currencies dynamically
+        years, currencies = detectar_años_y_monedas(lineas)
+
+        # Pre-process lines to associate vertical labels and amounts
+        lineas = asociar_lineas_verticales(lineas)
+
         # 4. Parsear todas las líneas
         confianza = 0.75 if requirio_ocr else 1.0
         cuentas = []
         for i, l in enumerate(lineas):
-            c = parsear_linea(l, i, formato_codigo, separador, confianza,
-                              column_order=column_order,
-                              periodo_comparativo=periodo_comparativo)
-            if c:
-                cuentas.append(c)
+            sub_lines = split_side_by_side(l)
+            for sub_l in sub_lines:
+                c = parsear_linea(sub_l, i, formato_codigo, separador, confianza,
+                                  column_order=column_order,
+                                  periodo_comparativo=periodo_comparativo,
+                                  years=years,
+                                  currencies=currencies)
+                if c:
+                    cuentas.append(c)
 
         secciones_anotadas = anotar_secciones_balance_clasificado(cuentas)
         if secciones_anotadas:
@@ -2144,25 +2349,118 @@ class ParserPDF:
 
 def parsear_excel(file) -> list[CuentaRaw]:
     df = pd.read_excel(file, header=None)
+    
+    # Helper to detect year and currency for a column
+    # Scan the top 15 rows of this column and its immediate left neighbor
+    col_meta = {}
+    for col_idx in range(df.shape[1]):
+        year = None
+        currency = None
+        # Look in current column and adjacent left column (useful for merged cells)
+        for c in (col_idx, col_idx - 1):
+            if c < 0 or c >= df.shape[1]:
+                continue
+            for r in range(min(15, df.shape[0])):
+                val = df.iloc[r, c]
+                if pd.isna(val) or (isinstance(val, (int, float)) and not (1990 <= val <= 2050)):
+                    continue
+                val_str = str(val).strip().lower()
+                
+                # Check year
+                year_match = re.search(r'\b(20\d{2})\b', val_str)
+                if year_match and not year:
+                    year = year_match.group(1)
+                elif 'actual' in val_str and not year:
+                    year = 'actual'
+                elif 'anterior' in val_str and not year:
+                    year = 'anterior'
+                elif 'acumulado' in val_str and not year:
+                    year = 'acumulado'
+                    
+                # Check currency
+                if ('usd' in val_str or 'dolar' in val_str or 'us$' in val_str) and not currency:
+                    currency = 'USD'
+                elif ('clp' in val_str or 'peso' in val_str or 'clp$' in val_str) and not currency:
+                    currency = 'CLP'
+        col_meta[col_idx] = (year, currency)
+        
     cuentas = []
     for i, row in df.iterrows():
-        vals = [v for v in row.tolist() if pd.notna(v)]
-        if not vals: continue
-        textos = [v for v in vals if isinstance(v, str)]
-        numeros = [v for v in vals if isinstance(v, (int, float))]
-        if not textos: continue
+        vals = row.tolist()
+        non_na_vals = [v for v in vals if pd.notna(v)]
+        if not non_na_vals:
+            continue
+            
+        textos = [v for v in non_na_vals if isinstance(v, str)]
+        numeros = [v for v in non_na_vals if isinstance(v, (int, float)) and not isinstance(v, bool)]
+        if not textos:
+            continue
+            
         nombre = max(textos, key=len)
-        if len(nombre) < 3: continue
+        if len(nombre) < 3:
+            continue
+            
+        # Skip header/meta rows (e.g. if the row itself has words like 'balance', 'rut', 'año' and no numeric figures)
+        if any(w in nombre.lower() for w in ('rut', 'razon social', 'fecha', 'periodo', 'moneda', 'balance general')) and not numeros:
+            continue
+            
+        # Detect account code
         codigo = None
-        primer = str(vals[0])
+        primer = str(vals[0]) if pd.notna(vals[0]) else ""
         if re.match(r'^[\d.\-]+$', primer) and primer != nombre:
             codigo = primer
-        monto = numeros[-1] if numeros else None
+            
+        # Map all numeric amounts to their year/currency
+        montos_periodos = {}
+        montos_columnas = {}
+        last_monto = None
+        
+        for col_idx, val in enumerate(vals):
+            if pd.isna(val) or not isinstance(val, (int, float)) or isinstance(val, bool):
+                continue
+            if codigo and str(val) == codigo:
+                continue
+            if col_idx == 0 and isinstance(val, int) and val < 500:
+                continue
+                
+            val_f = float(val)
+            last_monto = val_f
+            
+            year, currency = col_meta.get(col_idx, (None, None))
+            
+            if year and currency:
+                montos_periodos[f"{year}_{currency}"] = val_f
+                montos_periodos[year] = val_f
+                montos_periodos[currency] = val_f
+            elif year:
+                montos_periodos[year] = val_f
+            elif currency:
+                montos_periodos[currency] = val_f
+                
+            col_name = f"col_{col_idx}"
+            if year:
+                col_name += f"_{year}"
+            if currency:
+                col_name += f"_{currency}"
+            montos_columnas[col_name] = val_f
+            
+        detected_years = sorted(list({col_meta[c][0] for c in col_meta if col_meta[c][0] is not None}), reverse=True)
+        if detected_years:
+            if "actual" not in montos_periodos and len(detected_years) >= 1:
+                montos_periodos["actual"] = montos_periodos.get(detected_years[0], 0.0)
+            if "anterior" not in montos_periodos and len(detected_years) >= 2:
+                montos_periodos["anterior"] = montos_periodos.get(detected_years[1], 0.0)
+                
+        monto_principal = montos_periodos.get("actual") or last_monto
+        
         cuentas.append(CuentaRaw(
-            linea=i, codigo=codigo, nombre=nombre, monto=monto,
-            origen_columna=OrigenColumna.DESCONOCIDO, confianza_extraccion=0.9
+            linea=i, codigo=codigo, nombre=nombre, monto=monto_principal,
+            origen_columna=OrigenColumna.DESCONOCIDO, confianza_extraccion=0.9,
+            montos_periodos=montos_periodos, montos_columnas=montos_columnas
         ))
+        
     return cuentas
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────

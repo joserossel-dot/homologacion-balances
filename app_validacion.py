@@ -64,8 +64,26 @@ from persistence.neon_store import NeonKnowledgeStore
 BASE_DIR = Path(__file__).parent
 load_dotenv(BASE_DIR / '.env')
 UMBRAL_REVISION = 0.85  # bajo este valor, la cuenta va a la cola de revisión
-USE_LEGACY_ENGINE = False  # True → MotorHibridoLocal (antiguo); False → HomologationPipeline (nuevo, default)
-SHADOW_MODE = True  # True → ejecuta nuevo pipeline en paralelo sin afectar UI, guarda logs en logs/shadow/
+USE_LEGACY_ENGINE = False
+SHADOW_MODE = False
+API_URL = os.environ.get("API_URL", "http://localhost:8000")
+
+class DummyDocCtx:
+    def __init__(self, data: dict):
+        self._data = data
+
+    def ui_summary(self) -> dict:
+        return {
+            "Documento": self._data.get("source_file", "—"),
+            "Formato": "PDF" if str(self._data.get("source_file", "")).endswith(".pdf") else "Excel",
+            "Columnas": str(self._data.get("accounts_total", "—")),
+            "Layout": self._data.get("dce_state", "—"),
+            "OCR": "No" if self._data.get("dce_state") == "native" else "Sí",
+            "Extractor": "ParserPDF",
+            "Confianza": f"{self._data.get('decision_stats', {}).get('avg_confidence', 0.0) * 100:.1f}%",
+            "Familia": "—",
+        }
+
 
 
 def _build_date() -> str:
@@ -1008,264 +1026,93 @@ def main():
             if k not in nombres_subidos:
                 state.pop(k, None)
 
-    # ── Procesar archivos nuevos ──────────────────────────────────────────────
-    if USE_LEGACY_ENGINE:
-        # LEGACY PIPELINE (MotorHibridoLocal)
-        for archivo in archivos:
-            if archivo.name not in st.session_state.resultados:
-                with st.spinner(f"Clasificando cuentas de {archivo.name}..."):
-                    lineas_encabezado = _extraer_lineas_encabezado(archivo)
-                    meta_indiv = extraer_metadata(lineas_encabezado)
-                    st.session_state.metadata_files[archivo.name] = meta_indiv
+    # ── Procesar archivos nuevos vía API backend FastAPI ──────────────────────
+    archivos_nuevos = [
+        archivo for archivo in archivos
+        if archivo.name not in st.session_state.resultados
+    ]
+    for archivo in archivos_nuevos:
+        with st.spinner(f"Clasificando cuentas de {archivo.name} vía API backend V2..."):
+            _t0 = time.perf_counter()
+            lineas_encabezado = _extraer_lineas_encabezado(archivo)
+            meta_indiv = extraer_metadata(lineas_encabezado)
+            st.session_state.metadata_files[archivo.name] = meta_indiv
 
-                    if archivo.name in st.session_state.extraction_resolved:
-                        cuentas = st.session_state.extraction_resolved.pop(archivo.name)
-                        doc_ctx = st.session_state.document_intel.get(archivo.name)
-                    else:
-                        cuentas, doc_ctx = _extraer_cuentas(archivo)
-                    st.session_state.document_intel[archivo.name] = doc_ctx
-                    motor = MotorHibridoLocal(st.session_state.diccionario)
-                    filas = []
-                    for c in cuentas:
-                        if c.monto is None and not c.codigo:
-                            continue
-                        if c.monto is not None and float(c.monto) == 0:
-                            continue
-                        if not c.codigo and PATRON_NO_CUENTA.match(c.nombre.strip()):
-                            continue
-                        _t0_legacy = time.perf_counter()
-                        r = motor.clasificar(c, company_giro_norm)
-                        _t1_legacy = (time.perf_counter() - _t0_legacy) * 1000
-                        origen_efectivo = _origen_efectivo(c.origen_columna, c.monto)
-                        if (r.get('codigo_estandar') and
-                                not _codigo_compatible_con_origen(
-                                    r['codigo_estandar'], c.origen_columna, c.monto,
-                                    c.nombre)):
-                            r = {
-                                **r,
-                                'codigo_estandar': None,
-                                'metodo': 'sin_clasificar+filtro_columna',
-                                'confianza': 0.0,
-                                'requiere_revision': True,
-                            }
-                        filas.append({
-                            'linea': c.linea,
-                            'codigo_original': c.codigo or '',
-                            'nombre_original': c.nombre,
-                            'nombre_normalizado': normalizar_nombre(c.nombre),
-                            'monto': c.monto,
-                            'monto_periodo_actual': c.montos_periodos.get('actual'),
-                            'monto_periodo_anterior': c.montos_periodos.get('anterior'),
-                            'columnas_derivadas': ', '.join(c.columnas_derivadas),
-                            'origen_columna': c.origen_columna.value,
-                            'origen_columna_efectiva': origen_efectivo,
-                            'es_total': c.es_total,
-                            'codigo_clasificado': r['codigo_estandar'] or '',
-                            'metodo': r['metodo'],
-                            'confianza': r['confianza'],
-                            'requiere_revision': (
-                                r['requiere_revision'] or bool(c.columnas_derivadas)
-                            ),
-                            'nota': r.get('nota_regla_especial', ''),
-                            'confianza_extraccion': c.confianza_extraccion,
-                            'origen_columna_display': _etiqueta_origen(c.origen_columna, c.monto),
-                            'nombre_revision_usuario': '',
-                            'tipo_revision': '',
-                            'origen': _origen_desde_metodo_display(r['metodo']),
-                            'regla': r['metodo'],
-                            'evidencia': r.get('nota_regla_especial', '') or r['metodo'],
-                            'tiempo_clasificacion': round(_t1_legacy, 3),
-                        })
-                    df_file = pd.DataFrame(filas)
-                    st.session_state.resultados[archivo.name] = df_file
+            import requests
+            archivo.seek(0)
+            file_bytes = archivo.read()
+            archivo.seek(0)
 
-                    # SHADOW MODE — homologación comparativa contra motor legacy
-                    if SHADOW_MODE and Path(archivo.name).suffix.lower() == '.pdf':
-                        import tempfile
-                        from pipeline.homologation_pipeline import HomologationPipeline
-                        from shadow.shadow_logger import ShadowLogger
-                        tmp_shadow = tempfile.NamedTemporaryFile(suffix='.pdf', delete=False)
-                        try:
-                            tmp_shadow.write(archivo.read())
-                            tmp_shadow.close()
-                            sh_path = Path(tmp_shadow.name)
-                            hp_shadow = HomologationPipeline()
-                            sh_summary = hp_shadow.process(sh_path)
-                            logger_sh = ShadowLogger()
-                            comparisons = []
-                            matches = 0
-                            for sh_entry in sh_summary.get("classified", []):
-                                aname = sh_entry["account_name"]
-                                amatch = df_file[df_file["nombre_original"] == aname]
-                                if amatch.empty:
-                                    continue
-                                comparisons.append(logger_sh.build_comparison(
-                                    account_name=aname,
-                                    account_code=sh_entry.get("account_code", ""),
-                                    legacy_code=amatch.iloc[0]["codigo_clasificado"] or None,
-                                    legacy_confidence=amatch.iloc[0]["confianza"],
-                                    new_code=sh_entry.get("final_code") or sh_entry.get("standard_code"),
-                                    new_confidence=sh_entry.get("confidence", 0.0),
-                                    new_method=sh_entry.get("method", ""),
-                                    learning_hit="learning" in sh_entry.get("method", ""),
-                                ))
-                                if comparisons[-1]["match"]:
-                                    matches += 1
-                            total_comp = len(comparisons)
-                            match_rate = matches / total_comp if total_comp else 1.0
-                            logger_sh.log(archivo.name, comparisons, match_rate)
-                        finally:
-                            sh_path.unlink(missing_ok=True)
-                            archivo.seek(0)
-    else:
-        # NEW PIPELINE (HomologationPipeline)
-        import logging as _logging
-        _shadow_logger = _logging.getLogger("homologation_pipeline")
-        from pipeline.homologation_pipeline import HomologationPipeline
-        from adapters.account_adapter import AccountAdapter
-        from interpreters.balance_interpreter import BalanceInterpreter
+            files = {
+                "file_balance": (archivo.name, file_bytes, "application/pdf" if archivo.name.endswith(".pdf") else "application/octet-stream")
+            }
+            data = {
+                "giro_empresa": giro_norm or "Otro"
+            }
 
-        archivos_nuevos = [
-            archivo for archivo in archivos
-            if archivo.name not in st.session_state.resultados
-        ]
-        hp = HomologationPipeline() if archivos_nuevos else None
-        for archivo in archivos_nuevos:
-            if archivo.name not in st.session_state.resultados:
-                with st.spinner(f"Clasificando cuentas de {archivo.name}..."):
-                    _t0 = time.perf_counter()
-                    lineas_encabezado = _extraer_lineas_encabezado(archivo)
-                    meta_indiv = extraer_metadata(lineas_encabezado)
-                    st.session_state.metadata_files[archivo.name] = meta_indiv
+            try:
+                response = requests.post(f"{API_URL}/api/v1/analisis/procesar", files=files, data=data, timeout=60)
+                response.raise_for_status()
+                result = response.json()
+            except Exception as e:
+                st.error(f"Error de conexión con el backend FastAPI para {archivo.name}: {e}")
+                continue
 
-                    if archivo.name in st.session_state.extraction_resolved:
-                        cuentas = st.session_state.extraction_resolved.pop(archivo.name)
-                        doc_ctx = st.session_state.document_intel.get(archivo.name)
-                    else:
-                        cuentas, doc_ctx = _extraer_cuentas(archivo)
-                    st.session_state.document_intel[archivo.name] = doc_ctx
-                    total_cuentas = len(cuentas)
-                    filas = []
-                    clasificadas = 0
-                    learning_hits = 0
-                    fallback_count = 0
+            doc_ctx = DummyDocCtx(result)
+            st.session_state.document_intel[archivo.name] = doc_ctx
 
-                    for c in cuentas:
-                        if c.monto is None and not c.codigo:
-                            continue
-                        if c.monto is not None and float(c.monto) == 0:
-                            continue
-                        if not c.codigo and PATRON_NO_CUENTA.match(c.nombre.strip()):
-                            continue
-                        ab = AccountAdapter.from_cuenta_raw(c)
-                        interp = BalanceInterpreter(ab)
-                        classification_amount = interp.classification_amount
-                        origen_efectivo = _origen_efectivo(c.origen_columna, classification_amount)
-                        account_tipo = _resolver_tipo_cuenta(origen_efectivo, c.codigo)
-                        if (origen_efectivo == 'pasivo'
-                                and _es_contra_activo(c.nombre)):
-                            account_tipo = 'ACTIVO'
-                        if classification_amount is None:
-                            codigo_clasificado = ""
-                            metodo = "movement_only"
-                            confianza = 0.0
-                            requiere_revision = True
-                            nota = ""
-                            clasif_origen = 'Sin clasificar'
-                            clasif_evidencia = ''
-                            tiempo_clasif_ms = 0.0
-                        else:
-                            clasificadas += 1
-                            _t0_clasif = time.perf_counter()
-                            classification = hp._classify_account(
-                                ab.account_code,
-                                ab.account_name,
-                                account_tipo=account_tipo,
-                            )
-                            tiempo_clasif_ms = round((time.perf_counter() - _t0_clasif) * 1000, 3)
-                            adjustment = hp._rule_processor.aplicar(
-                                nombre_cuenta=ab.account_name,
-                                codigo_clasificado=classification.get("standard_code") or "",
-                                monto=classification_amount,
-                                origen_columna=c.origen_columna,
-                            )
-                            final_code = (
-                                adjustment.codigo_final if adjustment.aplica
-                                else classification.get("standard_code")
-                            )
-                            if (final_code and
-                                    not _codigo_compatible_con_origen(
-                                        final_code, c.origen_columna,
-                                        classification_amount, c.nombre)):
-                                final_code = None
-                                classification = {
-                                    **classification,
-                                    "standard_code": None,
-                                    "confidence": 0.0,
-                                    "method": "unclassified_type_filter",
-                                    "reason": (
-                                        "Sugerencia descartada por ser incompatible con "
-                                        f"la columna efectiva {account_tipo}"
-                                    ),
-                                }
-                            codigo_clasificado = final_code or ""
-                            metodo = classification.get("method", "")
-                            confianza = classification.get("confidence", 0.0)
-                            requiere_revision = (
-                                confianza < UMBRAL_REVISION
-                                or (adjustment.aplica and adjustment.requiere_revision)
-                                or bool(c.columnas_derivadas)
-                            )
-                            nota = adjustment.nota if adjustment.aplica else ""
-                            clasif_evidencia = classification.get("reason", "")
-                            clasif_origen = _origen_desde_clasif(classification, ab.account_name, hp)
-                            if metodo.startswith("learning_"):
-                                learning_hits += 1
-                            else:
-                                fallback_count += 1
+            filas = []
+            classified_items = result.get("classified", [])
+            ignored_items = result.get("ignored", [])
 
-                        filas.append({
-                            'linea': c.linea,
-                            'codigo_original': c.codigo or '',
-                            'nombre_original': c.nombre,
-                            'nombre_normalizado': normalizar_nombre(c.nombre),
-                            'monto': c.monto,
-                            'monto_periodo_actual': c.montos_periodos.get('actual'),
-                            'monto_periodo_anterior': c.montos_periodos.get('anterior'),
-                            'columnas_derivadas': ', '.join(c.columnas_derivadas),
-                            'origen_columna': c.origen_columna.value,
-                            'origen_columna_efectiva': origen_efectivo,
-                            'es_total': c.es_total,
-                            'codigo_clasificado': codigo_clasificado,
-                            'metodo': metodo,
-                            'confianza': confianza,
-                            'requiere_revision': requiere_revision,
-                            'nota': nota,
-                            'confianza_extraccion': c.confianza_extraccion,
-                            'origen_columna_display': _etiqueta_origen(
-                                c.origen_columna, classification_amount),
-                            'nombre_revision_usuario': '',
-                            'tipo_revision': '',
-                            'origen': clasif_origen,
-                            'regla': metodo,
-                            'evidencia': clasif_evidencia,
-                            'tiempo_clasificacion': tiempo_clasif_ms,
-                        })
+            for item in classified_items + ignored_items:
+                name = item.get("account_name", "")
+                if not name:
+                    continue
+                code = item.get("account_code") or ""
+                amount = item.get("classification_amount")
+                if amount is not None:
+                    amount = float(amount)
+                
+                codigo_clasificado = item.get("final_code") or item.get("standard_code") or ""
+                metodo = item.get("method", "ignored" if item.get("standard_code") is None else "unknown")
+                confianza = item.get("confidence", 0.0)
+                
+                requiere_revision = (
+                    confianza < UMBRAL_REVISION 
+                    or not codigo_clasificado
+                    or bool(item.get("special_rule"))
+                )
 
-                    df_file = pd.DataFrame(filas)
-                    st.session_state.resultados[archivo.name] = df_file
+                filas.append({
+                    'linea': item.get("source_page", 0),
+                    'codigo_original': code,
+                    'nombre_original': name,
+                    'nombre_normalizado': normalizar_nombre(name),
+                    'monto': amount,
+                    'monto_periodo_actual': amount,
+                    'monto_periodo_anterior': None,
+                    'columnas_derivadas': '',
+                    'origen_columna': item.get("nature", "activo"),
+                    'origen_columna_efectiva': item.get("nature", "activo"),
+                    'es_total': False,
+                    'codigo_clasificado': codigo_clasificado,
+                    'metodo': metodo,
+                    'confianza': confianza,
+                    'requiere_revision': requiere_revision,
+                    'nota': item.get("special_rule") or "",
+                    'confianza_extraccion': 1.0,
+                    'origen_columna_display': str(item.get("nature", "activo")).upper(),
+                    'nombre_revision_usuario': '',
+                    'tipo_revision': '',
+                    'origen': item.get("reason") or "FastAPI V2",
+                    'regla': metodo,
+                    'evidencia': item.get("reason") or "",
+                    'tiempo_clasificacion': round((time.perf_counter() - _t0) * 1000, 2),
+                })
 
-                    _t1 = time.perf_counter()
-                    _shadow_logger.info(
-                        "archivo=%s cuentas=%d clasificadas=%d learning_hits=%d fallback=%d time=%.3fs",
-                        archivo.name, total_cuentas, clasificadas,
-                        learning_hits, fallback_count, _t1 - _t0,
-                    )
-        # P5.5 Runtime Observability: persistir métricas de uso para Runtime Analytics.
-        try:
-            st.session_state["runtime_metrics_last"] = hp._learning_engine.get_metrics()
-        except Exception:  # noqa: BLE001 — observabilidad no debe interrumpir el flujo
-            pass
+            df_file = pd.DataFrame(filas)
+            st.session_state.resultados[archivo.name] = df_file
     # After processing all uploaded files, propagate classifications across all balances
     if 'propagation_done' not in st.session_state:
         # Define helper to propagate classifications across balances

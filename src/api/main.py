@@ -23,17 +23,36 @@ repositorio: RepositorioDiccionario | None = None
 async def lifespan(app: FastAPI):
     global repositorio
 
-    repositorio = RepositorioDiccionario()
-    try:
-        await repositorio.inicializar()
-    except RuntimeError as e:
-        if "asyncpg" in str(e):
-            print(f"[API] {e}")
-            print("[API] Continuando sin base de datos — modo JSON fallback.")
+    is_dev = (
+        os.environ.get("DEBUG", "").lower() == "true"
+        or os.environ.get("LOCAL_DEV", "").lower() == "true"
+    )
+    db_url = os.environ.get("DATABASE_URL")
+
+    if not db_url:
+        if is_dev:
+            print("[API] WARNING: DATABASE_URL not set. Falling back to JSON mode in development.")
             repositorio = RepositorioDiccionario()
             repositorio._inicializar_json()
         else:
-            raise
+            raise RuntimeError(
+                "CRITICAL ERROR: DATABASE_URL environment variable is missing or empty. "
+                "Halt startup in production to prevent data anomalies."
+            )
+    else:
+        repositorio = RepositorioDiccionario()
+        try:
+            await repositorio.inicializar()
+        except Exception as e:
+            if is_dev:
+                print(f"[API] WARNING: Database connection failed: {e}. Falling back to JSON mode in development.")
+                repositorio = RepositorioDiccionario()
+                repositorio._inicializar_json()
+            else:
+                raise RuntimeError(
+                    f"CRITICAL ERROR: Database connection failed: {e}. "
+                    "Fail-fast active in production to prevent data anomalies."
+                ) from e
 
     yield
 
@@ -64,15 +83,16 @@ async def health():
 
 @app.post("/api/v1/analisis/procesar")
 async def procesar_analisis(
-    file_carpeta: UploadFile = File(...),
     file_balance: UploadFile = File(...),
+    file_carpeta: UploadFile | None = File(None),
     giro_empresa: str = Form(...),
 ):
     if repositorio is None:
         raise HTTPException(status_code=503, detail="Repositorio no disponible")
 
-    if not file_carpeta.filename or not file_carpeta.filename.endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="file_carpeta debe ser un archivo PDF")
+    if file_carpeta is not None and file_carpeta.filename:
+        if not file_carpeta.filename.endswith(".pdf"):
+            raise HTTPException(status_code=400, detail="file_carpeta debe ser un archivo PDF")
     if not file_balance.filename or not file_balance.filename.endswith(".pdf"):
         raise HTTPException(status_code=400, detail="file_balance debe ser un archivo PDF")
 
@@ -80,7 +100,8 @@ async def procesar_analisis(
     tmp_balance = None
 
     try:
-        tmp_carpeta = _save_upload(file_carpeta)
+        if file_carpeta is not None and file_carpeta.filename:
+            tmp_carpeta = _save_upload(file_carpeta)
         tmp_balance = _save_upload(file_balance)
 
         orquestador = PipelineOrquestador(repositorio)
