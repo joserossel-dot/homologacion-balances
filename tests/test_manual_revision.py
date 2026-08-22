@@ -2,14 +2,19 @@ from __future__ import annotations
 
 import pandas as pd
 import pytest
+import streamlit as st
 
 from app_validacion import (
     _codigo_compatible_con_origen,
+    _con_saldo_relevante,
+    _diagnosticar_cuadratura,
     _etiqueta_origen,
     _monto_presentacion,
     _origen_efectivo,
     _pendientes_revision,
     _resultado_periodo,
+    _reabrir_incompatibles,
+    propagar_clasificacion_resultados,
 )
 from reglas_especiales import ProcesadorReglasEspeciales, calcular_patrimonio_efectivo
 
@@ -207,6 +212,141 @@ class TestCuentaCorrienteSocios:
         assert resultado['patrimonio_efectivo'] == 86962737
 
 
+class TestPropagacionCompatible:
+    def test_no_propaga_activo_a_cuenta_homonima_del_pasivo(self):
+        df = pd.DataFrame([
+            {
+                'nombre_original': 'BOLETAS DE GARANTIA',
+                'origen_columna': 'activo', 'monto': 160000000,
+                'codigo_clasificado': 'AC.08', 'metodo': 'validacion_humana',
+                'confianza': 1.0, 'requiere_revision': False,
+            },
+            {
+                'nombre_original': 'BOLETAS DE GARANTIA',
+                'origen_columna': 'pasivo', 'monto': 160000000,
+                'codigo_clasificado': 'PC.08', 'metodo': 'origin_fallback',
+                'confianza': 0.55, 'requiere_revision': True,
+            },
+        ])
+        st.session_state['resultados'] = {'balance.pdf': df}
+
+        propagar_clasificacion_resultados(
+            'BOLETAS DE GARANTIA', 'AC.08', 'validacion_humana_propagada'
+        )
+
+        resultado = st.session_state['resultados']['balance.pdf']
+        assert resultado.at[0, 'codigo_clasificado'] == 'AC.08'
+        assert resultado.at[1, 'codigo_clasificado'] == 'PC.08'
+        assert resultado.at[1, 'requiere_revision']
+
+    def test_propaga_entre_cuentas_de_la_misma_naturaleza(self):
+        df = pd.DataFrame([
+            {
+                'nombre_original': 'BOLETAS DE GARANTIA',
+                'origen_columna': 'activo', 'monto': 160000000,
+                'codigo_clasificado': '', 'metodo': '',
+                'confianza': 0.0, 'requiere_revision': True,
+            },
+        ])
+        st.session_state['resultados'] = {'balance.pdf': df}
+
+        propagar_clasificacion_resultados(
+            'BOLETAS DE GARANTIA', 'AC.08', 'validacion_humana_propagada'
+        )
+
+        resultado = st.session_state['resultados']['balance.pdf']
+        assert resultado.at[0, 'codigo_clasificado'] == 'AC.08'
+        assert not resultado.at[0, 'requiere_revision']
+
+
+class TestCuadraturaBalanceHomologado:
+    def test_detecta_doble_impacto_de_clasificacion_en_lado_incorrecto(self):
+        df = pd.DataFrame([
+            {
+                'nombre_original': 'Caja', 'origen_columna': 'activo',
+                'monto': 1000.0, 'es_total': False,
+                'codigo_clasificado': 'AC.01', 'requiere_revision': False,
+            },
+            {
+                'nombre_original': 'Boletas de garantía',
+                'origen_columna': 'pasivo', 'monto': 100.0,
+                'es_total': False, 'codigo_clasificado': 'AC.08',
+                'requiere_revision': False,
+            },
+            {
+                'nombre_original': 'Capital', 'origen_columna': 'pasivo',
+                'monto': 900.0, 'es_total': False,
+                'codigo_clasificado': 'PAT.01', 'requiere_revision': False,
+            },
+        ])
+        clasificadas = df.copy()
+        agrupado = pd.DataFrame([
+            {'codigo_clasificado': 'AC.01', 'monto_total': 1000.0},
+            {'codigo_clasificado': 'AC.08', 'monto_total': 100.0},
+            {'codigo_clasificado': 'PAT.01', 'monto_total': 900.0},
+        ])
+
+        diagnostico = _diagnosticar_cuadratura(
+            df, agrupado, clasificadas, tolerancia=0
+        )
+
+        assert diagnostico['diferencia'] == 200.0
+        assert not diagnostico['cuadra']
+        assert diagnostico['incompatibles'].index.tolist() == [1]
+        assert bool(diagnostico['incompatibles'].at[1, 'explica_diferencia'])
+
+    def test_balance_corregido_cuadra(self):
+        df = pd.DataFrame([
+            {
+                'nombre_original': 'Caja', 'origen_columna': 'activo',
+                'monto': 1000.0, 'es_total': False,
+                'codigo_clasificado': 'AC.01', 'requiere_revision': False,
+            },
+            {
+                'nombre_original': 'Boletas de garantía',
+                'origen_columna': 'pasivo', 'monto': 100.0,
+                'es_total': False, 'codigo_clasificado': 'PC.08',
+                'requiere_revision': False,
+            },
+            {
+                'nombre_original': 'Capital', 'origen_columna': 'pasivo',
+                'monto': 900.0, 'es_total': False,
+                'codigo_clasificado': 'PAT.01', 'requiere_revision': False,
+            },
+        ])
+        agrupado = pd.DataFrame([
+            {'codigo_clasificado': 'AC.01', 'monto_total': 1000.0},
+            {'codigo_clasificado': 'PC.08', 'monto_total': 100.0},
+            {'codigo_clasificado': 'PAT.01', 'monto_total': 900.0},
+        ])
+
+        diagnostico = _diagnosticar_cuadratura(df, agrupado, df, tolerancia=0)
+
+        assert diagnostico['cuadra']
+        assert diagnostico['diferencia'] == 0.0
+        assert diagnostico['incompatibles'].empty
+
+    def test_reabre_solo_la_cuenta_incompatible(self):
+        df = pd.DataFrame([
+            {
+                'codigo_clasificado': 'AC.01', 'metodo': 'dictionary_exact',
+                'confianza': .98, 'requiere_revision': False,
+            },
+            {
+                'codigo_clasificado': 'AC.08', 'metodo': 'validacion_humana_propagada',
+                'confianza': 1.0, 'requiere_revision': False,
+            },
+        ])
+
+        resultado = _reabrir_incompatibles(df, [1])
+
+        assert resultado.at[0, 'codigo_clasificado'] == 'AC.01'
+        assert resultado.at[1, 'codigo_clasificado'] == ''
+        assert resultado.at[1, 'metodo'] == 'reapertura_cuadratura'
+        assert resultado.at[1, 'confianza'] == 0.0
+        assert resultado.at[1, 'requiere_revision']
+
+
 class TestPresentacionYResultado:
     def test_depreciacion_acumulada_resta_activo_fijo(self):
         assert _monto_presentacion(
@@ -255,6 +395,15 @@ class TestPendientesRevision:
         df.at[0, 'es_total'] = True
 
         assert 0 not in _pendientes_revision(df).index
+
+    def test_saldo_cero_tampoco_llega_al_resumen_ni_exportacion(self, df_resultados):
+        df = df_resultados.copy()
+        df.at[0, 'monto'] = 0
+
+        relevantes = _con_saldo_relevante(df)
+
+        assert 0 not in relevantes.index
+        assert 1 in relevantes.index
 
 
 class TestVisualNameChange:

@@ -190,6 +190,17 @@ def propagar_clasificacion_resultados(nombre_original: str, codigo_final: str, m
                 (df_res['codigo_clasificado'] == '') | 
                 (df_res['confianza'] < 1.0)
             )
+            if codigo_final != '__EXCLUIR__':
+                compatibles = df_res.apply(
+                    lambda row: _codigo_compatible_con_origen(
+                        codigo_final,
+                        row.get('origen_columna'),
+                        row.get('monto'),
+                        row.get('nombre_original'),
+                    ),
+                    axis=1,
+                )
+                mask_target &= compatibles
             if mask_target.any():
                 df_res.loc[mask_target, 'codigo_clasificado'] = codigo_final
                 df_res.loc[mask_target, 'metodo'] = metodo
@@ -436,6 +447,12 @@ def _pendientes_revision(df: pd.DataFrame) -> pd.DataFrame:
     pendientes = pendientes[~pendientes['es_total']]
     montos = pd.to_numeric(pendientes['monto'], errors='coerce')
     return pendientes[montos.isna() | montos.ne(0)]
+
+
+def _con_saldo_relevante(df: pd.DataFrame) -> pd.DataFrame:
+    """Excluye filas con saldo cero de clasificación, resumen y exportación."""
+    montos = pd.to_numeric(df['monto'], errors='coerce')
+    return df[montos.isna() | montos.ne(0)]
 
 
 def _explicar_clasificacion(hp, account_code: str, account_name: str, *,
@@ -918,6 +935,8 @@ def main():
                     for c in cuentas:
                         if c.monto is None and not c.codigo:
                             continue
+                        if c.monto is not None and float(c.monto) == 0:
+                            continue
                         if not c.codigo and PATRON_NO_CUENTA.match(c.nombre.strip()):
                             continue
                         _t0_legacy = time.perf_counter()
@@ -1007,8 +1026,12 @@ def main():
         from adapters.account_adapter import AccountAdapter
         from interpreters.balance_interpreter import BalanceInterpreter
 
-        hp = HomologationPipeline()
-        for archivo in archivos:
+        archivos_nuevos = [
+            archivo for archivo in archivos
+            if archivo.name not in st.session_state.resultados
+        ]
+        hp = HomologationPipeline() if archivos_nuevos else None
+        for archivo in archivos_nuevos:
             if archivo.name not in st.session_state.resultados:
                 with st.spinner(f"Clasificando cuentas de {archivo.name}..."):
                     _t0 = time.perf_counter()
@@ -1026,6 +1049,8 @@ def main():
 
                     for c in cuentas:
                         if c.monto is None and not c.codigo:
+                            continue
+                        if c.monto is not None and float(c.monto) == 0:
                             continue
                         if not c.codigo and PATRON_NO_CUENTA.match(c.nombre.strip()):
                             continue
@@ -1157,7 +1182,14 @@ def main():
                         break
                 if classified_code:
                     for fname, idx, cod in entries:
-                        if not cod or cod == '':
+                        row = st.session_state.resultados[fname].loc[idx]
+                        if ((not cod or cod == '')
+                                and _codigo_compatible_con_origen(
+                                    classified_code,
+                                    row.get('origen_columna'),
+                                    row.get('monto'),
+                                    row.get('nombre_original'),
+                                )):
                             st.session_state.resultados[fname].at[idx, 'codigo_clasificado'] = classified_code
                             st.session_state.resultados[fname].at[idx, 'metodo'] = 'propagado_automático'
                             st.session_state.resultados[fname].at[idx, 'confianza'] = 1.0
@@ -1232,26 +1264,43 @@ def main():
             pass
 
     with col_trabajo:
-        tab_resumen, tab_revision, tab_balance, tab_diccionario, tab_aprendizaje, tab_analytics, tab_conocimiento, tab_inteligencia, tab_km = st.tabs(
-            ["📈 Resumen", "🔍 Cola de Revisión", "📋 Balance Normalizado",
-             "📚 Diccionario", "🧠 Aprendizaje", "📊 Analytics", "📖 Conocimiento Documental",
-             "📈 Inteligencia del Dataset", "🧠 Knowledge Manager"]
+        tab_km = "🧠 Knowledge Manager"
+        vistas = [
+            "📈 Resumen", "🔍 Cola de Revisión", "📋 Balance Normalizado",
+            "📚 Diccionario", "🧠 Aprendizaje", "📊 Analytics",
+            "📖 Conocimiento Documental", "📈 Inteligencia del Dataset",
+            tab_km,
+        ]
+        vista_solicitada = st.session_state.pop("vista_trabajo_solicitada", None)
+        if vista_solicitada in vistas:
+            st.session_state["vista_trabajo"] = vista_solicitada
+        vista = st.selectbox(
+            "Vista de trabajo", vistas, key="vista_trabajo",
+            help="Solo se ejecuta la vista seleccionada para evitar recargas innecesarias.",
         )
 
-        with tab_resumen: _tab_resumen(df)
-        with tab_revision: _tab_revision(df, catalogo, motor=MotorHibridoLocal(st.session_state.diccionario), archivo_nombre=archivo_activo_name)
-        with tab_balance: _tab_balance(df, catalogo)
-        with tab_diccionario: _tab_diccionario()
-        with tab_conocimiento: _tab_conocimiento(archivo_activo, _doc_ctx, meta_activo)
-        with tab_inteligencia: _tab_inteligencia()
-        with tab_km: _tab_knowledge_manager()
-
-
-        with tab_aprendizaje:
+        if vista == "📈 Resumen":
+            _tab_resumen(df)
+        elif vista == "🔍 Cola de Revisión":
+            _tab_revision(
+                df, catalogo,
+                motor=MotorHibridoLocal(st.session_state.diccionario),
+                archivo_nombre=archivo_activo_name,
+            )
+        elif vista == "📋 Balance Normalizado":
+            _tab_balance(df, catalogo, archivo_activo_name)
+        elif vista == "📚 Diccionario":
+            _tab_diccionario()
+        elif vista == "🧠 Aprendizaje":
             _tab_aprendizaje()
-
-        with tab_analytics:
+        elif vista == "📊 Analytics":
             st.markdown("Analytics Dashboard (Work in Progress)")
+        elif vista == "📖 Conocimiento Documental":
+            _tab_conocimiento(archivo_activo, _doc_ctx, meta_activo)
+        elif vista == "📈 Inteligencia del Dataset":
+            _tab_inteligencia()
+        elif vista == tab_km:
+            _tab_knowledge_manager()
 
 
 def _visor_documento(archivo):
@@ -2013,8 +2062,166 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                         st.rerun()
 
 
-def _tab_balance(df: pd.DataFrame, catalogo: dict):
+def _diagnosticar_cuadratura(
+        df: pd.DataFrame, agrupado: pd.DataFrame,
+        clasificadas: pd.DataFrame, tolerancia: float = 1_000) -> dict:
+    """Concilia el balance homologado y localiza causas probables del descuadre."""
+    codigos = agrupado['codigo_clasificado'].fillna('').astype(str)
+    activo = agrupado[codigos.str.startswith(('AC.', 'ANC.'))]['monto_total'].sum()
+    pasivo_patrimonio = agrupado[
+        codigos.str.startswith(('PC.', 'PNC.', 'PAT.'))
+    ]['monto_total'].sum()
+    diferencia = float(activo - pasivo_patrimonio)
+
+    incompatibles = clasificadas[
+        ~clasificadas.apply(
+            lambda row: _codigo_compatible_con_origen(
+                row.get('codigo_clasificado'), row.get('origen_columna'),
+                row.get('monto'), row.get('nombre_original'),
+            ),
+            axis=1,
+        )
+    ].copy()
+    if not incompatibles.empty:
+        incompatibles['impacto_potencial'] = incompatibles['monto'].abs() * 2
+        incompatibles['explica_diferencia'] = (
+            incompatibles['impacto_potencial'] - abs(diferencia)
+        ).abs() <= tolerancia
+
+    relevantes = _con_saldo_relevante(df[~df['es_total']].copy())
+    sin_clasificar = relevantes[relevantes['codigo_clasificado'] == ''].copy()
+    excluidas = relevantes[relevantes['codigo_clasificado'] == '__EXCLUIR__'].copy()
+    total_cuentas = len(relevantes)
+    cuentas_clasificadas = total_cuentas - len(sin_clasificar) - len(excluidas)
+    cobertura = cuentas_clasificadas / total_cuentas if total_cuentas else 1.0
+
+    return {
+        'activo': float(activo),
+        'pasivo_patrimonio': float(pasivo_patrimonio),
+        'diferencia': diferencia,
+        'cuadra': abs(diferencia) <= tolerancia,
+        'tolerancia': tolerancia,
+        'incompatibles': incompatibles,
+        'sin_clasificar': sin_clasificar,
+        'excluidas': excluidas,
+        'total_cuentas': total_cuentas,
+        'cuentas_clasificadas': cuentas_clasificadas,
+        'cobertura': cobertura,
+    }
+
+
+def _reabrir_incompatibles(df: pd.DataFrame, indices) -> pd.DataFrame:
+    """Devuelve las clasificaciones incompatibles a la cola de revisión humana."""
+    resultado = df.copy()
+    indices_validos = resultado.index.intersection(indices)
+    if len(indices_validos):
+        resultado.loc[indices_validos, 'codigo_clasificado'] = ''
+        resultado.loc[indices_validos, 'metodo'] = 'reapertura_cuadratura'
+        resultado.loc[indices_validos, 'confianza'] = 0.0
+        resultado.loc[indices_validos, 'requiere_revision'] = True
+        if 'regla' in resultado.columns:
+            resultado.loc[indices_validos, 'regla'] = 'reapertura_cuadratura'
+        if 'evidencia' in resultado.columns:
+            resultado.loc[indices_validos, 'evidencia'] = (
+                'Clasificación incompatible detectada por conciliación contable'
+            )
+    return resultado
+
+
+def _mostrar_resumen_cuadratura(
+        diagnostico: dict, df: pd.DataFrame, archivo_nombre: str) -> None:
+    """Resumen ejecutivo, causas probables y navegación a revisión humana."""
+    st.subheader("✅ Control de cuadratura del balance homologado")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Activo normalizado", f"${diagnostico['activo']:,.0f}")
+    c2.metric("Pasivo + Patrimonio", f"${diagnostico['pasivo_patrimonio']:,.0f}")
+    c3.metric(
+        "Diferencia", f"${abs(diagnostico['diferencia']):,.0f}",
+        delta="Cuadra" if diagnostico['cuadra'] else "Requiere corrección",
+        delta_color="normal" if diagnostico['cuadra'] else "inverse",
+    )
+    c4.metric(
+        "Cobertura", f"{diagnostico['cobertura']:.1%}",
+        help=(f"{diagnostico['cuentas_clasificadas']} de "
+              f"{diagnostico['total_cuentas']} cuentas con saldo"),
+    )
+
+    if diagnostico['cuadra']:
+        st.success(
+            "El activo homologado coincide con pasivo más patrimonio dentro de "
+            f"la tolerancia de ${diagnostico['tolerancia']:,.0f}."
+        )
+        return
+
+    st.error(
+        "El balance homologado no cuadra. La descarga permanece disponible para "
+        "auditoría, pero el resultado requiere revisión humana."
+    )
+    incompatibles = diagnostico['incompatibles']
+    sin_clasificar = diagnostico['sin_clasificar']
+    excluidas = diagnostico['excluidas']
+
+    with st.container(border=True):
+        st.markdown("#### Causas probables")
+        if not incompatibles.empty:
+            exactas = incompatibles[incompatibles['explica_diferencia']]
+            if not exactas.empty:
+                st.warning(
+                    f"Se encontraron {len(exactas)} clasificación(es) incompatible(s) "
+                    "cuyo cambio de lado explica exactamente el descuadre."
+                )
+            else:
+                st.warning(
+                    f"Se encontraron {len(incompatibles)} clasificación(es) que "
+                    "contradicen la columna contable extraída."
+                )
+            tabla = incompatibles.copy()
+            tabla['Cuenta'] = tabla['nombre_original']
+            tabla['Columna extraída'] = tabla['origen_columna'].str.upper()
+            tabla['Clasificación actual'] = tabla['codigo_clasificado']
+            tabla['Monto'] = tabla['monto'].map(lambda x: f"${x:,.0f}")
+            tabla['Impacto si cambia de lado'] = tabla['impacto_potencial'].map(
+                lambda x: f"${x:,.0f}"
+            )
+            st.dataframe(
+                tabla[['Cuenta', 'Columna extraída', 'Clasificación actual',
+                       'Monto', 'Impacto si cambia de lado']],
+                use_container_width=True, hide_index=True,
+            )
+        if not sin_clasificar.empty:
+            st.warning(
+                f"Hay {len(sin_clasificar)} cuenta(s) con saldo sin clasificar por "
+                f"${sin_clasificar['monto'].abs().sum():,.0f}."
+            )
+        if not excluidas.empty:
+            st.info(
+                f"Hay {len(excluidas)} cuenta(s) excluida(s) por "
+                f"${excluidas['monto'].abs().sum():,.0f}."
+            )
+        if incompatibles.empty and sin_clasificar.empty and excluidas.empty:
+            st.info(
+                "No se detectó una causa única. Revise signos, cuentas contra-activo "
+                "y asignaciones de patrimonio cercanas al monto de la diferencia."
+            )
+
+        if not incompatibles.empty:
+            if st.button(
+                f"↩️ Reabrir {len(incompatibles)} cuenta(s) incompatible(s) en revisión",
+                type="primary", use_container_width=True,
+            ):
+                st.session_state.resultados[archivo_nombre] = _reabrir_incompatibles(
+                    df, incompatibles.index
+                )
+                st.session_state['vista_trabajo_solicitada'] = "🔍 Cola de Revisión"
+                st.rerun()
+        elif st.button("↩️ Volver a la clasificación humana", use_container_width=True):
+            st.session_state['vista_trabajo_solicitada'] = "🔍 Cola de Revisión"
+            st.rerun()
+
+
+def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
     clasificadas = df[(df['codigo_clasificado'] != '') & (df['codigo_clasificado'] != '__EXCLUIR__') & (~df['es_total'])].copy()
+    clasificadas = _con_saldo_relevante(clasificadas)
     if clasificadas.empty:
         st.info("No hay cuentas clasificadas todavía.")
         return
@@ -2051,6 +2258,25 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict):
     orden_cat = ['activo_corriente', 'activo_no_corriente', 'pasivo_corriente', 'pasivo_no_corriente', 'patrimonio', 'resultado']
     agrupado['orden'] = agrupado['categoria'].map(lambda c: orden_cat.index(c) if c in orden_cat else 99)
     agrupado = agrupado.sort_values(['orden', 'codigo_clasificado'])
+
+    diagnostico = _diagnosticar_cuadratura(df, agrupado, clasificadas)
+    _mostrar_resumen_cuadratura(diagnostico, df, archivo_nombre)
+
+    resultado_periodo_display = resultado_periodo or 0.0
+    r1, r2, r3 = st.columns(3)
+    ganancias = clasificadas[
+        clasificadas['origen_columna_efectiva'] == 'ganancia'
+    ]['monto'].abs().sum()
+    perdidas = clasificadas[
+        clasificadas['origen_columna_efectiva'] == 'perdida'
+    ]['monto'].abs().sum()
+    r1.metric("Ganancias", f"${ganancias:,.0f}")
+    r2.metric("Pérdidas", f"${perdidas:,.0f}")
+    r3.metric(
+        "Resultado del período", f"${resultado_periodo_display:,.0f}",
+        delta="Utilidad" if resultado_periodo_display >= 0 else "Pérdida",
+    )
+    st.divider()
 
     LABELS_CAT = {
         'activo_corriente': '🟦 Activo Corriente', 'activo_no_corriente': '🟦 Activo No Corriente',
