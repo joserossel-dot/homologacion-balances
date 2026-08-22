@@ -5,6 +5,8 @@ import pytest
 import streamlit as st
 
 from app_validacion import (
+    MotorHibridoLocal,
+    _alternativas_revision,
     _codigo_compatible_con_origen,
     _con_saldo_relevante,
     _diagnosticar_cuadratura,
@@ -17,6 +19,56 @@ from app_validacion import (
     propagar_clasificacion_resultados,
 )
 from reglas_especiales import ProcesadorReglasEspeciales, calcular_patrimonio_efectivo
+
+
+class TestAlternativasRevision:
+    def test_rankea_aprendizaje_humano_y_filtra_tipo_incompatible(self):
+        catalogo = {
+            'AC.03': {'nombre_estandar': 'Deudores comerciales'},
+            'PC.05': {'nombre_estandar': 'Proveedores comerciales'},
+            'ER.01': {'nombre_estandar': 'Ingresos por ventas'},
+        }
+        motor = MotorHibridoLocal([
+            {
+                'cuenta_original': 'Clientes por venta de suministros',
+                'codigo_estandar': 'AC.03',
+                'fuente': 'validacion_humana',
+            },
+            {
+                'cuenta_original': 'Proveedores por pagar',
+                'codigo_estandar': 'PC.05',
+                'fuente': 'validacion_humana',
+            },
+        ])
+
+        alternativas = _alternativas_revision(
+            nombre='Clientes venta suministros', sugerido='', confianza=0,
+            origen_columna='activo', monto=100,
+            catalogo=catalogo, motor=motor,
+        )
+
+        assert alternativas[0]['codigo'] == 'AC.03'
+        assert alternativas[0]['fuente'] == 'Neon · validación humana'
+        assert 'PC.05' not in {item['codigo'] for item in alternativas}
+
+    def test_conserva_sugerencia_actual_y_deduplica_codigo(self):
+        catalogo = {'AC.03': {'nombre_estandar': 'Deudores comerciales'}}
+        motor = MotorHibridoLocal([
+            {
+                'cuenta_original': 'Clientes',
+                'codigo_estandar': 'AC.03',
+                'fuente': 'diccionario',
+            },
+        ])
+
+        alternativas = _alternativas_revision(
+            nombre='Clientes', sugerido='AC.03', confianza=0.98,
+            origen_columna='activo', monto=100,
+            catalogo=catalogo, motor=motor,
+        )
+
+        assert [item['codigo'] for item in alternativas] == ['AC.03']
+        assert alternativas[0]['score'] == 1.0
 
 
 def _nombre_mostrar(row: pd.Series) -> str:

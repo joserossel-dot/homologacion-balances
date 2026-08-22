@@ -459,6 +459,81 @@ def _con_saldo_relevante(df: pd.DataFrame) -> pd.DataFrame:
     return df[montos.isna() | montos.ne(0)]
 
 
+def _alternativas_revision(
+    *, nombre: str, sugerido: str, confianza: float,
+    origen_columna, monto, catalogo: dict, motor,
+    limite: int = 3,
+) -> list[dict]:
+    """Rankea candidatos compatibles sin alterar la decisión del motor."""
+    candidatos: dict[str, dict] = {}
+
+    def agregar(codigo: str | None, score: float, fuente: str, evidencia: str):
+        if not codigo or codigo not in catalogo:
+            return
+        if not _codigo_compatible_con_origen(
+            codigo, origen_columna, monto, nombre,
+        ):
+            return
+        item = {
+            "codigo": codigo,
+            "nombre": catalogo[codigo].get("nombre_estandar", codigo),
+            "score": max(0.0, min(float(score), 1.0)),
+            "fuente": fuente,
+            "evidencia": evidencia,
+        }
+        previous = candidatos.get(codigo)
+        if previous is None or item["score"] > previous["score"]:
+            candidatos[codigo] = item
+
+    agregar(
+        sugerido or None,
+        float(confianza or 0.0),
+        "Sugerencia actual",
+        "Clasificación producida por el pipeline operativo.",
+    )
+
+    normalized = normalizar_nombre(nombre)
+    dictionary_names = getattr(motor, "dic_lista", []) or []
+    dictionary = getattr(motor, "dic_exacto", {}) or {}
+    if normalized and dictionary_names:
+        for matched_name, similarity, _ in process.extract(
+            normalized, dictionary_names,
+            scorer=fuzz.token_set_ratio, limit=max(limite * 3, 8),
+        ):
+            if similarity < 55:
+                continue
+            entry = dictionary.get(matched_name) or {}
+            source = str(entry.get("fuente") or "Diccionario")
+            human = any(token in source.lower() for token in (
+                "human", "manual", "validacion", "analista",
+            ))
+            agregar(
+                entry.get("codigo_estandar"),
+                similarity / 100.0 + (0.03 if human else 0.0),
+                "Neon · validación humana" if human else "Diccionario",
+                f"Cuenta similar: {entry.get('cuenta_original', matched_name)} "
+                f"({similarity:.0f}% de similitud).",
+            )
+
+    catalog_names = {
+        codigo: normalizar_nombre(str(entry.get("nombre_estandar") or codigo))
+        for codigo, entry in catalogo.items()
+    }
+    for codigo, catalog_name in catalog_names.items():
+        similarity = fuzz.token_set_ratio(normalized, catalog_name)
+        if similarity >= 58:
+            agregar(
+                codigo, similarity / 100.0, "Catálogo maestro",
+                f"Nombre estándar similar: {catalogo[codigo].get('nombre_estandar', codigo)} "
+                f"({similarity:.0f}%).",
+            )
+
+    return sorted(
+        candidatos.values(),
+        key=lambda item: (-item["score"], item["codigo"]),
+    )[:max(1, int(limite))]
+
+
 def _explicar_clasificacion(hp, account_code: str, account_name: str, *,
                             account_tipo: str | None = None,
                             origen_columna=None,
@@ -2033,7 +2108,32 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
         if qc.button("⬜ Limpiar selección", use_container_width=True):
             st.session_state.lote_seleccion = set(); st.rerun()
 
-    for idx, row in pendientes.iterrows():
+    pc1, pc2 = st.columns([1, 2])
+    with pc1:
+        page_size = st.selectbox(
+            "Cuentas por página", [10, 25, 50], index=0,
+            key="revision_page_size",
+        )
+    total_pages = max(1, (len(pendientes) + page_size - 1) // page_size)
+    current_page = min(
+        max(int(st.session_state.get("revision_page", 1)), 1),
+        total_pages,
+    )
+    if st.session_state.get("revision_page") != current_page:
+        st.session_state["revision_page"] = current_page
+    with pc2:
+        page = int(st.number_input(
+            "Página", min_value=1, max_value=total_pages,
+            step=1, key="revision_page",
+        ))
+    start = (page - 1) * page_size
+    visible = pendientes.iloc[start:start + page_size]
+    st.caption(
+        f"Mostrando {start + 1}–{min(start + page_size, len(pendientes))} "
+        f"de {len(pendientes)} pendientes · página {page} de {total_pages}."
+    )
+
+    for idx, row in visible.iterrows():
         seleccionada = idx in st.session_state.lote_seleccion
         with st.container(border=seleccionada):
             c0, c1, c2 = st.columns([0.3, 4, 4])
@@ -2147,6 +2247,45 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                             _nombre_mostrar(row))):
                     sugerido = ''
                 st.write(f"Sugerido: **{sugerido or '(ninguno)'}**")
+
+                alternativas = _alternativas_revision(
+                    nombre=_nombre_mostrar(row),
+                    sugerido=sugerido,
+                    confianza=float(row.get('confianza') or 0.0),
+                    origen_columna=row.get('origen_columna'),
+                    monto=row.get('monto'),
+                    catalogo=catalogo,
+                    motor=motor,
+                )
+                if alternativas:
+                    st.caption("Alternativas compatibles · selección asistida, no automática")
+                    if (
+                        len(alternativas) > 1
+                        and alternativas[0]["codigo"] != alternativas[1]["codigo"]
+                        and alternativas[0]["score"] - alternativas[1]["score"] <= 0.05
+                    ):
+                        st.warning(
+                            "Señales contradictorias: los dos primeros candidatos "
+                            "tienen relevancia similar. Requiere criterio del analista."
+                        )
+                    alt_cols = st.columns(len(alternativas))
+                    for alt_col, alternativa in zip(alt_cols, alternativas):
+                        with alt_col:
+                            st.markdown(
+                                f"**`{alternativa['codigo']}`**  \n"
+                                f"{alternativa['nombre']}"
+                            )
+                            st.caption(
+                                f"{alternativa['score']:.0%} · {alternativa['fuente']}  \n"
+                                f"{alternativa['evidencia']}"
+                            )
+                            if st.button(
+                                "Usar",
+                                key=f"usar_alt_{idx}_{alternativa['codigo']}",
+                                use_container_width=True,
+                            ):
+                                st.session_state[f"sel_{idx}"] = alternativa['codigo']
+                                st.rerun()
 
                 if mostrar_todas:
                     opciones_fila = opciones_codigo
