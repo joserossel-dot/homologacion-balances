@@ -105,6 +105,9 @@ class ClasificadorCodigo:
 
     # ── FORMATO 2: compacto sin separador XYYZZZ (Wilug, Inmobiliaria) ────────
     MAPEO_COMPACTO = {
+        # Planes compactos de ocho dígitos: bloque 120x corresponde a
+        # propiedades, planta y equipo; 1206 agrupa depreciación acumulada.
+        r'^120[1-6]':      ('ANC.01', 0.96),
         r'^111[0-9]':      ('AC.01', 0.97),
         r'^112[0-9]':      ('AC.01', 0.97),
         r'^113[0-9]':      ('AC.07', 0.93),

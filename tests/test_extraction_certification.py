@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import app_validacion as app
 import parser_universal as parser
+from clasificador_codigo_cuenta import ClasificadorCodigo
 
 
 class FakePage:
@@ -134,6 +135,107 @@ def test_parsear_linea_elimina_raya_ocr_antes_del_nombre():
         assert cuenta.nombre == "Fondo Fijo"
 
 
+def test_total_con_comilla_ocr_no_se_considera_detalle():
+    cuenta = parser.parsear_linea(
+        "“Total Acumulado 100 100 50 50 40 40 10 10",
+        1, parser.FormatoCodigo.SIN_CODIGO, ".",
+    )
+
+    assert cuenta is not None
+    assert cuenta.es_total is True
+
+
+def test_resultado_con_codigo_es_cuenta_y_no_subtotal():
+    cuenta = parser.parsear_linea(
+        "23070200 Resultado Acumuladas 100 40 60 0 60 0 0 0",
+        1, parser.FormatoCodigo.COMPACTO, ".",
+    )
+
+    assert cuenta is not None
+    assert cuenta.codigo == "23070200"
+    assert cuenta.es_total is False
+
+
+def test_codigo_compacto_120_clasifica_activo_fijo_y_depreciacion():
+    classifier = ClasificadorCodigo()
+
+    asset = classifier.clasificar("12040100")
+    depreciation = classifier.clasificar("12060305")
+
+    assert asset is not None and asset.codigo_estandar == "ANC.01"
+    assert depreciation is not None and depreciation.codigo_estandar == "ANC.01"
+    assert asset.confianza == 0.96
+
+
+def test_certificacion_codificada_ignora_ruido_sin_codigo():
+    values = {
+        "debitos": 100.0, "creditos": 0.0,
+        "saldo_deudor": 100.0, "saldo_acreedor": 0.0,
+        "activo": 100.0, "pasivo": 0.0,
+        "perdida": 0.0, "ganancia": 0.0,
+    }
+    detalles = [
+        parser.CuentaRaw(i, f"11010{i}", f"Caja {i}", 100,
+                         montos_columnas=dict(values))
+        for i in range(1, 4)
+    ]
+    ruido = parser.CuentaRaw(
+        4, None, "REPRESENTANTE LEGAL", 999,
+        montos_columnas={column: 999.0 for column in parser.RAW_MONETARY_COLUMNS},
+    )
+    subtotal = parser.CuentaRaw(
+        5, None, "SUMAS", 300, es_total=True,
+        montos_columnas={key: value * 3 for key, value in values.items()},
+    )
+
+    result = parser.certificar_extraccion_columnas([*detalles, ruido, subtotal])
+
+    assert result.estado == "certificada"
+    assert result.filas_evaluadas == 3
+
+
+def test_parsear_linea_reconstruye_movimiento_ocr_desde_saldo_consistente():
+    cuenta = parser.parsear_linea(
+        "12020800 Termo 1.201.569.748 0 569.748 0 569.748 0 0 0",
+        1, parser.FormatoCodigo.COMPACTO, ".",
+    )
+
+    assert cuenta is not None
+    assert cuenta.montos_columnas["debitos"] == 569748
+    assert cuenta.columnas_derivadas == ["debitos"]
+
+
+def test_parsear_linea_elimina_movimiento_fantasma_con_tres_evidencias():
+    cuenta = parser.parsear_linea(
+        "12060305 Depreciación Acumulada 1.148 2.730.292 0 2.730.292 0 2.730.292 0 0",
+        1, parser.FormatoCodigo.COMPACTO, ".",
+    )
+
+    assert cuenta is not None
+    assert cuenta.montos_columnas["debitos"] == 0
+    assert cuenta.montos_columnas["creditos"] == 2730292
+    assert cuenta.columnas_derivadas == ["debitos"]
+
+
+def test_total_acumulado_completa_par_de_saldos_y_certifica_detalle():
+    lines = [
+        "110101 Caja 100 0 100 0 100 0 0 0",
+        "210101 Proveedores 0 40 0 40 0 40 0 0",
+        "410101 Ventas 0 60 0 60 0 0 0 60",
+        "Total Acumulado 100 100 0 100 100 40 0 60",
+    ]
+    cuentas = [
+        parser.parsear_linea(line, i, parser.FormatoCodigo.COMPACTO, ".")
+        for i, line in enumerate(lines, 1)
+    ]
+
+    assert all(cuenta is not None for cuenta in cuentas)
+    assert cuentas[-1].montos_columnas["saldo_deudor"] == 100
+    result = parser.certificar_extraccion_columnas(cuentas)
+    assert result.estado == "parcial"
+    assert not any(result.diferencias.values())
+
+
 def test_extractor_acepta_sinonimos_y_filas_sin_codigo():
     page = FakePage([
         _alternate_header(),
@@ -156,6 +258,28 @@ def test_extractor_acepta_sinonimos_y_filas_sin_codigo():
     assert cuenta.codigo is None
     assert cuenta.nombre == "Caja principal"
     assert cuenta.origen_columna == parser.OrigenColumna.ACTIVO
+
+
+def test_extractor_acepta_encabezado_ocr_con_plural_y_debitos_deformado():
+    page = FakePage([
+        (10, [
+            (120, 190, "CUENTA"), (236, 250, "pEBITOS"),
+            (268, 283, "CREDITOS"), (301, 314, "DEUDOR"),
+            (331, 348, "ACREEDOR"), (366, 378, "ACTIVOS"),
+            (399, 411, "PASIVOS"), (428, 444, "PERDIDA"),
+            (457, 475, "GANANCIA"),
+        ]),
+        _row(20, "11010100", "Fondo Fijo", [
+            "400.000", "0", "400.000", "0", "400.000", "0", "0", "0",
+        ]),
+    ])
+
+    lines, centers = parser._extraer_tabla_balance_por_coordenadas(page)
+
+    assert centers is not None
+    assert lines == [
+        "11010100 Fondo Fijo 400.000 0 400.000 0 400.000 0 0 0",
+    ]
 
 
 def test_extractor_detecta_encabezado_distribuido_en_dos_lineas():

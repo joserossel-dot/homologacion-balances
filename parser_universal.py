@@ -100,12 +100,12 @@ def _agrupar_palabras_por_linea(words: list[dict], tolerancia: float = 1.5) -> l
 
 _HEADER_ALIASES = {
     "nombre": {"CUENTA", "NOMBRE", "DESCRIPCION", "DETALLE"},
-    "debitos": {"DEBITOS", "DEBITO", "DEBE"},
+    "debitos": {"DEBITOS", "DEBITO", "DEBE", "PEBITOS", "DEBIT0S"},
     "creditos": {"CREDITOS", "CREDITO", "HABER"},
     "saldo_deudor": {"DEUDOR"},
     "saldo_acreedor": {"ACREEDOR", "ACREEEDOR"},
-    "activo": {"ACTIVO"},
-    "pasivo": {"PASIVO", "PASIWO", "PATRIMONIO"},
+    "activo": {"ACTIVO", "ACTIVOS"},
+    "pasivo": {"PASIVO", "PASIVOS", "PASIWO", "PATRIMONIO"},
     "perdida": {"PERDIDA", "PERDIDAS"},
     "ganancia": {"GANANCIA", "GANANCIAS"},
 }
@@ -759,6 +759,11 @@ def certificar_extraccion_columnas(
         cuenta for cuenta in cuentas
         if not cuenta.es_total and cuenta.montos_columnas
     ]
+    # En balances con plan de cuentas explicito, encabezados, firmas y notas
+    # OCR sin codigo no son filas contables y no deben afectar la cuadratura.
+    filas_codificadas = [cuenta for cuenta in filas_detalle if cuenta.codigo]
+    if len(filas_codificadas) >= 3:
+        filas_detalle = filas_codificadas
     filas_inconsistentes: list[int] = []
     for cuenta in filas_detalle:
         values = cuenta.montos_columnas
@@ -801,7 +806,10 @@ def certificar_extraccion_columnas(
         if cuenta.es_total and cuenta.montos_columnas
         and (
             "subtotal" in normalized_name(cuenta)
-            or normalized_name(cuenta) in {"sumas", "sumas iguales"}
+            or normalized_name(cuenta) in {
+                "sumas", "sumas iguales",
+            }
+            or normalized_name(cuenta).startswith("total acumulado")
         )
     ]
     if not candidatos:
@@ -841,7 +849,12 @@ def certificar_extraccion_columnas(
             filas_inconsistentes=filas_inconsistentes,
             totales_finales_validos=totales_finales_validos,
         )
-    total_impreso = candidatos[-1].montos_columnas
+    acumulados = [
+        cuenta for cuenta in candidatos
+        if normalized_name(cuenta).startswith("total acumulado")
+    ]
+    subtotal_referencia = acumulados[-1] if acumulados else candidatos[-1]
+    total_impreso = subtotal_referencia.montos_columnas
     calculados = {column: 0.0 for column in RAW_MONETARY_COLUMNS}
     filas = 0
     for cuenta in filas_detalle:
@@ -878,13 +891,18 @@ def certificar_extraccion_columnas(
         razones.append("La fila TOTALES IGUALES no está cuadrada en sus pares de columnas.")
     failed = bool(fallidas or filas_inconsistentes or totales_finales_validos is False)
     filas_derivadas = [cuenta.linea for cuenta in filas_detalle if cuenta.columnas_derivadas]
-    if filas_derivadas and not failed:
+    total_derivado = bool(subtotal_referencia.columnas_derivadas)
+    if (filas_derivadas or total_derivado) and not failed:
         razones.append(
             f"{len(filas_derivadas)} filas contienen movimientos reconstruidos "
-            "desde saldos y clasificación; requieren revisión humana."
+            "desde saldos y clasificación"
+            + (" y el subtotal fue completado" if total_derivado else "")
+            + "; requieren revisión humana."
         )
     return CertificacionExtraccion(
-        estado="fallida" if failed else ("parcial" if filas_derivadas else "certificada"),
+        estado="fallida" if failed else (
+            "parcial" if filas_derivadas or total_derivado else "certificada"
+        ),
         metodo=metodo,
         totales_impresos={k: float(total_impreso.get(k, 0.0) or 0.0) for k in RAW_MONETARY_COLUMNS},
         totales_calculados={k: round(v, 2) for k, v in calculados.items()},
@@ -1397,7 +1415,8 @@ def parsear_linea(
     if not nombre or len(nombre) < 3:
         return None
 
-    es_total = bool(PATRON_TOTAL.match(nombre))
+    nombre_para_total = re.sub(r"^[^\w]+", "", nombre).strip()
+    es_total = codigo is None and bool(PATRON_TOTAL.match(nombre_para_total))
 
     # Determinar orden de columnas: si ENABLE_DYNAMIC_LAYOUT está activo
     # y se proporcionó un column_order con confianza suficiente, usarlo.
@@ -1456,13 +1475,45 @@ def parsear_linea(
             montos_columnas["activo"] + montos_columnas["pasivo"]
             + montos_columnas["perdida"] + montos_columnas["ganancia"]
         )
-        if debit == 0 and credit == 0 and abs(debtor + creditor - classified) <= 10:
-            if debtor != 0 and creditor == 0:
+        balance = debtor - creditor
+        classification_consistent = abs(debtor + creditor - classified) <= 10
+        movement_consistent = abs(debit - credit - balance) <= 10
+        movement_is_implausible = abs(debit - credit) > max(
+            abs(balance) * 10, abs(balance) + 1000,
+        )
+        if classification_consistent and not movement_consistent:
+            phantom_limit = max(10_000.0, max(abs(debit), abs(credit)) * 0.01)
+            if debit == 0 and credit == 0 and debtor != 0 and creditor == 0:
                 montos_columnas["debitos"] = debtor
                 columnas_derivadas.append("debitos")
-            elif creditor != 0 and debtor == 0:
+            elif debit == 0 and credit == 0 and creditor != 0 and debtor == 0:
                 montos_columnas["creditos"] = creditor
                 columnas_derivadas.append("creditos")
+            elif (
+                debtor == 0 and abs(credit - creditor) <= 10
+                and 0 < abs(debit) <= phantom_limit
+            ):
+                montos_columnas["debitos"] = 0.0
+                columnas_derivadas.append("debitos")
+            elif (
+                creditor == 0 and abs(debit - debtor) <= 10
+                and 0 < abs(credit) <= phantom_limit
+            ):
+                montos_columnas["creditos"] = 0.0
+                columnas_derivadas.append("creditos")
+            elif movement_is_implausible and credit == 0 and balance >= 0:
+                montos_columnas["debitos"] = balance
+                columnas_derivadas.append("debitos")
+            elif movement_is_implausible and debit == 0 and balance < 0:
+                montos_columnas["creditos"] = -balance
+                columnas_derivadas.append("creditos")
+        if es_total and debit == credit and debit != 0:
+            if debtor == 0 and creditor != 0:
+                montos_columnas["saldo_deudor"] = creditor
+                columnas_derivadas.append("saldo_deudor")
+            elif creditor == 0 and debtor != 0:
+                montos_columnas["saldo_acreedor"] = debtor
+                columnas_derivadas.append("saldo_acreedor")
 
     return CuentaRaw(
         linea=numero_linea,
@@ -1920,14 +1971,22 @@ class ParserPDF:
 
                 texto = ocr_pagina(img_path, rotacion_global)
                 words_tsv = ocr_pagina_tsv(img_path, rotacion_global)
+                tabla_coordenadas_usada = False
                 if words_tsv:
                     tabla_ocr, detected_centers = _extraer_tabla_balance_por_coordenadas(
-                        _OCRWordsPage(words_tsv), None,
+                        _OCRWordsPage(words_tsv), coordinate_centers,
                     )
                     if len(tabla_ocr) >= 3 and detected_centers:
+                        coordinate_centers = detected_centers
                         texto = "\n".join(tabla_ocr)
                         self._extraction_method = "ocr_coordinates_8_amounts"
-                if _ocr_requiere_alternativa(texto, pagina == n_paginas):
+                        tabla_coordenadas_usada = True
+                # Una tabla reconstruida por coordenadas ya contiene la misma
+                # pagina. Fusionarla con PSM 4 duplicaba sus cuentas y montos.
+                if (
+                    not tabla_coordenadas_usada
+                    and _ocr_requiere_alternativa(texto, pagina == n_paginas)
+                ):
                     texto_tabla = ocr_pagina(img_path, rotacion_global, psm=4)
                     texto, estrategia = _combinar_candidatos_ocr(texto, texto_tabla)
                     if estrategia != "principal":
