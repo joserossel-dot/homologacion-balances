@@ -25,9 +25,10 @@ RUN poetry config virtualenvs.create false \
 # Copiar el código y registrar la fecha UTC del artefacto desplegado.
 COPY . .
 RUN date -u +%Y-%m-%dT%H:%M:%SZ > /app/.build_date
+RUN chmod +x start.sh
 
 # Forzamos a Python a mirar tanto en la raíz como en la carpeta src
 ENV PYTHONPATH="/app:/app/src"
 
-# CAMBIO CRUCIAL: Arrancamos con 'streamlit run', asignando el puerto 10000 de Render
-CMD ["sh", "-c", "streamlit run app_validacion.py --server.port=${PORT:-10000} --server.address=0.0.0.0"]
+# Arrancamos con el script orquestador start.sh que levanta ambos procesos
+CMD ["sh", "start.sh"]
