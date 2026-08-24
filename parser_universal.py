@@ -209,7 +209,7 @@ def _extraer_tabla_balance_8_columnas(page) -> list[str]:
     return []
 
 
-def _agrupar_palabras_por_linea(words: list[dict], tolerancia: float = 1.5) -> list[list[dict]]:
+def _agrupar_palabras_por_linea(words: list[dict], tolerancia: float = 2.5) -> list[list[dict]]:
     """Agrupa palabras por coordenada vertical sin depender de bordes de tabla."""
     grupos: list[list[dict]] = []
     for word in sorted(words, key=lambda item: (float(item["top"]), float(item["x0"]))):
