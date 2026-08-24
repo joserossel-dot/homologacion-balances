@@ -17,6 +17,7 @@ from app_validacion import (
     _pendientes_revision,
     _resultado_periodo,
     _reabrir_incompatibles,
+    _seleccion_lote_actualizada,
     propagar_clasificacion_resultados,
 )
 from parser_universal import CuentaRaw, OrigenColumna
@@ -71,6 +72,20 @@ class TestAlternativasRevision:
 
         assert [item['codigo'] for item in alternativas] == ['AC.03']
         assert alternativas[0]['score'] == 1.0
+
+
+class TestSeleccionLote:
+    def test_reemplaza_agrega_y_quita_sin_mutar_el_original(self):
+        original = {1, 2}
+
+        assert _seleccion_lote_actualizada(original, [3], 'reemplazar') == {3}
+        assert _seleccion_lote_actualizada(original, [3], 'agregar') == {1, 2, 3}
+        assert _seleccion_lote_actualizada(original, [2], 'quitar') == {1}
+        assert original == {1, 2}
+
+    def test_rechaza_accion_desconocida(self):
+        with pytest.raises(ValueError, match='Acción de selección desconocida'):
+            _seleccion_lote_actualizada(set(), [], 'alternar')
 
 
 def test_editor_excluye_ruido_y_permite_marcar_control():

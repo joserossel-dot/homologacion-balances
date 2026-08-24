@@ -20,6 +20,7 @@ Funcionalidad:
     6. Feedback loop: las correcciones se agregan al diccionario y son descargables
 """
 
+import hashlib
 import json
 import os
 import re
@@ -179,6 +180,43 @@ def normalizar_nombre(nombre: str) -> str:
     n = re.sub(r"[^\w\sñáéíóú]", " ", n)
     n = re.sub(r"\s+", " ", n)
     return n.strip()
+
+
+def _seleccion_lote_actualizada(
+    seleccion_actual: set, indices: list, accion: str,
+) -> set:
+    """Calcula la selección en lote sin depender del ciclo de Streamlit."""
+    seleccion = set(seleccion_actual)
+    objetivos = set(indices)
+    if accion == 'reemplazar':
+        return objetivos
+    if accion == 'agregar':
+        return seleccion | objetivos
+    if accion == 'quitar':
+        return seleccion - objetivos
+    raise ValueError(f"Acción de selección desconocida: {accion}")
+
+
+def _reemplazar_seleccion_lote(indices: list, checkbox_prefix: str) -> None:
+    """Sincroniza selección y widgets antes del único rerun normal."""
+    anterior = set(st.session_state.get('lote_seleccion', set()))
+    nueva = _seleccion_lote_actualizada(anterior, indices, 'reemplazar')
+    st.session_state.lote_seleccion = nueva
+    for idx in anterior | nueva:
+        st.session_state[f"{checkbox_prefix}_{idx}"] = idx in nueva
+
+
+def _alternar_seleccion_lote(idx, checkbox_key: str) -> None:
+    """Actualiza una casilla sin encadenar un segundo st.rerun()."""
+    accion = 'agregar' if st.session_state.get(checkbox_key, False) else 'quitar'
+    st.session_state.lote_seleccion = _seleccion_lote_actualizada(
+        set(st.session_state.get('lote_seleccion', set())), [idx], accion,
+    )
+
+
+def _asignar_estado_widget(key: str, value) -> None:
+    """Permite que un botón actualice otro widget antes del rerun."""
+    st.session_state[key] = value
 
 
 def propagar_clasificacion_resultados(nombre_original: str, codigo_final: str, metodo: str):
@@ -2209,7 +2247,12 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
     # seleccionables (cálculo / TOTAL). Ver catalog_selection.py.
     opciones_codigo = [''] + opciones_clasificacion(catalogo) + ['➕ NUEVA CATEGORÍA', '🚫 NO INCLUIR']
 
-    if 'lote_seleccion' not in st.session_state:
+    doc_key = hashlib.sha1(archivo_nombre.encode('utf-8')).hexdigest()[:10]
+    checkbox_prefix = f"chk_{doc_key}"
+    if st.session_state.get('lote_archivo') != archivo_nombre:
+        st.session_state.lote_archivo = archivo_nombre
+        st.session_state.lote_seleccion = set()
+    elif 'lote_seleccion' not in st.session_state:
         st.session_state.lote_seleccion = set()
 
     n_sel = len(st.session_state.lote_seleccion)
@@ -2220,10 +2263,10 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
             cat_lote = st.selectbox(
                 "Clasificar todas las seleccionadas como:", opciones_codigo,
                 format_func=lambda c: f"{c} — {catalogo[c]['nombre_estandar']}" if c in catalogo else c if c else "(elegir categoría)",
-                key="lote_categoria"
+                key=f"lote_categoria_{doc_key}"
             )
         with bc2:
-            alcance_lote = st.radio("Alcance", ["Solo este caso", "Agregar al diccionario"], index=1, horizontal=True, key="lote_alcance")
+            alcance_lote = st.radio("Alcance", ["Solo este caso", "Agregar al diccionario"], index=1, horizontal=True, key=f"lote_alcance_{doc_key}")
         with bc3:
             st.write(""); st.write("")
             confirmar_lote = st.button(f"✅ Confirmar lote ({n_sel})", disabled=(n_sel == 0 or not cat_lote), use_container_width=True)
@@ -2285,30 +2328,39 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                 st.rerun()
 
         qa, qb, qc = st.columns(3)
-        if qa.button("☑️ Seleccionar todas", use_container_width=True):
-            st.session_state.lote_seleccion = set(pendientes.index.tolist()); st.rerun()
-        if qb.button("🟦 Seleccionar sin clasificar", use_container_width=True):
-            st.session_state.lote_seleccion = set(pendientes[pendientes['codigo_clasificado'] == ''].index.tolist()); st.rerun()
-        if qc.button("⬜ Limpiar selección", use_container_width=True):
-            st.session_state.lote_seleccion = set(); st.rerun()
+        qa.button(
+            "☑️ Seleccionar todas", use_container_width=True,
+            on_click=_reemplazar_seleccion_lote,
+            args=(pendientes.index.tolist(), checkbox_prefix),
+        )
+        qb.button(
+            "🟦 Seleccionar sin clasificar", use_container_width=True,
+            on_click=_reemplazar_seleccion_lote,
+            args=(pendientes[pendientes['codigo_clasificado'] == ''].index.tolist(), checkbox_prefix),
+        )
+        qc.button(
+            "⬜ Limpiar selección", use_container_width=True,
+            on_click=_reemplazar_seleccion_lote,
+            args=([], checkbox_prefix),
+        )
 
     pc1, pc2 = st.columns([1, 2])
     with pc1:
         page_size = st.selectbox(
             "Cuentas por página", [10, 25, 50], index=0,
-            key="revision_page_size",
+            key=f"revision_page_size_{doc_key}",
         )
     total_pages = max(1, (len(pendientes) + page_size - 1) // page_size)
     current_page = min(
-        max(int(st.session_state.get("revision_page", 1)), 1),
+        max(int(st.session_state.get(f"revision_page_{doc_key}", 1)), 1),
         total_pages,
     )
-    if st.session_state.get("revision_page") != current_page:
-        st.session_state["revision_page"] = current_page
+    if st.session_state.get(f"revision_page_{doc_key}") != current_page:
+        st.session_state[f"revision_page_{doc_key}"] = current_page
     with pc2:
         page = int(st.number_input(
             "Página", min_value=1, max_value=total_pages,
-            step=1, key="revision_page",
+            step=1, key=f"revision_page_{doc_key}",
         ))
     start = (page - 1) * page_size
     visible = pendientes.iloc[start:start + page_size]
@@ -2322,11 +2374,13 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
         with st.container(border=seleccionada):
             c0, c1, c2 = st.columns([0.3, 4, 4])
             with c0:
-                marcado = st.checkbox("", value=seleccionada, key=f"chk_{idx}", label_visibility="collapsed")
-                if marcado and idx not in st.session_state.lote_seleccion:
-                    st.session_state.lote_seleccion.add(idx); st.rerun()
-                elif not marcado and idx in st.session_state.lote_seleccion:
-                    st.session_state.lote_seleccion.discard(idx); st.rerun()
+                checkbox_key = f"{checkbox_prefix}_{idx}"
+                st.checkbox(
+                    "", value=seleccionada, key=checkbox_key,
+                    label_visibility="collapsed",
+                    on_change=_alternar_seleccion_lote,
+                    args=(idx, checkbox_key),
+                )
 
             with c1:
                 col_extraida = row.get('origen_columna', 'desconocido')
@@ -2367,18 +2421,18 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                         f"{columnas_derivadas}. Requiere confirmación humana."
                     )
 
-                edit_mode = st.checkbox("Editar cuenta", key=f"edit_{idx}")
+                edit_mode = st.checkbox("Editar cuenta", key=f"edit_{doc_key}_{idx}")
 
                 if edit_mode:
                     st.divider()
-                    nuevo_nombre = st.text_input("Nombre", value=_nombre_mostrar(row), key=f"ed_nombre_{idx}")
+                    nuevo_nombre = st.text_input("Nombre", value=_nombre_mostrar(row), key=f"ed_nombre_{doc_key}_{idx}")
                     opciones_nat = ['ACTIVO', 'PASIVO', 'PERDIDA', 'GANANCIA']
                     idx_nat = opciones_nat.index(col_actual) if col_actual in opciones_nat else 0
-                    nueva_nat = st.selectbox("Columna contable", opciones_nat, index=idx_nat, key=f"ed_nat_{idx}")
+                    nueva_nat = st.selectbox("Columna contable", opciones_nat, index=idx_nat, key=f"ed_nat_{doc_key}_{idx}")
                     monto_inicial = row['monto'] if pd.notna(row['monto']) else 0.0
-                    nuevo_monto = st.number_input("Monto", value=float(monto_inicial), format="%.0f", key=f"ed_monto_{idx}")
+                    nuevo_monto = st.number_input("Monto", value=float(monto_inicial), format="%.0f", key=f"ed_monto_{doc_key}_{idx}")
 
-                    if st.button("💾 Guardar corrección", key=f"ed_guardar_{idx}", use_container_width=True):
+                    if st.button("💾 Guardar corrección", key=f"ed_guardar_{doc_key}_{idx}", use_container_width=True):
                         df_mod = st.session_state.resultados[archivo_nombre]
                         original_col = row.get('origen_columna', '')
                         original_monto = row['monto']
@@ -2386,7 +2440,7 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                         monto_changed = (nuevo_monto != original_monto) if pd.notna(original_monto) else (nuevo_monto != 0)
 
                         if col_changed or monto_changed:
-                            sel_clave = st.session_state.get(f"sel_{idx}", '')
+                            sel_clave = st.session_state.get(f"sel_{doc_key}_{idx}", '')
                             codigo_final = sel_clave if sel_clave not in ('', '➕ NUEVA CATEGORÍA', '🚫 NO INCLUIR') else ''
                             df_mod.at[idx, 'nombre_original'] = nuevo_nombre
                             df_mod.at[idx, 'nombre_revision_usuario'] = ''
@@ -2418,7 +2472,7 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
             with c2:
                 mostrar_todas = st.checkbox(
                     "🔎 Buscar más clasificaciones",
-                    key=f"mostrar_todas_{idx}",
+                    key=f"mostrar_todas_{doc_key}_{idx}",
                     help=(
                         "Muestra el catálogo completo para casos contables "
                         "excepcionales que no coinciden con la columna física."
@@ -2463,13 +2517,14 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                                 f"{alternativa['score']:.0%} · {alternativa['fuente']}  \n"
                                 f"{alternativa['evidencia']}"
                             )
-                            if st.button(
+                            selection_key = f"sel_{doc_key}_{idx}"
+                            st.button(
                                 "Usar",
-                                key=f"usar_alt_{idx}_{alternativa['codigo']}",
+                                key=f"usar_alt_{doc_key}_{idx}_{alternativa['codigo']}",
                                 use_container_width=True,
-                            ):
-                                st.session_state[f"sel_{idx}"] = alternativa['codigo']
-                                st.rerun()
+                                on_click=_asignar_estado_widget,
+                                args=(selection_key, alternativa['codigo']),
+                            )
 
                 if mostrar_todas:
                     opciones_fila = opciones_codigo
@@ -2492,25 +2547,25 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                         f"{c} — {catalogo[c]['nombre_estandar']}" if c in catalogo
                         else c if c else "(sin clasificar)"
                     ),
-                    key=f"sel_{idx}"
+                    key=f"sel_{doc_key}_{idx}"
                 )
 
                 es_nueva_cat = seleccion == '➕ NUEVA CATEGORÍA'
                 if es_nueva_cat:
                     st.info("Define la nueva categoría:")
                     nuevo_codigo = st.text_input("Código (ej: AC.10, ER.17)",
-                                                  key=f"new_cod_{idx}", max_chars=10)
+                                                  key=f"new_cod_{doc_key}_{idx}", max_chars=10)
                     nuevo_nombre_cat = st.text_input("Nombre de la categoría",
-                                                  key=f"new_nom_{idx}")
+                                                  key=f"new_nom_{doc_key}_{idx}")
                     nuevo_tipo = st.selectbox("Tipo de estado",
                                               ['balance', 'resultados'],
-                                              key=f"new_tipo_{idx}")
+                                              key=f"new_tipo_{doc_key}_{idx}")
                     nuevo_cat = st.selectbox(
                         "Categoría",
                         ['activo_corriente', 'activo_no_corriente',
                          'pasivo_corriente', 'pasivo_no_corriente',
                          'patrimonio', 'resultado'],
-                        key=f"new_cat_{idx}"
+                        key=f"new_cat_{doc_key}_{idx}"
                     )
 
                 if not es_nueva_cat and seleccion not in ('', '🚫 NO INCLUIR'):
@@ -2518,12 +2573,12 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                         "¿Aplicar esta clasificación?",
                         ["Solo para este caso",
                          "Agregar al diccionario (aplica a casos futuros iguales)"],
-                        index=1, key=f"alc_{idx}", horizontal=True
+                        index=1, key=f"alc_{doc_key}_{idx}", horizontal=True
                     )
                 else:
                     alcance = "Solo para este caso"
 
-                if st.button("✅ Confirmar", key=f"btn_{idx}"):
+                if st.button("✅ Confirmar", key=f"btn_{doc_key}_{idx}"):
                     codigo_final = None
 
                     if es_nueva_cat:
