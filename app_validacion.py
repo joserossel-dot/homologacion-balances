@@ -1593,6 +1593,95 @@ def _aplicar_correcciones_extraccion(
     return corrected, certification
 
 
+def _diagnosticar_filas_extraccion(
+        cuentas: list[CuentaRaw], certification=None,
+        tolerancia: float = 10.0) -> dict[int, dict]:
+    """Explica por fila por qué falló la certificación y qué revisar.
+
+    La función es deliberadamente informativa: no modifica importes, no excluye
+    filas y no marca subtotales automáticamente. La decisión permanece en manos
+    del analista.
+    """
+    inconsistent = set(
+        getattr(certification, "filas_inconsistentes", []) or []
+    )
+    diagnostics: dict[int, dict] = {}
+    footer_terms = (
+        "firma", "representante legal", "contador", "auditor", "rut",
+        "dirección", "direccion", "página", "pagina",
+    )
+    total_terms = (
+        "subtotal", "total", "totales", "sumas", "utilidad del ejercicio",
+        "pérdida del ejercicio", "perdida del ejercicio",
+    )
+
+    for cuenta in cuentas:
+        if not cuenta.montos_columnas:
+            continue
+        values = {
+            column: float(cuenta.montos_columnas.get(column, 0.0) or 0.0)
+            for column in RAW_MONETARY_COLUMNS
+        }
+        movement_error = (
+            values["debitos"] - values["creditos"]
+            - values["saldo_deudor"] + values["saldo_acreedor"]
+        )
+        classification_error = (
+            values["saldo_deudor"] + values["saldo_acreedor"]
+            - values["activo"] - values["pasivo"]
+            - values["perdida"] - values["ganancia"]
+        )
+        name = normalizar_nombre(cuenta.nombre)
+        is_inconsistent = int(cuenta.linea) in inconsistent
+
+        if is_inconsistent and abs(movement_error) > tolerancia:
+            if abs(classification_error) > tolerancia:
+                reason = "No coinciden movimiento, saldo y columna de clasificación"
+                action = (
+                    "Compare Debe/Haber y ambos saldos con el documento; después "
+                    "deje el saldo en una sola columna contable."
+                )
+            else:
+                reason = "Debe menos Haber no coincide con el saldo"
+                action = (
+                    "Revise Débitos, Créditos, Saldo deudor y Saldo acreedor."
+                )
+            priority = 1
+        elif is_inconsistent and abs(classification_error) > tolerancia:
+            reason = "El saldo no coincide con Activo/Pasivo/Pérdidas/Ganancias"
+            action = (
+                "Compare las cuatro columnas finales y deje el importe en la "
+                "columna impresa correspondiente."
+            )
+            priority = 1
+        elif any(term in name for term in footer_terms):
+            reason = "Posible firma, identificación o pie de página"
+            action = "Si no es una cuenta contable, marque Excluir."
+            priority = 2
+        elif any(name.startswith(term) for term in total_terms):
+            reason = "Posible fila de control o resultado del ejercicio"
+            action = (
+                "Si corresponde a un subtotal, utilidad/pérdida o total impreso, "
+                "marque Subtotal/total."
+            )
+            priority = 2
+        else:
+            reason = "Sin inconsistencia individual detectada"
+            action = (
+                "No cambie esta fila salvo que el importe difiera del documento."
+            )
+            priority = 3
+
+        diagnostics[int(cuenta.linea)] = {
+            "prioridad": priority,
+            "diagnostico": reason,
+            "accion_sugerida": action,
+            "error_movimiento": round(movement_error, 2),
+            "error_clasificacion": round(classification_error, 2),
+        }
+    return diagnostics
+
+
 def _mostrar_correccion_extraccion(filename: str) -> None:
     """Editor seguro previo a homologación para extracciones OCR fallidas."""
     resultado = st.session_state.extraction_pending.get(filename)
@@ -1605,14 +1694,21 @@ def _mostrar_correccion_extraccion(filename: str) -> None:
     rows = []
     certification = getattr(resultado, "certificacion_extraccion", None)
     inconsistent = set(getattr(certification, "filas_inconsistentes", []) or [])
+    diagnostics = _diagnosticar_filas_extraccion(
+        resultado.cuentas, certification,
+    )
     for cuenta in resultado.cuentas:
         if not cuenta.montos_columnas:
             continue
+        diagnosis = diagnostics.get(int(cuenta.linea), {})
         rows.append({
             "linea": cuenta.linea,
             "codigo": cuenta.codigo or "",
             "cuenta": cuenta.nombre,
             "inconsistente": int(cuenta.linea) in inconsistent,
+            "prioridad": int(diagnosis.get("prioridad", 3)),
+            "diagnostico": diagnosis.get("diagnostico", ""),
+            "accion_sugerida": diagnosis.get("accion_sugerida", ""),
             "excluir": False,
             **{
                 column: float(cuenta.montos_columnas.get(column, 0.0) or 0.0)
@@ -1623,7 +1719,9 @@ def _mostrar_correccion_extraccion(filename: str) -> None:
     if not rows:
         st.warning("OCR no produjo filas tabulares que puedan corregirse.")
         return
-    source = pd.DataFrame(rows)
+    source = pd.DataFrame(rows).sort_values(
+        ["prioridad", "linea"], kind="stable",
+    ).reset_index(drop=True)
     c1, c2, c3 = st.columns(3)
     c1.metric("Filas extraídas", len(source))
     c2.metric("Filas inconsistentes", len(inconsistent))
@@ -1678,13 +1776,25 @@ def _mostrar_correccion_extraccion(filename: str) -> None:
         source,
         hide_index=True,
         use_container_width=True,
-        disabled=["linea", "codigo", "cuenta", "inconsistente"],
+        disabled=[
+            "linea", "codigo", "cuenta", "inconsistente", "prioridad",
+            "diagnostico", "accion_sugerida",
+        ],
         key=f"extraction_editor_{filename}",
         column_config={
             "linea": st.column_config.NumberColumn("Fila", format="%d"),
             "codigo": "Código",
             "cuenta": "Cuenta",
             "inconsistente": st.column_config.CheckboxColumn("Revisar"),
+            "prioridad": st.column_config.NumberColumn(
+                "Prioridad", help="1: revisar primero; 2: validar tipo de fila; 3: sin señal directa.",
+            ),
+            "diagnostico": st.column_config.TextColumn(
+                "Qué detectó el sistema", width="large",
+            ),
+            "accion_sugerida": st.column_config.TextColumn(
+                "Qué debe hacer", width="large",
+            ),
             "excluir": st.column_config.CheckboxColumn(
                 "Excluir", help="Úselo sólo para pies, firmas, notas o texto que no sea una cuenta."
             ),

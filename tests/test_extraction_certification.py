@@ -298,6 +298,46 @@ def test_correccion_humana_recertifica_y_actualiza_origen_efectivo():
     assert corrected[0].origen_columna == parser.OrigenColumna.ACTIVO
     assert "correccion_humana" in corrected[0].columnas_derivadas
 
+
+def test_diagnostico_extraccion_prioriza_fila_que_rompe_clasificacion():
+    cuenta = parser.CuentaRaw(
+        linea=7, codigo="110101", nombre="Caja", monto=100,
+        montos_columnas={
+            "debitos": 100, "creditos": 0,
+            "saldo_deudor": 100, "saldo_acreedor": 0,
+            "activo": 0, "pasivo": 0, "perdida": 0, "ganancia": 0,
+        },
+    )
+    certification = SimpleNamespace(filas_inconsistentes=[7])
+
+    diagnosis = app._diagnosticar_filas_extraccion([cuenta], certification)
+
+    assert diagnosis[7]["prioridad"] == 1
+    assert "Activo/Pasivo" in diagnosis[7]["diagnostico"]
+    assert diagnosis[7]["error_movimiento"] == 0
+    assert diagnosis[7]["error_clasificacion"] == 100
+
+
+def test_diagnostico_extraccion_explica_firma_y_total_sin_autocorregir():
+    firma = parser.CuentaRaw(
+        linea=8, codigo=None, nombre="Firma Representante Legal", monto=100,
+        montos_columnas={column: 0 for column in parser.RAW_MONETARY_COLUMNS},
+    )
+    total = parser.CuentaRaw(
+        linea=9, codigo=None, nombre="Totales Iguales", monto=100,
+        es_total=False,
+        montos_columnas={column: 0 for column in parser.RAW_MONETARY_COLUMNS},
+    )
+
+    diagnosis = app._diagnosticar_filas_extraccion([firma, total])
+
+    assert diagnosis[8]["prioridad"] == 2
+    assert "marque Excluir" in diagnosis[8]["accion_sugerida"]
+    assert diagnosis[9]["prioridad"] == 2
+    assert "marque Subtotal/total" in diagnosis[9]["accion_sugerida"]
+    assert firma.monto == 100
+    assert total.es_total is False
+
 def test_total_acumulado_completa_par_de_saldos_y_certifica_detalle():
     lines = [
         "110101 Caja 100 0 100 0 100 0 0 0",
