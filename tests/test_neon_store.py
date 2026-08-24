@@ -1,5 +1,6 @@
 from persistence.neon_store import NeonKnowledgeStore, normalize_account_name
 from pipeline.homologation_pipeline import HomologationPipeline
+import app_validacion as app
 
 
 class FakeCursor:
@@ -90,6 +91,61 @@ def test_lote_vacio_no_abre_conexion():
     store.save_validations([])
 
     assert calls == []
+
+
+def test_ui_persiste_validacion_individual_y_limpia_cache(monkeypatch):
+    observed = {}
+
+    class FakeStore:
+        enabled = True
+
+        def save_validation(self, **kwargs):
+            observed.update(kwargs)
+
+    cache_clears = []
+    monkeypatch.setattr(app, "NeonKnowledgeStore", FakeStore)
+    monkeypatch.setattr(
+        app.cargar_diccionario_base, "clear", lambda: cache_clears.append(True),
+    )
+
+    persisted = app._persistir_validacion(
+        nombre="Caja", codigo="AC.01", fuente="validacion_humana",
+        agregar_diccionario=True, sugerido="AC.02", metodo="regex",
+        confianza=0.7, archivo="balance.pdf",
+    )
+
+    assert persisted is True
+    assert observed == {
+        "account_name": "Caja",
+        "validated_code": "AC.01",
+        "source": "validacion_humana",
+        "suggested_code": "AC.02",
+        "suggested_method": "regex",
+        "suggested_confidence": 0.7,
+        "source_file": "balance.pdf",
+        "add_to_dictionary": True,
+    }
+    assert cache_clears == [True]
+
+
+def test_ui_no_declara_persistencia_si_neon_falla(monkeypatch):
+    class FailingStore:
+        enabled = True
+
+        def save_validation(self, **_kwargs):
+            raise RuntimeError("database unavailable")
+
+    errors = []
+    monkeypatch.setattr(app, "NeonKnowledgeStore", FailingStore)
+    monkeypatch.setattr(app.st, "error", errors.append)
+
+    persisted = app._persistir_validacion(
+        nombre="Caja", codigo="AC.01", fuente="validacion_humana",
+        agregar_diccionario=True,
+    )
+
+    assert persisted is False
+    assert errors and "Neon" in errors[0]
 
 
 def test_seed_omite_codigos_que_no_existen_en_catalogo():

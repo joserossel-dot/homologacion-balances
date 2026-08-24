@@ -622,7 +622,7 @@ class HomologationPipeline:
                 nombre_cuenta=ab.account_name,
                 codigo_clasificado=classification.get("standard_code") or "",
                 monto=classification_amount,
-                origen_columna=raw.origen_columna,
+                origen_columna=cr.origen_columna,
             )
 
             final_code = (

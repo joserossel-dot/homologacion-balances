@@ -4,8 +4,10 @@ import pytest
 
 from account_qualification import qualify_cuentas, safe_mode_enabled
 from parser_universal import (
+    OrigenColumna,
     ParserPDF,
     _agrupar_palabras_por_linea,
+    certificar_extraccion_columnas,
     parsear_excel,
     parsear_monto,
 )
@@ -144,6 +146,12 @@ def test_inagal_excel():
     cuentas = parsear_excel(excel_path)
     assert len(cuentas) > 10
     assert any(c.montos_periodos for c in cuentas if "caja" in c.nombre.lower())
+    caja = next(c for c in cuentas if "caja moneda nacional" in c.nombre.lower())
+    assert caja.codigo == "110100101"
+    assert caja.origen_columna is OrigenColumna.ACTIVO
+    assert certificar_extraccion_columnas(
+        cuentas, metodo="excel_8_columns",
+    ).estado == "no_evaluable"
 
 
 def test_agricola_general_excel():
@@ -153,6 +161,18 @@ def test_agricola_general_excel():
     cuentas = parsear_excel(excel_path)
     assert len(cuentas) > 5
     assert any(c.monto and c.monto > 0 for c in cuentas)
+    banco = next(c for c in cuentas if "banco santander" in c.nombre.lower())
+    assert banco.monto == 452093
+    assert banco.origen_columna is OrigenColumna.ACTIVO
+    assert set(banco.montos_columnas) == {
+        "debitos", "creditos", "saldo_deudor", "saldo_acreedor",
+        "activo", "pasivo", "perdida", "ganancia",
+    }
+    certification = certificar_extraccion_columnas(
+        cuentas, metodo="excel_8_columns",
+    )
+    assert certification.estado == "certificada"
+    assert all(value == 0 for value in certification.diferencias.values())
 
 
 def test_los_maitenes_pdf(parser):

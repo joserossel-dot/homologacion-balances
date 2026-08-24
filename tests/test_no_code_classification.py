@@ -1,3 +1,9 @@
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+
+from parser_universal import (
+    CuentaRaw, FormatoCodigo, OrigenColumna, ResultadoParseo,
+)
 from pipeline.homologation_pipeline import HomologationPipeline
 
 
@@ -54,3 +60,34 @@ def test_contra_activo_sin_codigo_se_clasifica_como_activo_fijo(tmp_path):
 
     assert result['standard_code'] == 'ANC.01'
     assert result['confidence'] < 0.85
+
+
+def test_process_aplica_reglas_a_la_cuenta_actual(tmp_path):
+    pipeline = HomologationPipeline(db_path=tmp_path / 'gold.db')
+    cuenta = CuentaRaw(
+        linea=1, codigo='101001', nombre='Caja', monto=100,
+        origen_columna=OrigenColumna.ACTIVO,
+    )
+    pipeline._parser.parsear = MagicMock(return_value=ResultadoParseo(
+        archivo='balance.pdf', formato_codigo=FormatoCodigo.SIN_CODIGO,
+        separador_miles='.', requirio_ocr=False, rotacion_aplicada=0,
+        cuentas=[cuenta],
+    ))
+    pipeline._classify_account = MagicMock(return_value={
+        'standard_code': 'AC.01', 'confidence': 0.98,
+        'method': 'dictionary_exact', 'reason': 'prueba', '_cmcc_score': -1,
+    })
+    pipeline._semantic_engine.interpret = MagicMock(
+        return_value=SimpleNamespace(to_dict=lambda: {
+            'semantic_type': 'unknown', 'confidence': 0.0,
+        })
+    )
+    pipeline._rule_processor.aplicar = MagicMock(return_value=SimpleNamespace(
+        aplica=False, codigo_final='AC.01', nota='', requiere_revision=False,
+    ))
+
+    result = pipeline.process(tmp_path / 'balance.pdf')
+
+    assert result['accounts_classified'] == 1
+    assert pipeline._rule_processor.aplicar.call_args.kwargs['origen_columna'] \
+        == OrigenColumna.ACTIVO

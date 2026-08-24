@@ -48,6 +48,7 @@ from reglas_especiales import (
 from config.regex_rules import REGLAS_REGEX, REGLAS_COMPILADAS
 from parser_universal import (
     ParserPDF, CuentaRaw, OrigenColumna, RAW_MONETARY_COLUMNS,
+    FormatoCodigo, ResultadoParseo,
     certificar_extraccion_columnas, parsear_excel,
 )
 from parsers.column_interpretation import es_ingreso as es_ingreso_col, es_gasto as es_gasto_col
@@ -125,6 +126,22 @@ def _persistir_validacion(
     store = NeonKnowledgeStore()
     if not store.enabled:
         return False
+    try:
+        store.save_validation(
+            account_name=nombre,
+            validated_code=codigo,
+            source=fuente,
+            suggested_code=sugerido,
+            suggested_method=metodo,
+            suggested_confidence=confianza,
+            source_file=archivo,
+            add_to_dictionary=agregar_diccionario,
+        )
+        cargar_diccionario_base.clear()
+        return True
+    except Exception:
+        st.error("Neon no pudo guardar la validación; se usará respaldo local.")
+        return False
 
 
 def _persistir_validaciones_lote(validaciones: list[dict]) -> bool:
@@ -141,22 +158,6 @@ def _persistir_validaciones_lote(validaciones: list[dict]) -> bool:
             "Neon no pudo guardar el lote; las clasificaciones permanecen "
             "en esta sesión y se usará el respaldo local del diccionario."
         )
-        return False
-    try:
-        store.save_validation(
-            account_name=nombre,
-            validated_code=codigo,
-            source=fuente,
-            suggested_code=sugerido,
-            suggested_method=metodo,
-            suggested_confidence=confianza,
-            source_file=archivo,
-            add_to_dictionary=agregar_diccionario,
-        )
-        cargar_diccionario_base.clear()
-        return True
-    except Exception:
-        st.error("Neon no pudo guardar la validación; se usará respaldo local.")
         return False
 
 
@@ -1451,6 +1452,7 @@ def main():
             _tab_knowledge_manager()
 
 
+@st.fragment
 def _visor_documento(archivo):
     import tempfile, base64, io, platform, shutil, subprocess, glob
     from PIL import Image
@@ -1461,7 +1463,11 @@ def _visor_documento(archivo):
     st.markdown("#### 📄 Documento original")
 
     if suffix == '.pdf':
-        clave_imgs = f"_imgs_{archivo.name}"
+        try:
+            contenido_id = hashlib.sha1(archivo.getvalue()).hexdigest()[:12]
+        except Exception:
+            contenido_id = hashlib.sha1(archivo.name.encode('utf-8')).hexdigest()[:12]
+        clave_imgs = f"_imgs_{contenido_id}"
         if clave_imgs not in st.session_state:
             with st.spinner("Cargando páginas del documento..."):
                 with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
@@ -1499,19 +1505,23 @@ def _visor_documento(archivo):
             return
 
         ctrl1, ctrl2, ctrl3 = st.columns([2, 2, 2])
-        with ctrl1: pagina = st.number_input(f"Página (1-{n_paginas})", min_value=1, max_value=n_paginas, value=1, step=1, key="visor_pagina")
-        with ctrl2: zoom = st.slider("Zoom", min_value=50, max_value=200, value=100, step=10, format="%d%%", key="visor_zoom")
-        with ctrl3: rotacion = st.select_slider("Rotación", options=[0, 90, 180, 270], value=0, format_func=lambda x: f"{x}°", key="visor_rot")
+        with ctrl1: pagina = st.number_input(f"Página (1-{n_paginas})", min_value=1, max_value=n_paginas, value=1, step=1, key=f"visor_pagina_{contenido_id}")
+        with ctrl2: zoom = st.slider("Zoom", min_value=50, max_value=200, value=100, step=10, format="%d%%", key=f"visor_zoom_{contenido_id}")
+        with ctrl3: rotacion = st.select_slider("Rotación", options=[0, 90, 180, 270], value=0, format_func=lambda x: f"{x}°", key=f"visor_rot_{contenido_id}")
 
-        img = imgs[pagina - 1]
-        if rotacion != 0: img = img.rotate(-rotacion, expand=True)
-        if zoom != 100:
-            w, h = img.size
-            img = img.resize((int(w * zoom / 100), int(h * zoom / 100)), Image.LANCZOS)
+        clave_render = f"_visor_render_{contenido_id}_{pagina}_{zoom}_{rotacion}"
+        b64 = st.session_state.get(clave_render)
+        if b64 is None:
+            img = imgs[pagina - 1]
+            if rotacion != 0: img = img.rotate(-rotacion, expand=True)
+            if zoom != 100:
+                w, h = img.size
+                img = img.resize((int(w * zoom / 100), int(h * zoom / 100)), Image.LANCZOS)
 
-        buf = io.BytesIO()
-        img.save(buf, format='PNG')
-        b64 = base64.b64encode(buf.getvalue()).decode()
+            buf = io.BytesIO()
+            img.save(buf, format='PNG')
+            b64 = base64.b64encode(buf.getvalue()).decode()
+            st.session_state[clave_render] = b64
 
         html_visor = f"""
         <div style="height: 72vh; overflow-y: auto; overflow-x: auto; border: 1px solid #d0d0d0; border-radius: 8px; background: #f5f5f5; padding: 8px; text-align: center;">
@@ -1958,7 +1968,43 @@ def _extraer_cuentas(archivo) -> tuple[list[CuentaRaw], object]:
                 document_context
         return resultado.cuentas, document_context
     else:
-        return parsear_excel(archivo), None
+        cuentas = parsear_excel(archivo)
+        certificacion = certificar_extraccion_columnas(
+            cuentas, metodo="excel_8_columns",
+        )
+        if certificacion.estado == "fallida":
+            st.error(
+                "Las ocho columnas del Excel no reproducen sus controles "
+                "impresos. La homologación queda pausada hasta revisar las filas."
+            )
+            if certificacion.razones:
+                st.caption(" ".join(certificacion.razones))
+            st.session_state.extraction_pending[archivo.name] = ResultadoParseo(
+                archivo=archivo.name,
+                formato_codigo=FormatoCodigo.SIN_CODIGO,
+                separador_miles=".",
+                requirio_ocr=False,
+                rotacion_aplicada=0,
+                cuentas=cuentas,
+                certificacion_extraccion=certificacion,
+            )
+            return [], None
+        if certificacion.estado == "certificada":
+            st.success(
+                "Excel certificado: las cuentas reproducen el subtotal y el "
+                "control final de sus ocho columnas."
+            )
+        elif certificacion.estado == "parcial":
+            st.warning(
+                "El Excel cuadra en su ecuación final, pero requiere revisión "
+                "humana de sus filas antes de exportar."
+            )
+        else:
+            st.info(
+                "El Excel no contiene un subtotal independiente de ocho columnas; "
+                "su extracción no puede certificarse automáticamente."
+            )
+        return cuentas, None
 
 
 def _mostrar_informacion_documento(ctx) -> None:
@@ -2236,6 +2282,7 @@ def _tab_resumen(df: pd.DataFrame):
     st.dataframe(dist_df, use_container_width=True, hide_index=True)
 
 
+@st.fragment
 def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, archivo_nombre: str):
     pendientes = _pendientes_revision(df)
 
@@ -2295,7 +2342,9 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                 validaciones_lote = []
                 for idx_lote in list(st.session_state.lote_seleccion):
                     nombre_orig = df.at[idx_lote, 'nombre_original']
-                    codigo_orig = df.at[idx_lote, 'codigo_original']
+                    codigo_sugerido = df.at[idx_lote, 'codigo_clasificado'] or None
+                    metodo_sugerido = df.at[idx_lote, 'metodo']
+                    confianza_sugerida = float(df.at[idx_lote, 'confianza'])
                     st.session_state.resultados[archivo_nombre].at[idx_lote, 'codigo_clasificado'] = codigo_lote
                     st.session_state.resultados[archivo_nombre].at[idx_lote, 'metodo'] = 'validacion_humana_lote'
                     st.session_state.resultados[archivo_nombre].at[idx_lote, 'confianza'] = 1.0
@@ -2308,9 +2357,9 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                         'validated_code': codigo_lote,
                         'source': 'validacion_humana_lote',
                         'add_to_dictionary': "diccionario" in alcance_lote,
-                        'suggested_code': df.at[idx_lote, 'codigo_clasificado'] or None,
-                        'suggested_method': df.at[idx_lote, 'metodo'],
-                        'suggested_confidence': float(df.at[idx_lote, 'confianza']),
+                        'suggested_code': codigo_sugerido,
+                        'suggested_method': metodo_sugerido,
+                        'suggested_confidence': confianza_sugerida,
                         'source_file': archivo_nombre,
                     })
                     if "diccionario" in alcance_lote:

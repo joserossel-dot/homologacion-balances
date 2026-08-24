@@ -75,6 +75,17 @@ def test_extractor_coordenadas_preserva_codigo_nombre_y_ocho_columnas():
     }
 
 
+def test_ocho_columnas_prevalece_sobre_anio_detectado_en_cabecera():
+    cuenta = parser.parsear_linea(
+        "1.1.01.01 Caja 500 400 100 0 100 0 0 0",
+        1, parser.FormatoCodigo.PUNTO, ".", years=["2023"],
+    )
+
+    assert cuenta is not None
+    assert cuenta.monto == 100
+    assert cuenta.origen_columna is parser.OrigenColumna.ACTIVO
+
+
 def test_extractor_coordenadas_recupera_ceros_ocr_sin_contaminar_nombre():
     page = FakePage([
         _header(),
@@ -170,6 +181,18 @@ def test_total_con_comilla_ocr_no_se_considera_detalle():
     assert cuenta.es_total is True
 
 
+def test_total_foral_ocr_no_convierte_primer_importe_en_codigo():
+    cuenta = parser.parsear_linea(
+        "[foral] 7.608.246.111 7.608.246.111 1.259.149.847 "
+        "1.259.149.847 458.598.280 458.598.280 848.102.769 848.102.769",
+        1, parser.FormatoCodigo.PUNTO, ".", confianza_base=0.75,
+    )
+
+    assert cuenta is not None
+    assert cuenta.codigo is None
+    assert cuenta.es_total is True
+
+
 def test_resultado_con_codigo_es_cuenta_y_no_subtotal():
     cuenta = parser.parsear_linea(
         "23070200 Resultado Acumuladas 100 40 60 0 60 0 0 0",
@@ -242,6 +265,40 @@ def test_parsear_linea_elimina_movimiento_fantasma_con_tres_evidencias():
     assert cuenta.columnas_derivadas == ["debitos"]
 
 
+def test_parsear_linea_ocr_reconstruye_debito_desde_saldo_y_clasificacion():
+    cuenta = parser.parsear_linea(
+        "1.02.03.04 Equipos 40.269 0 640.269 0 640.269 0 0 0",
+        1, parser.FormatoCodigo.PUNTO, ".", confianza_base=0.75,
+    )
+
+    assert cuenta is not None
+    assert cuenta.montos_columnas["debitos"] == 640_269
+    assert cuenta.columnas_derivadas == ["debitos"]
+
+
+def test_parsear_linea_ocr_reconstruye_saldo_desde_movimiento_y_clasificacion():
+    cuenta = parser.parsear_linea(
+        "1.01.09.10 Existencias 24.421.797 0 24.821.797 0 24.421.797 0 0 0",
+        1, parser.FormatoCodigo.PUNTO, ".", confianza_base=0.75,
+    )
+
+    assert cuenta is not None
+    assert cuenta.montos_columnas["saldo_deudor"] == 24_421_797
+    assert cuenta.columnas_derivadas == ["saldo_deudor"]
+
+
+def test_parsear_linea_ocr_elimina_prefijo_pegado_si_saldo_cero_exige_igualdad():
+    cuenta = parser.parsear_linea(
+        "2.01.01.10 Préstamo 121.866.316 1.866.316 0 0 0 0 0 0",
+        1, parser.FormatoCodigo.PUNTO, ".", confianza_base=0.75,
+    )
+
+    assert cuenta is not None
+    assert cuenta.montos_columnas["debitos"] == 1_866_316
+    assert cuenta.montos_columnas["creditos"] == 1_866_316
+    assert cuenta.columnas_derivadas == ["debitos"]
+
+
 def test_parsear_linea_ocr_corrige_digito_fantasma_solo_si_mejora_identidad():
     cuenta = parser.parsear_linea(
         "3202007 Aseo 81.135 0 81.135 0 9 0 81.135 9",
@@ -252,6 +309,29 @@ def test_parsear_linea_ocr_corrige_digito_fantasma_solo_si_mejora_identidad():
     assert cuenta.montos_columnas["activo"] == 0
     assert cuenta.montos_columnas["ganancia"] == 0
     assert set(cuenta.columnas_derivadas) == {"activo", "ganancia"}
+
+
+def test_parsear_linea_ocr_corrige_diez_fantasma_si_mejora_identidad():
+    cuenta = parser.parsear_linea(
+        "4.01.03.18 Combustibles 27.196.269 10 27.196.269 0 0 0 27.196.269 0",
+        1, parser.FormatoCodigo.PUNTO, ".", confianza_base=0.75,
+    )
+
+    assert cuenta is not None
+    assert cuenta.montos_columnas["creditos"] == 0
+    assert cuenta.columnas_derivadas == ["creditos"]
+
+
+def test_parsear_linea_ocr_elimina_clasificacion_marginal_con_saldo_completo():
+    cuenta = parser.parsear_linea(
+        "4.01.03.05 Protección 1.135.074 0 1.135.074 0 0 0 1.135.074 7.669",
+        1, parser.FormatoCodigo.PUNTO, ".", confianza_base=0.75,
+    )
+
+    assert cuenta is not None
+    assert cuenta.montos_columnas["perdida"] == 1_135_074
+    assert cuenta.montos_columnas["ganancia"] == 0
+    assert cuenta.columnas_derivadas == ["ganancia"]
 
 
 def test_parsear_linea_nativa_preserva_importe_pequeno_real():
@@ -584,6 +664,62 @@ def test_certificacion_valida_totales_iguales_si_estan_presentes():
     assert certification.totales_finales_validos is True
 
 
+def test_certificacion_degrada_a_parcial_si_fila_final_ocr_esta_incompleta():
+    details = [
+        parser.parsear_linea(
+            "110101 ACTIVO 100 0 100 0 100 0 0 0",
+            1, parser.FormatoCodigo.COMPACTO, ".",
+        ),
+        parser.parsear_linea(
+            "210101 PASIVO 0 60 0 60 0 60 0 0",
+            2, parser.FormatoCodigo.COMPACTO, ".",
+        ),
+        parser.parsear_linea(
+            "310101 GANANCIA 0 40 0 40 0 0 0 40",
+            3, parser.FormatoCodigo.COMPACTO, ".",
+        ),
+    ]
+    subtotal = parser.parsear_linea(
+        "SUBTOTAL 100 100 100 100 100 60 0 40",
+        4, parser.FormatoCodigo.COMPACTO, ".",
+    )
+    incomplete_final = parser.parsear_linea(
+        "SUMAS IGUALES 100 0 100 0 100 0 40 0",
+        5, parser.FormatoCodigo.COMPACTO, ".",
+    )
+
+    certification = parser.certificar_extraccion_columnas(
+        [*details, subtotal, incomplete_final],
+    )
+
+    assert certification.estado == "parcial"
+    assert certification.totales_finales_validos is None
+    assert all(value == 0 for value in certification.diferencias.values())
+    assert any("columnas vacías" in reason for reason in certification.razones)
+
+
+def test_certificacion_no_acepta_subtotal_con_ecuacion_contable_invalida():
+    detail = parser.parsear_linea(
+        "110101 ACTIVO 100 0 100 0 100 0 0 0",
+        1, parser.FormatoCodigo.COMPACTO, ".",
+    )
+    subtotal = parser.parsear_linea(
+        "SUBTOTAL 100 0 100 0 100 0 0 0",
+        2, parser.FormatoCodigo.COMPACTO, ".",
+    )
+    incomplete_final = parser.parsear_linea(
+        "SUMAS IGUALES 100 0 100 0 100 0 0 0",
+        3, parser.FormatoCodigo.COMPACTO, ".",
+    )
+
+    certification = parser.certificar_extraccion_columnas(
+        [detail, subtotal, incomplete_final],
+    )
+
+    assert certification.estado == "fallida"
+    assert any("ecuación" in reason for reason in certification.razones)
+
+
 def test_certificacion_reconoce_resultado_puente_hasta_sumas_iguales():
     details = [
         parser.parsear_linea(
@@ -878,6 +1014,243 @@ def test_balance_clasificado_propaga_secciones_sin_sobrescribir_columnas():
     assert accounts[6].origen_columna is parser.OrigenColumna.PASIVO
 
 
+def test_fusiona_glosa_partida_con_importes_de_la_misma_linea():
+    accounts = [
+        # El "12" de la glosa puede haber sido interpretado como monto antes
+        # de observar las ocho columnas del segundo fragmento.
+        parser.CuentaRaw(12, "1.1.02.03", "Fondo de Inversion Cap.12", 12),
+        parser.CuentaRaw(
+            12, None, "PERDIDA", 127_561_879,
+            origen_columna=parser.OrigenColumna.ACTIVO,
+            es_total=True,
+            montos_columnas={
+                "debitos": 127_561_879,
+                "creditos": 127_561_879,
+                "saldo_deudor": 0,
+                "saldo_acreedor": 0,
+                "activo": 0,
+                "pasivo": 0,
+                "perdida": 0,
+                "ganancia": 0,
+            },
+        ),
+    ]
+
+    merged, count = parser.fusionar_cuentas_partidas(accounts)
+
+    assert count == 1
+    assert len(merged) == 1
+    assert merged[0].codigo == "1.1.02.03"
+    assert merged[0].nombre == "Fondo de Inversion Cap.12 PERDIDA"
+    assert merged[0].es_total is False
+    assert merged[0].montos_columnas["debitos"] == 127_561_879
+
+
+def test_perdida_de_inventario_es_cuenta_y_no_total():
+    account = parser.parsear_linea(
+        "PERDIDA DE INVENTARIO (ROBOS Y HURTOS) "
+        "14542740 0 14542740 0 0 0 14542740 0",
+        10,
+        parser.FormatoCodigo.SIN_CODIGO,
+        ".",
+        1.0,
+    )
+
+    assert account is not None
+    assert account.es_total is False
+    assert account.nombre == "PERDIDA DE INVENTARIO (ROBOS Y HURTOS)"
+
+
+def test_perdida_del_ejercicio_sigue_siendo_total():
+    account = parser.parsear_linea(
+        "PERDIDA DEL EJERCICIO 0 0 0 100 0 100 100 0",
+        11,
+        parser.FormatoCodigo.SIN_CODIGO,
+        ".",
+        1.0,
+    )
+
+    assert account is not None
+    assert account.es_total is True
+
+
+def test_no_divide_fila_ocho_columnas_por_guion_en_glosa():
+    line = (
+        "21050400 Prestamo JL - CP "
+        "14.784.726 14.784.726 0 0 0 0 0 0"
+    )
+
+    assert parser.split_side_by_side(line) == [line]
+    account = parser.parsear_linea(
+        line, 12, parser.FormatoCodigo.COMPACTO, ".", 0.75,
+    )
+    assert account is not None
+    assert account.nombre == "Prestamo JL - CP"
+    assert account.montos_columnas["debitos"] == 14_784_726
+
+
+def test_no_divide_fila_ocho_columnas_con_ceros_ocr_como_letra_o():
+    line = (
+        "1.01.01.02 Banco Cta Cte BCI — "
+        "1.054.433.416 1.032.171.062 22.262.354 O 22.262.354 0 0 o"
+    )
+
+    assert parser.split_side_by_side(line) == [line]
+    account = parser.parsear_linea(
+        line, 2, parser.FormatoCodigo.PUNTO, ".", 0.75,
+    )
+    assert account is not None
+    assert account.nombre == "Banco Cta Cte BCI"
+    assert account.montos_columnas["saldo_acreedor"] == 0
+    assert account.montos_columnas["activo"] == 22_262_354
+
+
+def test_ocr_separa_dos_montos_agrupados_sin_espacio():
+    line = (
+        "1.01.01.01 Caja 0 3,100,0001,385,515 "
+        "1,714,485 0 1,714,485 0 0 0"
+    )
+
+    normalized = parser.normalizar_linea_ocr_tabla(line)
+
+    assert "3.100.000 1.385.515" in normalized
+    account = parser.parsear_linea(
+        normalized, 1, parser.FormatoCodigo.PUNTO, ".", 0.75,
+    )
+    assert account is not None
+    assert account.montos_columnas["debitos"] == 3_100_000
+    assert account.montos_columnas["creditos"] == 1_385_515
+    assert account.montos_columnas["saldo_deudor"] == 1_714_485
+
+
+def test_ocr_recupera_clasificacion_ausente_y_movimiento_desplazado():
+    account = parser.parsear_linea(
+        "1.02.03.01 Maquinarias y equipos "
+        "0 3.630.878 3.630.878 0 0 0 o 0",
+        22,
+        parser.FormatoCodigo.PUNTO,
+        ".",
+        0.75,
+    )
+
+    assert account is not None
+    assert account.montos_columnas == {
+        "debitos": 3_630_878.0,
+        "creditos": 0.0,
+        "saldo_deudor": 3_630_878.0,
+        "saldo_acreedor": 0.0,
+        "activo": 3_630_878.0,
+        "pasivo": 0.0,
+        "perdida": 0.0,
+        "ganancia": 0.0,
+    }
+    assert {"debitos", "creditos", "activo"}.issubset(
+        account.columnas_derivadas,
+    )
+
+
+def test_ocr_conserva_contra_activo_en_columna_acreedora():
+    account = parser.parsear_linea(
+        "1.02.06.01 Depreciación Acumulada "
+        "0 8.371.044 0 8.371.044 0 0 0 0",
+        26,
+        parser.FormatoCodigo.PUNTO,
+        ".",
+        0.75,
+    )
+
+    assert account is not None
+    assert account.montos_columnas["pasivo"] == 8_371_044
+    assert account.montos_columnas["activo"] == 0
+    assert account.origen_columna is parser.OrigenColumna.PASIVO
+
+
+def test_ocr_repara_monto_unido_al_cero_de_columna_siguiente():
+    account = parser.parsear_linea(
+        "4.01.03.03 Gastos Legales 0 9.360.900 936.090 0 0 0 0 0",
+        59,
+        parser.FormatoCodigo.PUNTO,
+        ".",
+        0.75,
+    )
+
+    assert account is not None
+    assert account.montos_columnas["debitos"] == 936_090
+    assert account.montos_columnas["creditos"] == 0
+    assert account.montos_columnas["perdida"] == 936_090
+
+
+def test_normaliza_dos_puntos_dentro_de_codigo_ocr():
+    line = "4.02.:12.01 Diferencias de cambio Perdida 572 0 572 0 0 0 572 0"
+
+    normalized = parser.normalizar_codigo_ocr(line)
+
+    assert normalized.startswith("4.02.12.01 ")
+
+
+def test_ocr_recupera_codigo_embebido_detras_de_ruido_corto():
+    account = parser.parsear_linea(
+        "Ú 1.01.09.19 — Plan Monitoreo 8.982.160 0 8.982.160 0 "
+        "8.982.160 0 0 0",
+        20,
+        parser.FormatoCodigo.PUNTO,
+        ".",
+        0.75,
+    )
+
+    assert account.codigo == "1.01.09.19"
+    assert account.nombre == "Plan Monitoreo"
+    assert account.montos_columnas["activo"] == 8_982_160
+
+
+def test_codigo_embebido_no_se_recupera_en_texto_nativo():
+    account = parser.parsear_linea(
+        "E 3.02.03.01 Utilidad en venta 0 100 0 100 0 0 0 100",
+        1,
+        parser.FormatoCodigo.PUNTO,
+        ".",
+        1.0,
+    )
+
+    assert account.codigo is None
+
+
+def test_normaliza_primer_digito_separado_de_monto_con_miles():
+    line = "Total de Activos 2 2.029.324,87 2 6.620.286,76"
+
+    normalized = parser.normalizar_montos_fragmentados(line)
+
+    assert normalized == "Total de Activos 22.029.324,87 26.620.286,76"
+
+
+def test_certifica_totales_ifrs_espanol_e_ingles():
+    for active_name, liability_name in (
+        ("Total de Activos", "Total de Patrimonio y Pasivos"),
+        ("TOTAL ASSETS", "TOTAL EQUITY AND LIABILITIES"),
+    ):
+        certification = parser.certificar_totales_clasificados([
+            parser.CuentaRaw(1, None, active_name, 441_477, es_total=True),
+            parser.CuentaRaw(2, None, liability_name, 441_477, es_total=True),
+        ])
+
+        assert certification.estado == "parcial"
+        assert certification.diferencias["activo_menos_pasivo_patrimonio"] == 0
+
+
+def test_total_pasivos_generico_solo_certifica_si_equivale_al_total_activos():
+    matching = parser.certificar_totales_clasificados([
+        parser.CuentaRaw(1, None, "Total Activos", 5_000, es_total=True),
+        parser.CuentaRaw(2, None, "Total Pasivos", 5_000, es_total=True),
+    ])
+    mismatching = parser.certificar_totales_clasificados([
+        parser.CuentaRaw(1, None, "Total Activos", 5_000, es_total=True),
+        parser.CuentaRaw(2, None, "Total Pasivos", 3_000, es_total=True),
+    ])
+
+    assert matching.estado == "parcial"
+    assert mismatching.estado == "no_evaluable"
+
+
 def test_seccion_corrige_heuristica_de_ultima_columna_sin_evidencia_tabular():
     accounts = [
         parser.CuentaRaw(1, None, "ACTIVOS FIJOS", None),
@@ -926,3 +1299,129 @@ def test_seccion_no_se_filtra_hacia_otro_estado_financiero():
 
     assert accounts[1].origen_columna is parser.OrigenColumna.PASIVO
     assert accounts[4].origen_columna is parser.OrigenColumna.DESCONOCIDO
+
+
+def test_secciones_ifrs_con_dos_columnas_paralelas_y_encabezados_en_ingles():
+    accounts = [
+        parser.CuentaRaw(1, None, "NON-CURRENT ASSETS EQUITY", None),
+        parser.CuentaRaw(2, None, "Vessels", 100),
+        parser.CuentaRaw(2, None, "Paid capital", 40),
+        parser.CuentaRaw(3, None, "Net income", 10),
+        parser.CuentaRaw(4, None, "NON-CURRENT LIABILITIES", None),
+        parser.CuentaRaw(5, None, "Long term debt", 60),
+    ]
+
+    parser.anotar_secciones_balance_clasificado(accounts)
+
+    assert accounts[1].origen_columna is parser.OrigenColumna.ACTIVO
+    assert accounts[2].origen_columna is parser.OrigenColumna.PASIVO
+    assert accounts[3].origen_columna is parser.OrigenColumna.DESCONOCIDO
+    assert accounts[5].origen_columna is parser.OrigenColumna.PASIVO
+
+
+def test_encabezados_con_dos_puntos_y_total_final_cortan_la_seccion():
+    accounts = [
+        parser.CuentaRaw(1, None, "Activos corrientes:", None),
+        parser.CuentaRaw(2, None, "Caja", 100),
+        parser.CuentaRaw(
+            3, None, "Total de Patrimonio y Pasivos", 100, es_total=True,
+        ),
+        parser.CuentaRaw(4, None, "Ingresos ordinarios", 20),
+    ]
+
+    parser.anotar_secciones_balance_clasificado(accounts)
+
+    assert accounts[1].origen_columna is parser.OrigenColumna.ACTIVO
+    assert accounts[3].origen_columna is parser.OrigenColumna.DESCONOCIDO
+
+
+def test_fusion_ocr_recupera_saldo_y_movimientos_sin_duplicar_filas():
+    coordinate_lines = [
+        "1.01.05.06 Deudores Varios 42,389,219 0 0 0 0 0 0 0",
+        "2.01.07.04 Cheques por Pagar 0 0 0 40,916,967 0 40,916,967 0 0",
+    ]
+    alternative = "\n".join([
+        "1.01.05.06 Deudores Varios 42,389,219 0 42,389,219 0 42,389,219 0",
+        "2.01.07.04 Cheques por Pagar 49,313,784 90,230,751 0 40,916,967 0 40,916,967",
+    ])
+
+    assert parser._tabla_ocr_necesita_recuperacion(coordinate_lines)
+    recovered, count = parser.recuperar_filas_tabla_ocr(
+        coordinate_lines, alternative,
+    )
+    accounts = [
+        parser._cuenta_desde_candidato_ocr(line, index)
+        for index, line in enumerate(recovered)
+    ]
+
+    assert count == 2
+    assert len(recovered) == 2
+    assert accounts[0].montos_columnas["activo"] == 42_389_219
+    assert accounts[1].montos_columnas["debitos"] == 49_313_784
+    assert accounts[1].montos_columnas["creditos"] == 90_230_751
+
+
+def test_fusion_ocr_rechaza_alternativa_que_cambia_saldo_observado():
+    coordinate = [
+        "1.01.01.01 Caja 100 0 100 0 100 0 0 0",
+    ]
+    alternative = "1.01.01.01 Caja 200 0 200 0 200 0"
+
+    recovered, count = parser.recuperar_filas_tabla_ocr(coordinate, alternative)
+
+    assert count == 0
+    assert recovered == coordinate
+
+
+def test_fusion_ocr_agrega_fila_omitida_solo_si_es_consistente_y_no_duplicada():
+    coordinate = [
+        "4.01.03.19 Peajes 454.419 0 454.419 0 0 0 454.419 0",
+        "4.02.09.60 Finiquitos 11.082.273 0 11.082.273 0 0 0 11.082.273 0",
+    ]
+    alternative = "\n".join([
+        "4.01.03.18 Combustibles 27.196.269 10 27.196.269 0 0 0 27.196.269 0",
+        # Mismo nombre, código OCR distinto: no debe duplicarse.
+        "4.02.04.60 Finiquitos 11.082.273 0 11.082.273 0 0 0 11.082.273 0",
+        # Los controles nunca son detalles recuperables.
+        "[Sumas 1.000] 1.000 500 500 400 300 100 200",
+    ])
+
+    recovered, count = parser.recuperar_filas_tabla_ocr(coordinate, alternative)
+    accounts = [
+        parser._cuenta_desde_candidato_ocr(line, index)
+        for index, line in enumerate(recovered)
+    ]
+
+    assert count == 1
+    assert len(recovered) == 3
+    assert accounts[-1].nombre == "Combustibles"
+    assert accounts[-1].montos_columnas["creditos"] == 0
+
+
+def test_fusion_ocr_recupera_control_partido_por_solapamiento_independiente():
+    coordinate = [
+        "Sumas J7s08246111 7.608 246.111 1.259.149.847 1.259.149:847 "
+        "458.598.280 411.047.078 800.551.567 848.102.769",
+    ]
+    alternative = (
+        "Sumas 7.608.246.111 7.608.246.111 1.259.149.847 "
+        "1.259.149.847 458.598.280 411.047.078"
+    )
+
+    assert parser._tabla_ocr_necesita_recuperacion(coordinate)
+    recovered, count = parser.recuperar_filas_tabla_ocr(coordinate, alternative)
+    total = parser.parsear_linea(
+        recovered[0], 1, parser.FormatoCodigo.SIN_CODIGO, ".", 0.75,
+    )
+
+    assert count == 1
+    assert total.montos_columnas == {
+        "debitos": 7_608_246_111,
+        "creditos": 7_608_246_111,
+        "saldo_deudor": 1_259_149_847,
+        "saldo_acreedor": 1_259_149_847,
+        "activo": 458_598_280,
+        "pasivo": 411_047_078,
+        "perdida": 800_551_567,
+        "ganancia": 848_102_769,
+    }
