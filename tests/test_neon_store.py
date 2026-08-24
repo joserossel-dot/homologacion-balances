@@ -53,6 +53,45 @@ def test_validacion_y_diccionario_se_guardan_en_una_transaccion():
     assert log_params[6] is True
 
 
+def test_lote_de_validaciones_reutiliza_una_sola_conexion():
+    connection = FakeConnection()
+    connections = []
+
+    def connect(_):
+        connections.append(connection)
+        return connection
+
+    store = NeonKnowledgeStore("postgresql://test", connect=connect)
+    store.save_validations([
+        {
+            "account_name": "Caja", "validated_code": "AC.01",
+            "source": "validacion_humana_lote",
+            "suggested_code": "AC.02", "add_to_dictionary": True,
+        },
+        {
+            "account_name": "Banco", "validated_code": "AC.01",
+            "source": "validacion_humana_lote",
+            "suggested_code": None, "add_to_dictionary": True,
+        },
+    ])
+
+    assert len(connections) == 1
+    assert len(connection.cursor_instance.calls) == 8
+    assert connection.cursor_instance.calls[1][1][0] == "Caja"
+    assert connection.cursor_instance.calls[5][1][0] == "Banco"
+
+
+def test_lote_vacio_no_abre_conexion():
+    calls = []
+    store = NeonKnowledgeStore(
+        "postgresql://test", connect=lambda _: calls.append(True)
+    )
+
+    store.save_validations([])
+
+    assert calls == []
+
+
 def test_seed_omite_codigos_que_no_existen_en_catalogo():
     connection = FakeConnection()
     store = NeonKnowledgeStore("postgresql://test", connect=lambda _: connection)

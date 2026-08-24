@@ -160,59 +160,87 @@ class NeonKnowledgeStore:
         source_file: str = "",
         add_to_dictionary: bool = True,
     ) -> None:
-        normalized = normalize_account_name(account_name)
         with self._connect() as conn:
             with conn.cursor() as cursor:
-                if add_to_dictionary:
-                    cursor.execute(
-                        "SELECT codigo_estandar FROM diccionario_homologacion "
-                        "WHERE cuenta_normalizada = %s FOR UPDATE",
-                        (normalized,),
-                    )
-                    previous_row = cursor.fetchone()
-                    previous_code = previous_row[0] if previous_row else None
-                    cursor.execute(
-                        """INSERT INTO diccionario_homologacion
-                           (cuenta_original, cuenta_normalizada, codigo_estandar,
-                            fuente, validado_humano, validado_por, validado_en)
-                           VALUES (%s, %s, %s, %s, TRUE, %s, NOW())
-                           ON CONFLICT (cuenta_normalizada) DO UPDATE SET
-                             cuenta_original = EXCLUDED.cuenta_original,
-                             codigo_estandar = EXCLUDED.codigo_estandar,
-                             fuente = EXCLUDED.fuente,
-                             validado_humano = TRUE,
-                             validado_por = EXCLUDED.validado_por,
-                             validado_en = NOW(),
-                             frecuencia_uso = diccionario_homologacion.frecuencia_uso + 1,
-                             activo = TRUE,
-                             actualizado_en = NOW()""",
-                        (account_name, normalized, validated_code, source, reviewer),
-                    )
-                    if previous_code != validated_code:
-                        cursor.execute(
-                            """INSERT INTO historial_diccionario
-                               (cuenta_original, cuenta_normalizada, codigo_anterior,
-                                codigo_nuevo, accion, validado_por, archivo_origen)
-                               VALUES (%s, %s, %s, %s, %s, %s, %s)""",
-                            (
-                                account_name, normalized, previous_code, validated_code,
-                                "INSERT" if previous_code is None else "UPDATE",
-                                reviewer, source_file,
-                            ),
-                        )
+                self._save_validation_cursor(cursor, {
+                    "account_name": account_name, "validated_code": validated_code,
+                    "source": source, "suggested_code": suggested_code,
+                    "suggested_method": suggested_method,
+                    "suggested_confidence": suggested_confidence,
+                    "reviewer": reviewer, "source_file": source_file,
+                    "add_to_dictionary": add_to_dictionary,
+                })
+
+    def save_validations(self, validations: list[dict[str, Any]]) -> None:
+        """Guarda un lote completo usando una sola conexión y transacción."""
+        if not validations:
+            return
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                for validation in validations:
+                    self._save_validation_cursor(cursor, validation)
+
+    @staticmethod
+    def _save_validation_cursor(cursor, validation: dict[str, Any]) -> None:
+        account_name = validation["account_name"]
+        validated_code = validation["validated_code"]
+        source = validation["source"]
+        suggested_code = validation.get("suggested_code")
+        suggested_method = validation.get("suggested_method")
+        suggested_confidence = validation.get("suggested_confidence")
+        reviewer = validation.get("reviewer", "analista")
+        source_file = validation.get("source_file", "")
+        normalized = normalize_account_name(account_name)
+        if validation.get("add_to_dictionary", True):
+            cursor.execute(
+                "SELECT codigo_estandar FROM diccionario_homologacion "
+                "WHERE cuenta_normalizada = %s FOR UPDATE",
+                (normalized,),
+            )
+            previous_row = cursor.fetchone()
+            previous_code = previous_row[0] if previous_row else None
+            cursor.execute(
+                """INSERT INTO diccionario_homologacion
+                   (cuenta_original, cuenta_normalizada, codigo_estandar,
+                    fuente, validado_humano, validado_por, validado_en)
+                   VALUES (%s, %s, %s, %s, TRUE, %s, NOW())
+                   ON CONFLICT (cuenta_normalizada) DO UPDATE SET
+                     cuenta_original = EXCLUDED.cuenta_original,
+                     codigo_estandar = EXCLUDED.codigo_estandar,
+                     fuente = EXCLUDED.fuente,
+                     validado_humano = TRUE,
+                     validado_por = EXCLUDED.validado_por,
+                     validado_en = NOW(),
+                     frecuencia_uso = diccionario_homologacion.frecuencia_uso + 1,
+                     activo = TRUE,
+                     actualizado_en = NOW()""",
+                (account_name, normalized, validated_code, source, reviewer),
+            )
+            if previous_code != validated_code:
                 cursor.execute(
-                    """INSERT INTO log_validaciones
-                       (cuenta_original, cuenta_normalizada, codigo_sugerido, codigo_validado,
-                        metodo_sugerido, confianza_sugerida, fue_correccion,
-                        validado_por, archivo_origen)
-                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                    """INSERT INTO historial_diccionario
+                       (cuenta_original, cuenta_normalizada, codigo_anterior,
+                        codigo_nuevo, accion, validado_por, archivo_origen)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s)""",
                     (
-                        account_name, normalized, suggested_code, validated_code,
-                        suggested_method, suggested_confidence,
-                        bool(suggested_code and suggested_code != validated_code),
+                        account_name, normalized, previous_code, validated_code,
+                        "INSERT" if previous_code is None else "UPDATE",
                         reviewer, source_file,
                     ),
                 )
+        cursor.execute(
+            """INSERT INTO log_validaciones
+               (cuenta_original, cuenta_normalizada, codigo_sugerido, codigo_validado,
+                metodo_sugerido, confianza_sugerida, fue_correccion,
+                validado_por, archivo_origen)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+            (
+                account_name, normalized, suggested_code, validated_code,
+                suggested_method, suggested_confidence,
+                bool(suggested_code and suggested_code != validated_code),
+                reviewer, source_file,
+            ),
+        )
 
     def save_catalog_entry(self, entry: dict[str, Any]) -> None:
         with self._connect() as conn:

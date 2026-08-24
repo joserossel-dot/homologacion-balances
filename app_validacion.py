@@ -36,7 +36,6 @@ from dotenv import load_dotenv
 from clasificador_codigo_cuenta import ClasificadorCodigo
 from catalog_selection import opciones_clasificacion
 from gold_standard.builder import GoldBuilder
-from gold_standard.models import GoldRecord
 from gold_standard.promotion import promote as promover_revisiones
 from gold_standard.runtime import RuntimeGoldStorage
 from gold_standard.runtime_manager import RuntimeManager
@@ -125,6 +124,23 @@ def _persistir_validacion(
     """Persiste en Neon; retorna False para que el caller use fallback JSON."""
     store = NeonKnowledgeStore()
     if not store.enabled:
+        return False
+
+
+def _persistir_validaciones_lote(validaciones: list[dict]) -> bool:
+    """Persiste un lote completo en una única transacción Neon."""
+    store = NeonKnowledgeStore()
+    if not store.enabled:
+        return False
+    try:
+        store.save_validations(validaciones)
+        cargar_diccionario_base.clear()
+        return True
+    except Exception:
+        st.error(
+            "Neon no pudo guardar el lote; las clasificaciones permanecen "
+            "en esta sesión y se usará el respaldo local del diccionario."
+        )
         return False
     try:
         store.save_validation(
@@ -909,22 +925,6 @@ class MotorHibridoLocal:
 # ─────────────────────────────────────────────────────────────────────────────
 # INTERFAZ DE USUARIO PRINCIPAL (MAIN)
 # ─────────────────────────────────────────────────────────────────────────────
-
-def _save_gold_standard(account_name, account_code, final_code, reviewer="analista"):
-    try:
-        builder = GoldBuilder()
-        record = GoldRecord(
-            account_name=account_name,
-            account_code_original=account_code,
-            final_code=final_code,
-            reviewer=reviewer,
-            source_file=st.session_state.get("archivo_activo_select", ""),
-        )
-        builder.add_or_update(record)
-        builder.close()
-    except Exception:
-        pass
-
 
 def main():
     st.title("📊 Homologación de Balances Tributarios Chilenos")
@@ -2292,6 +2292,7 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                     st.stop()
                 procesados = 0
                 fallback_json_lote = False
+                validaciones_lote = []
                 for idx_lote in list(st.session_state.lote_seleccion):
                     nombre_orig = df.at[idx_lote, 'nombre_original']
                     codigo_orig = df.at[idx_lote, 'codigo_original']
@@ -2302,25 +2303,24 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                     st.session_state.resultados[archivo_nombre].at[idx_lote, 'origen'] = 'Manual'
                     st.session_state.resultados[archivo_nombre].at[idx_lote, 'regla'] = 'validacion_humana_lote'
                     st.session_state.resultados[archivo_nombre].at[idx_lote, 'evidencia'] = 'Asignación en lote por analista'
-                    # Gold Standard autoaprendizaje
-                    _save_gold_standard(nombre_orig, codigo_orig, codigo_lote)
-                    persistido = _persistir_validacion(
-                        nombre=nombre_orig,
-                        codigo=codigo_lote,
-                        fuente='validacion_humana_lote',
-                        agregar_diccionario="diccionario" in alcance_lote,
-                        sugerido=df.at[idx_lote, 'codigo_clasificado'] or None,
-                        metodo=df.at[idx_lote, 'metodo'],
-                        confianza=float(df.at[idx_lote, 'confianza']),
-                        archivo=archivo_nombre,
-                    )
+                    validaciones_lote.append({
+                        'account_name': nombre_orig,
+                        'validated_code': codigo_lote,
+                        'source': 'validacion_humana_lote',
+                        'add_to_dictionary': "diccionario" in alcance_lote,
+                        'suggested_code': df.at[idx_lote, 'codigo_clasificado'] or None,
+                        'suggested_method': df.at[idx_lote, 'metodo'],
+                        'suggested_confidence': float(df.at[idx_lote, 'confianza']),
+                        'source_file': archivo_nombre,
+                    })
                     if "diccionario" in alcance_lote:
                         entrada = {'cuenta_original': nombre_orig, 'codigo_estandar': codigo_lote, 'fuente': 'validacion_humana_lote'}
                         st.session_state.diccionario.append(entrada)
                         st.session_state.correcciones.append(entrada)
-                        fallback_json_lote = fallback_json_lote or not persistido
                     propagar_clasificacion_resultados(nombre_orig, codigo_lote, 'validacion_humana_lote_propagada')
                     procesados += 1
+                persistido = _persistir_validaciones_lote(validaciones_lote)
+                fallback_json_lote = not persistido
                 if "diccionario" in alcance_lote and fallback_json_lote:
                     with open(BASE_DIR / 'diccionario.json', 'w', encoding='utf-8') as f:
                         json.dump(st.session_state.diccionario, f, ensure_ascii=False, indent=2)
@@ -2459,8 +2459,6 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                             df_mod.at[idx, 'origen'] = 'Manual'
                             df_mod.at[idx, 'regla'] = 'manual_revision'
                             df_mod.at[idx, 'evidencia'] = 'Corrección manual de extracción'
-                            if codigo_final:
-                                _save_gold_standard(nuevo_nombre, row['codigo_original'], codigo_final, reviewer="manual_revision")
                             propagar_clasificacion_resultados(nuevo_nombre, codigo_final or df_mod.at[idx, 'codigo_clasificado'], 'manual_revision_propagada')
                             st.toast(f"'{nuevo_nombre[:35]}' corregida ✅", icon="✅")
                         else:
@@ -2640,7 +2638,6 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                         st.session_state.resultados[archivo_nombre].at[idx, 'confianza'] = 1.0
                         st.session_state.resultados[archivo_nombre].at[idx, 'requiere_revision'] = False
                         st.session_state.lote_seleccion.discard(idx)
-                        _save_gold_standard(row['nombre_original'], row['codigo_original'], codigo_final)
                         persistido = _persistir_validacion(
                             nombre=row['nombre_original'], codigo=codigo_final,
                             fuente='validacion_humana',
