@@ -26,6 +26,7 @@ from app_validacion import (
     UMBRAL_REVISION,
     _codigo_compatible_con_origen,
     _es_contra_activo,
+    _es_partida_patrimonial,
     _origen_efectivo,
     _resolver_tipo_cuenta,
 )
@@ -72,10 +73,14 @@ def _classify(accounts, pipeline: HomologationPipeline) -> dict:
         amount = BalanceInterpreter(adapted).classification_amount
         if amount is None:
             continue
-        effective_origin = _origen_efectivo(account.origen_columna, amount)
+        effective_origin = _origen_efectivo(
+            account.origen_columna, amount, account.nombre,
+        )
         account_type = _resolver_tipo_cuenta(effective_origin, account.codigo)
         if effective_origin == "pasivo" and _es_contra_activo(account.nombre):
             account_type = "ACTIVO"
+        if _es_partida_patrimonial(account.nombre):
+            account_type = "PATRIMONIO"
         started = time.perf_counter()
         classification = pipeline._classify_account(
             adapted.account_code, adapted.account_name,

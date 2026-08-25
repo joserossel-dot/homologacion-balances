@@ -20,7 +20,11 @@ from parser_universal import FormatoCodigo, ParserPDF, ResultadoParseo
 from pipeline.cmcc_classifier import CMCCClassifier
 from pipeline.features import CMCCFeatureFlags
 from persistence.neon_store import NeonKnowledgeStore
-from parsers.account_type_resolver import is_contra_asset_name
+from parsers.account_type_resolver import (
+    is_accumulated_result_name,
+    is_contra_asset_name,
+    is_patrimonial_reserve_name,
+)
 from reglas_especiales import ProcesadorReglasEspeciales
 from decision.engine import DecisionEngine
 from semantic.semantic_engine import SemanticEngine
@@ -135,11 +139,15 @@ class HomologationPipeline:
         normalized = self._normalize_name(account_name)
         for entry in self._dictionary:
             if self._normalize_name(entry["cuenta_original"]) == normalized:
+                code = (
+                    "ANC.01.01" if is_contra_asset_name(account_name)
+                    else entry["codigo_estandar"]
+                )
                 return {
-                    "standard_code": entry["codigo_estandar"],
+                    "standard_code": code,
                     "confidence": 0.98,
                     "method": "dictionary_exact",
-                    "reason": f"Coincidencia exacta con diccionario → {entry['codigo_estandar']}",
+                    "reason": f"Coincidencia exacta con diccionario → {code}",
                 }
         return None
 
@@ -155,16 +163,34 @@ class HomologationPipeline:
                 best_entry = entry
         if best_score >= 90 and best_entry is not None:
             confidence = min(0.80 + (best_score - 90) * 0.01, 0.97)
+            code = (
+                "ANC.01.01" if is_contra_asset_name(account_name)
+                else best_entry["codigo_estandar"]
+            )
             return {
-                "standard_code": best_entry["codigo_estandar"],
+                "standard_code": code,
                 "confidence": round(confidence, 4),
                 "method": "dictionary_fuzzy",
                 "reason": (
                     f"Coincidencia fuzzy ({best_score}%) con "
-                    f"'{best_entry['cuenta_original']}' → {best_entry['codigo_estandar']}"
+                    f"'{best_entry['cuenta_original']}' → {code}"
                 ),
             }
         return None
+
+    @staticmethod
+    def _canonicalize_special_code(
+        result: dict[str, Any], account_name: str,
+    ) -> dict[str, Any]:
+        """Migra decisiones antiguas al código específico vigente."""
+        if (is_contra_asset_name(account_name)
+                and result.get("standard_code") == "ANC.01"):
+            result = {**result, "standard_code": "ANC.01.01"}
+            result["reason"] = (
+                f"{result.get('reason', 'Clasificación previa')}; "
+                "contra-activo normalizado a ANC.01.01"
+            )
+        return result
 
     def _classify_by_regex(self, account_name: str, account_tipo: str | None = None) -> dict[str, Any] | None:
         if not account_name:
@@ -191,12 +217,12 @@ class HomologationPipeline:
         normalized = self._normalize_name(account_name)
         if account_tipo == "ACTIVO" and is_contra_asset_name(account_name):
             return {
-                "standard_code": "ANC.01",
+                "standard_code": "ANC.01.01",
                 "confidence": 0.84,
                 "method": "regex_contextual",
                 "reason": (
                     "Contra-activo identificado por nombre y columna acreedora → "
-                    "ANC.01; requiere revisión humana"
+                    "ANC.01.01; requiere revisión humana"
                 ),
             }
         for pattern, code, confidence in self._REGEX_CONTEXTUAL:
@@ -288,6 +314,7 @@ class HomologationPipeline:
             result = self._classify_with_decision_engine(
                 account_code, account_name, account_tipo,
             )
+            result = self._canonicalize_special_code(result, account_name)
             result["_cmcc_score"] = cmcc_score
             if cmcc_raw is not None:
                 result["cmcc_detail"] = cmcc_raw
@@ -340,6 +367,8 @@ class HomologationPipeline:
                 "method": "unclassified",
                 "reason": "Sin coincidencia en código ni diccionario",
             }
+
+        result = self._canonicalize_special_code(result, account_name)
 
         if store_cmcc_shadow and cmcc_raw is not None:
             result["cmcc_shadow"] = cmcc_raw
@@ -515,6 +544,9 @@ class HomologationPipeline:
             account_tipo = tipo_result.account_type.value
             if account_tipo == "PASIVO" and is_contra_asset_name(ab.account_name):
                 account_tipo = "ACTIVO"
+            if (is_patrimonial_reserve_name(ab.account_name)
+                    or is_accumulated_result_name(ab.account_name)):
+                account_tipo = "PATRIMONIO"
 
             # None significa ausencia de información.
             # Un saldo 0.0 puede tener cuenta válida y debe clasificarse.

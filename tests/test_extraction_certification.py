@@ -396,6 +396,44 @@ def test_diagnostico_extraccion_prioriza_fila_que_rompe_clasificacion():
     assert "Activo/Pasivo" in diagnosis[7]["diagnostico"]
     assert diagnosis[7]["error_movimiento"] == 0
     assert diagnosis[7]["error_clasificacion"] == 100
+    assert diagnosis[7]["valores_sugeridos"] == ""
+
+
+def test_diagnostico_extraccion_sugiere_debito_omitido_sin_autocorregir():
+    cuenta = parser.CuentaRaw(
+        linea=0, codigo=None, nombre="Caja", monto=2_309_117,
+        montos_columnas={
+            "debitos": 0, "creditos": 6_006_281,
+            "saldo_deudor": 2_309_117, "saldo_acreedor": 0,
+            "activo": 2_309_117, "pasivo": 0,
+            "perdida": 0, "ganancia": 0,
+        },
+    )
+
+    diagnosis = app._diagnosticar_filas_extraccion(
+        [cuenta], SimpleNamespace(filas_inconsistentes=[0]),
+    )
+
+    assert "Debe: 0 → 8,315,398" in diagnosis[0]["valores_sugeridos"]
+    assert cuenta.montos_columnas["debitos"] == 0
+
+
+def test_crear_cuenta_manual_preserva_ocho_columnas_y_trazabilidad():
+    nueva = app._crear_cuenta_manual_extraccion(
+        [], codigo="2301001", nombre="Capital Social",
+        montos={
+            "debitos": 0, "creditos": 15_201_000,
+            "saldo_deudor": 0, "saldo_acreedor": 15_201_000,
+            "activo": 0, "pasivo": 15_201_000,
+            "perdida": 0, "ganancia": 0,
+        },
+    )
+
+    assert nueva.nombre == "Capital Social"
+    assert nueva.monto == 15_201_000
+    assert nueva.origen_columna is parser.OrigenColumna.PASIVO
+    assert nueva.columnas_derivadas == ["ingreso_manual_analista"]
+    assert nueva.montos_columnas["creditos"] == 15_201_000
 
 
 def test_diagnostico_extraccion_explica_firma_y_total_sin_autocorregir():

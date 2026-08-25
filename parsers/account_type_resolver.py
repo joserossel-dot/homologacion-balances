@@ -31,6 +31,27 @@ def is_contra_asset_name(name: str | None) -> bool:
     )
 
 
+def is_patrimonial_reserve_name(name: str | None) -> bool:
+    """True para reservas de patrimonio, no para provisiones de activos."""
+    normalized = re.sub(r"\s+", " ", str(name or "").lower()).strip()
+    if not re.search(r"\breserva(?:s)?\b", normalized):
+        return False
+    return not re.search(
+        r"incobrable|dudoso|obsolesc|inventario|provisi[oó]n|depreciaci[oó]n",
+        normalized,
+    )
+
+
+def is_accumulated_result_name(name: str | None) -> bool:
+    """True para utilidades, ganancias o pérdidas acumuladas patrimoniales."""
+    normalized = re.sub(r"\s+", " ", str(name or "").lower()).strip()
+    return bool(re.search(
+        r"\b(?:resultado(?:s)?|utilidad(?:es)?|ganancia(?:s)?|p[eé]rdida(?:s)?)\s+"
+        r"(?:acumulad[ao]s?|de\s+ejercicios?\s+anteriores?)\b",
+        normalized,
+    ))
+
+
 class AccountType(str, Enum):
     ACTIVO = "ACTIVO"
     PASIVO = "PASIVO"

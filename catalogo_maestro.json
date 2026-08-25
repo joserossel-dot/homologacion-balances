@@ -139,6 +139,20 @@
     "clasificable": true,
     "grupo_presentacion": "Activos"
   },
+  "ANC.01.01": {
+    "codigo_estandar": "ANC.01.01",
+    "nombre_estandar": "Depreciación Acumulada",
+    "categoria": "activo_no_corriente",
+    "tipo_estado": "balance",
+    "naturaleza": "acreedora",
+    "signo_normal": -1,
+    "es_deuda_financiera": false,
+    "es_activo_liquido": false,
+    "afecta_ebitda": false,
+    "descripcion": "Contra-activo del activo fijo. Puede extraerse como activo negativo o como pasivo positivo y siempre se presenta restando al activo fijo.",
+    "clasificable": true,
+    "grupo_presentacion": "Activos"
+  },
   "ANC.02": {
     "codigo_estandar": "ANC.02",
     "nombre_estandar": "Propiedades de Inversión",

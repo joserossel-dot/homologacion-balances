@@ -52,7 +52,11 @@ from parser_universal import (
     certificar_extraccion_columnas, parsear_excel,
 )
 from parsers.column_interpretation import es_ingreso as es_ingreso_col, es_gasto as es_gasto_col
-from parsers.account_type_resolver import is_contra_asset_name
+from parsers.account_type_resolver import (
+    is_accumulated_result_name,
+    is_contra_asset_name,
+    is_patrimonial_reserve_name,
+)
 from extractor_metadata import extraer_metadata, MetadataEmpresa
 from account_qualification import qualify_cuentas as _safe_qualify_cuentas, \
     safe_mode_enabled as _safe_mode_enabled
@@ -91,16 +95,23 @@ st.set_page_config(
 
 @st.cache_data
 def cargar_catalogo() -> dict:
+    with open(BASE_DIR / 'catalogo_maestro.json', encoding='utf-8') as f:
+        catalogo_local = json.load(f)
     store = NeonKnowledgeStore()
     if store.enabled:
         try:
-            catalogo = store.load_catalog()
-            if catalogo:
-                return catalogo
+            catalogo_neon = store.load_catalog()
+            if catalogo_neon:
+                return {
+                    codigo: {**entrada, **catalogo_neon.get(codigo, {})}
+                    for codigo, entrada in catalogo_local.items()
+                } | {
+                    codigo: entrada for codigo, entrada in catalogo_neon.items()
+                    if codigo not in catalogo_local
+                }
         except Exception:
             pass
-    with open(BASE_DIR / 'catalogo_maestro.json', encoding='utf-8') as f:
-        return json.load(f)
+    return catalogo_local
 
 
 @st.cache_data
@@ -389,6 +400,8 @@ def _origen_desde_clasif(clasif: dict, account_name: str, hp=None) -> str:
 
 def _resolver_tipo_cuenta(origen_columna, codigo) -> str | None:
     """Account type (read-only) para etapas sensibles al tipo. Never modifica nada."""
+    if str(getattr(origen_columna, 'value', origen_columna) or '').lower() == 'patrimonio':
+        return 'PATRIMONIO'
     try:
         from parser_universal import OrigenColumna as _OC
         from parsers.account_type_resolver import AccountTypeResolver
@@ -400,6 +413,8 @@ def _resolver_tipo_cuenta(origen_columna, codigo) -> str | None:
 
 def _resolver_tipos_permitidos(origen_columna) -> set[str]:
     """Tipos compatibles con la columna, conservando sus ambiguedades reales."""
+    if str(getattr(origen_columna, 'value', origen_columna) or '').lower() == 'patrimonio':
+        return {'PATRIMONIO'}
     try:
         from parser_universal import OrigenColumna as _OC
         from parsers.account_type_resolver import AccountTypeResolver
@@ -418,7 +433,7 @@ _CONTRA_ORIGEN = {
 }
 
 
-def _origen_efectivo(origen_columna, monto) -> str:
+def _origen_efectivo(origen_columna, monto, nombre: str | None = None) -> str:
     """Naturaleza contable efectiva, preservando aparte la columna física.
 
     En balances de 8 columnas un importe negativo representa una contra cuenta:
@@ -426,6 +441,8 @@ def _origen_efectivo(origen_columna, monto) -> str:
     """
     origen = getattr(origen_columna, 'value', origen_columna)
     origen = str(origen or 'desconocido').strip().lower()
+    if is_patrimonial_reserve_name(nombre) or is_accumulated_result_name(nombre):
+        return 'patrimonio'
     try:
         es_negativo = monto is not None and pd.notna(monto) and float(monto) < 0
     except (TypeError, ValueError):
@@ -433,11 +450,13 @@ def _origen_efectivo(origen_columna, monto) -> str:
     return _CONTRA_ORIGEN.get(origen, origen) if es_negativo else origen
 
 
-def _etiqueta_origen(origen_columna, monto) -> str:
+def _etiqueta_origen(origen_columna, monto, nombre: str | None = None) -> str:
     """Etiqueta auditable para la cola: extracción y naturaleza efectiva."""
     extraido = getattr(origen_columna, 'value', origen_columna)
     extraido = str(extraido or 'desconocido').strip().upper()
-    efectivo = _origen_efectivo(origen_columna, monto).upper()
+    efectivo = _origen_efectivo(origen_columna, monto, nombre).upper()
+    if is_patrimonial_reserve_name(nombre) or is_accumulated_result_name(nombre):
+        return f"{extraido} → PATRIMONIO (naturaleza de la cuenta)"
     if efectivo != extraido:
         return f"{extraido} → {efectivo} (monto negativo)"
     return extraido
@@ -446,6 +465,10 @@ def _etiqueta_origen(origen_columna, monto) -> str:
 def _es_contra_activo(nombre: str | None) -> bool:
     """Reconoce cuentas acreedoras que corrigen el valor de un activo."""
     return is_contra_asset_name(nombre)
+
+
+def _es_partida_patrimonial(nombre: str | None) -> bool:
+    return is_patrimonial_reserve_name(nombre) or is_accumulated_result_name(nombre)
 
 
 def _monto_presentacion(codigo: str | None, monto, nombre: str | None = None) -> float:
@@ -465,7 +488,7 @@ def _resultado_periodo(clasificadas: pd.DataFrame) -> float | None:
     encontro_resultado = False
     for _, row in clasificadas.iterrows():
         origen = row.get('origen_columna_efectiva') or _origen_efectivo(
-            row.get('origen_columna'), row.get('monto')
+            row.get('origen_columna'), row.get('monto'), row.get('nombre_original')
         )
         monto = abs(float(row.get('monto') or 0.0))
         if origen == 'ganancia':
@@ -480,12 +503,14 @@ def _resultado_periodo(clasificadas: pd.DataFrame) -> float | None:
 def _codigo_compatible_con_origen(
         codigo: str | None, origen_columna, monto, nombre: str | None = None) -> bool:
     """Impide sugerencias que contradigan la columna efectiva del balance."""
-    origen_efectivo = _origen_efectivo(origen_columna, monto)
+    origen_efectivo = _origen_efectivo(origen_columna, monto, nombre)
     # Una depreciación/amortización acumulada puede venir físicamente en la
     # columna Pasivo por su saldo acreedor, pero contablemente es contra-activo
     # y debe poder homologarse dentro del activo fijo (ANC).
     if (origen_efectivo == 'pasivo' and _es_contra_activo(nombre)
             and str(codigo or '').startswith('ANC')):
+        return True
+    if _es_partida_patrimonial(nombre) and str(codigo or '').startswith('PAT'):
         return True
     if (origen_efectivo == 'activo' and str(codigo or '') == 'PAT.10'
             and es_cuenta_socios(nombre)):
@@ -1075,7 +1100,9 @@ def main():
                         _t0_legacy = time.perf_counter()
                         r = motor.clasificar(c, company_giro_norm)
                         _t1_legacy = (time.perf_counter() - _t0_legacy) * 1000
-                        origen_efectivo = _origen_efectivo(c.origen_columna, c.monto)
+                        origen_efectivo = _origen_efectivo(
+                            c.origen_columna, c.monto, c.nombre,
+                        )
                         if (r.get('codigo_estandar') and
                                 not _codigo_compatible_con_origen(
                                     r['codigo_estandar'], c.origen_columna, c.monto,
@@ -1107,7 +1134,9 @@ def main():
                             ),
                             'nota': r.get('nota_regla_especial', ''),
                             'confianza_extraccion': c.confianza_extraccion,
-                            'origen_columna_display': _etiqueta_origen(c.origen_columna, c.monto),
+                            'origen_columna_display': _etiqueta_origen(
+                                c.origen_columna, c.monto, c.nombre,
+                            ),
                             'nombre_revision_usuario': '',
                             'tipo_revision': '',
                             'origen': _origen_desde_metodo_display(r['metodo']),
@@ -1199,11 +1228,15 @@ def main():
                         ab = AccountAdapter.from_cuenta_raw(c)
                         interp = BalanceInterpreter(ab)
                         classification_amount = interp.classification_amount
-                        origen_efectivo = _origen_efectivo(c.origen_columna, classification_amount)
+                        origen_efectivo = _origen_efectivo(
+                            c.origen_columna, classification_amount, c.nombre,
+                        )
                         account_tipo = _resolver_tipo_cuenta(origen_efectivo, c.codigo)
                         if (origen_efectivo == 'pasivo'
                                 and _es_contra_activo(c.nombre)):
                             account_tipo = 'ACTIVO'
+                        if _es_partida_patrimonial(c.nombre):
+                            account_tipo = 'PATRIMONIO'
                         if classification_amount is None:
                             codigo_clasificado = ""
                             metodo = "movement_only"
@@ -1282,7 +1315,7 @@ def main():
                             'nota': nota,
                             'confianza_extraccion': c.confianza_extraccion,
                             'origen_columna_display': _etiqueta_origen(
-                                c.origen_columna, classification_amount),
+                                c.origen_columna, classification_amount, c.nombre),
                             'nombre_revision_usuario': '',
                             'tipo_revision': '',
                             'origen': clasif_origen,
@@ -1381,7 +1414,11 @@ def main():
 
     if df.empty:
         if archivo_activo_name in st.session_state.extraction_pending:
-            _mostrar_correccion_extraccion(archivo_activo_name)
+            visor, correccion = st.columns([1, 1], gap="medium")
+            with visor:
+                _visor_documento(archivo_activo)
+            with correccion:
+                _mostrar_correccion_extraccion(archivo_activo_name)
         else:
             st.warning(f"No se extrajeron cuentas del archivo {archivo_activo_name}.")
         st.stop()
@@ -1641,6 +1678,43 @@ def _aplicar_correcciones_extraccion(
     return corrected, certification
 
 
+def _crear_cuenta_manual_extraccion(
+    cuentas: list[CuentaRaw], *, codigo: str, nombre: str,
+    montos: dict[str, float], es_total: bool = False,
+) -> CuentaRaw:
+    """Construye una fila auditable ingresada por el analista."""
+    if not str(nombre or '').strip():
+        raise ValueError("El nombre de la cuenta es obligatorio")
+    amounts = {
+        column: float(montos.get(column, 0.0) or 0.0)
+        for column in RAW_MONETARY_COLUMNS
+    }
+    origin_by_column = {
+        "activo": OrigenColumna.ACTIVO,
+        "pasivo": OrigenColumna.PASIVO,
+        "perdida": OrigenColumna.PERDIDA,
+        "ganancia": OrigenColumna.GANANCIA,
+    }
+    amount = None
+    origin = OrigenColumna.DESCONOCIDO
+    for column in ("activo", "pasivo", "perdida", "ganancia"):
+        if amounts[column] != 0:
+            amount = amounts[column]
+            origin = origin_by_column[column]
+            break
+    return CuentaRaw(
+        linea=max((int(c.linea) for c in cuentas), default=-1) + 1,
+        codigo=str(codigo or '').strip() or None,
+        nombre=str(nombre).strip(),
+        monto=amount,
+        origen_columna=origin,
+        es_total=bool(es_total),
+        confianza_extraccion=1.0,
+        montos_columnas=amounts,
+        columnas_derivadas=["ingreso_manual_analista"],
+    )
+
+
 def _diagnosticar_filas_extraccion(
         cuentas: list[CuentaRaw], certification=None,
         tolerancia: float = 10.0) -> dict[int, dict]:
@@ -1681,6 +1755,42 @@ def _diagnosticar_filas_extraccion(
         )
         name = normalizar_nombre(cuenta.nombre)
         is_inconsistent = int(cuenta.linea) in inconsistent
+        suggested: list[str] = []
+        movement_candidates = {
+            "Debe": values["creditos"] + values["saldo_deudor"] - values["saldo_acreedor"],
+            "Haber": values["debitos"] - values["saldo_deudor"] + values["saldo_acreedor"],
+            "Saldo deudor": values["debitos"] - values["creditos"] + values["saldo_acreedor"],
+            "Saldo acreedor": values["creditos"] - values["debitos"] + values["saldo_deudor"],
+        }
+        current_movement = {
+            "Debe": values["debitos"], "Haber": values["creditos"],
+            "Saldo deudor": values["saldo_deudor"],
+            "Saldo acreedor": values["saldo_acreedor"],
+        }
+        if abs(movement_error) > tolerancia:
+            zero_first = [
+                label for label, current in current_movement.items()
+                if current == 0 and movement_candidates[label] > 0
+            ]
+            labels = zero_first or list(movement_candidates)
+            suggested.extend(
+                f"{label}: {current_movement[label]:,.0f} → "
+                f"{movement_candidates[label]:,.0f}"
+                for label in labels
+                if movement_candidates[label] >= 0
+                and abs(current_movement[label] - movement_candidates[label]) > tolerancia
+            )
+        classification_values = {
+            "Activo": values["activo"], "Pasivo": values["pasivo"],
+            "Pérdidas": values["perdida"], "Ganancias": values["ganancia"],
+        }
+        populated = [label for label, value in classification_values.items() if value != 0]
+        saldo_total = values["saldo_deudor"] + values["saldo_acreedor"]
+        if abs(classification_error) > tolerancia and len(populated) == 1:
+            label = populated[0]
+            suggested.append(
+                f"{label}: {classification_values[label]:,.0f} → {saldo_total:,.0f}"
+            )
 
         if is_inconsistent and abs(movement_error) > tolerancia:
             if abs(classification_error) > tolerancia:
@@ -1724,6 +1834,7 @@ def _diagnosticar_filas_extraccion(
             "prioridad": priority,
             "diagnostico": reason,
             "accion_sugerida": action,
+            "valores_sugeridos": "; ".join(suggested),
             "error_movimiento": round(movement_error, 2),
             "error_clasificacion": round(classification_error, 2),
         }
@@ -1757,6 +1868,7 @@ def _mostrar_correccion_extraccion(filename: str) -> None:
             "prioridad": int(diagnosis.get("prioridad", 3)),
             "diagnostico": diagnosis.get("diagnostico", ""),
             "accion_sugerida": diagnosis.get("accion_sugerida", ""),
+            "valores_sugeridos": diagnosis.get("valores_sugeridos", ""),
             "excluir": False,
             **{
                 column: float(cuenta.montos_columnas.get(column, 0.0) or 0.0)
@@ -1809,6 +1921,10 @@ def _mostrar_correccion_extraccion(filename: str) -> None:
         "4. Corrija una cifra únicamente cuando sea distinta de la impresa. "
         "Después pulse **Verificar y continuar**."
     )
+    st.caption(
+        "Los valores sugeridos se calculan desde las identidades Debe/Haber y "
+        "saldo/clasificación. No se aplican automáticamente: compárelos con el PDF."
+    )
     if inconsistent:
         nombres_inconsistentes = source[source["inconsistente"]][
             ["linea", "cuenta"]
@@ -1820,6 +1936,50 @@ def _mostrar_correccion_extraccion(filename: str) -> None:
             nombres_inconsistentes.rename(columns={"linea": "Fila", "cuenta": "Cuenta"}),
             use_container_width=True, hide_index=True,
         )
+    with st.expander("Ingresar una cuenta omitida por la extracción"):
+        st.caption(
+            "Use esta opción sólo cuando la cuenta exista en el documento y no "
+            "aparezca en la tabla. Copie sus ocho columnas tal como están impresas."
+        )
+        with st.form(f"manual_extraction_row_{filename}", clear_on_submit=True):
+            codigo_manual = st.text_input("Código original, si existe")
+            nombre_manual = st.text_input("Nombre de la cuenta")
+            m1, m2, m3, m4 = st.columns(4)
+            debitos_manual = m1.number_input("Debe", value=0.0, format="%.0f")
+            creditos_manual = m2.number_input("Haber", value=0.0, format="%.0f")
+            saldo_deudor_manual = m3.number_input("Saldo deudor", value=0.0, format="%.0f")
+            saldo_acreedor_manual = m4.number_input("Saldo acreedor", value=0.0, format="%.0f")
+            c1m, c2m, c3m, c4m = st.columns(4)
+            activo_manual = c1m.number_input("Activo", value=0.0, format="%.0f")
+            pasivo_manual = c2m.number_input("Pasivo", value=0.0, format="%.0f")
+            perdida_manual = c3m.number_input("Pérdidas", value=0.0, format="%.0f")
+            ganancia_manual = c4m.number_input("Ganancias", value=0.0, format="%.0f")
+            total_manual = st.checkbox("Es subtotal, resultado o total impreso")
+            agregar_manual = st.form_submit_button("Agregar cuenta a la extracción")
+        if agregar_manual:
+            try:
+                nueva = _crear_cuenta_manual_extraccion(
+                    resultado.cuentas,
+                    codigo=codigo_manual,
+                    nombre=nombre_manual,
+                    montos={
+                        "debitos": debitos_manual, "creditos": creditos_manual,
+                        "saldo_deudor": saldo_deudor_manual,
+                        "saldo_acreedor": saldo_acreedor_manual,
+                        "activo": activo_manual, "pasivo": pasivo_manual,
+                        "perdida": perdida_manual, "ganancia": ganancia_manual,
+                    },
+                    es_total=total_manual,
+                )
+            except ValueError as exc:
+                st.error(str(exc))
+            else:
+                resultado.cuentas.append(nueva)
+                resultado.certificacion_extraccion = certificar_extraccion_columnas(
+                    resultado.cuentas, metodo="revision_humana_8_columnas",
+                )
+                st.success("Cuenta incorporada. Revise la certificación actualizada.")
+                st.rerun()
     edited = st.data_editor(
         source,
         hide_index=True,
@@ -1827,6 +1987,7 @@ def _mostrar_correccion_extraccion(filename: str) -> None:
         disabled=[
             "linea", "codigo", "cuenta", "inconsistente", "prioridad",
             "diagnostico", "accion_sugerida",
+            "valores_sugeridos",
         ],
         key=f"extraction_editor_{filename}",
         column_config={
@@ -1842,6 +2003,9 @@ def _mostrar_correccion_extraccion(filename: str) -> None:
             ),
             "accion_sugerida": st.column_config.TextColumn(
                 "Qué debe hacer", width="large",
+            ),
+            "valores_sugeridos": st.column_config.TextColumn(
+                "Leído → valor contablemente posible", width="large",
             ),
             "excluir": st.column_config.CheckboxColumn(
                 "Excluir", help="Úselo sólo para pies, firmas, notas o texto que no sea una cuenta."
@@ -2435,9 +2599,13 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                 col_extraida = row.get('origen_columna', 'desconocido')
                 col_actual = row.get(
                     'origen_columna_efectiva',
-                    _origen_efectivo(col_extraida, row.get('monto')),
+                    _origen_efectivo(
+                        col_extraida, row.get('monto'), row.get('nombre_original'),
+                    ),
                 ).upper()
-                etiqueta_columna = _etiqueta_origen(col_extraida, row.get('monto'))
+                etiqueta_columna = _etiqueta_origen(
+                    col_extraida, row.get('monto'), row.get('nombre_original'),
+                )
                 badge_bg = {
                     'ACTIVO': '#1E90FF', 'PASIVO': '#FF8C00',
                     'PERDIDA': '#DC143C', 'GANANCIA': '#2E8B57',
@@ -2496,9 +2664,9 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                             df_mod.at[idx, 'origen_columna'] = nueva_nat.lower()
                             df_mod.at[idx, 'monto'] = nuevo_monto
                             df_mod.at[idx, 'origen_columna_efectiva'] = _origen_efectivo(
-                                nueva_nat, nuevo_monto)
+                                nueva_nat, nuevo_monto, nuevo_nombre)
                             df_mod.at[idx, 'origen_columna_display'] = _etiqueta_origen(
-                                nueva_nat, nuevo_monto)
+                                nueva_nat, nuevo_monto, nuevo_nombre)
                             if codigo_final:
                                 df_mod.at[idx, 'codigo_clasificado'] = codigo_final
                             df_mod.at[idx, 'metodo'] = 'manual_revision'

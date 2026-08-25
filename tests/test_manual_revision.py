@@ -269,7 +269,7 @@ class TestOrigenContableEnRevision:
 
     def test_depreciacion_acumulada_en_pasivo_permite_activo_fijo(self):
         assert _codigo_compatible_con_origen(
-            'ANC.01', 'pasivo', 8371044, 'Depreciación Acumulada'
+            'ANC.01.01', 'pasivo', 8371044, 'Depreciación Acumulada'
         )
 
     def test_pasivo_comun_no_permite_activo_fijo(self):
@@ -286,7 +286,29 @@ class TestOrigenContableEnRevision:
         ],
     )
     def test_otras_contra_cuentas_acreedoras_permiten_anc(self, nombre):
-        assert _codigo_compatible_con_origen('ANC.01', 'pasivo', 100, nombre)
+        assert _codigo_compatible_con_origen('ANC.01.01', 'pasivo', 100, nombre)
+
+    @pytest.mark.parametrize('monto', [49934544, -49934544])
+    def test_reserva_patrimonial_admite_pat02_con_ambos_signos(self, monto):
+        assert _origen_efectivo('pasivo', monto, 'Reservas legales') == 'patrimonio'
+        assert _codigo_compatible_con_origen(
+            'PAT.02', 'pasivo', monto, 'Reservas legales'
+        )
+        assert 'PATRIMONIO' in _etiqueta_origen(
+            'pasivo', monto, 'Reservas legales'
+        )
+
+    @pytest.mark.parametrize('monto', [116171, -116171])
+    def test_perdidas_acumuladas_en_activo_admiten_patrimonio(self, monto):
+        assert _origen_efectivo('activo', monto, 'Pérdidas acumuladas') == 'patrimonio'
+        assert _codigo_compatible_con_origen(
+            'PAT.03', 'activo', monto, 'Pérdidas acumuladas'
+        )
+
+    def test_reserva_incobrables_no_se_trata_como_patrimonio(self):
+        assert not _codigo_compatible_con_origen(
+            'PAT.02', 'activo', 100, 'Reserva para cuentas incobrables'
+        )
 
     def test_cuenta_socios_en_activo_permite_pat10(self):
         assert _codigo_compatible_con_origen(

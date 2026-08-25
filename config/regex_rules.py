@@ -28,7 +28,7 @@ REGLAS_REGEX = [
     (r"\b(indemnizacion(es)?\s*(por\s*)?a[ñn]os?\s*(de\s*)?servicio|provision(es)?\s*lp|impuesto(s)?\s*diferido(s)?\s*lp)\b", "PNC.05", 0.85),
     (r"\b(capital\s*(pagado|suscrito|social|propio)?|aporte(s)?\s*(de\s*)?(capital|socios?))\b", "PAT.01", 0.90),
     (r"\b(reserva(s)?(\s*legal)?|prima\s*de\s*emision)\b", "PAT.02", 0.88),
-    (r"\b(utilidad(es)?\s*(acumulada(s)?|retenida(s)?)|resultado(s)?\s*acumulado(s)?|p[eé]rdida(s)?\s*acumulada(s)?)\b", "PAT.03", 0.90),
+    (r"\b(utilidad(es)?\s*(acumulada(s)?|retenida(s)?)|ganancia(s)?\s*acumulada(s)?|resultado(s)?\s*acumulado(s)?|p[eé]rdida(s)?\s*acumulada(s)?)\b", "PAT.03", 0.90),
     (r"\butilidad\s*del\s*(ejercicio|periodo|a[ñn]o)|resultado\s*del\s*(ejercicio|periodo)|p[eé]rdida\s*del\s*(ejercicio|periodo)|utilidad\s*[/(]?\s*p[eé]rdida\b", "PAT.04", 0.92),
     (r"\b(venta(s)?|ingreso(s)?\s*(por\s*venta|operacional|del\s*giro)|facturacion)\b", "ER.01", 0.90),
     (r"\bcosto(s)?\s*(de\s*)?(venta(s)?|explotacion|produccion|mercader[ií]a|motos?\s*(usadas?)?|repuestos?(\s+y\s+accesorios)?|servicio\s+taller)\b", "ER.02", 0.92),
@@ -38,6 +38,7 @@ REGLAS_REGEX = [
     (r"\bgasto(s)?\s*financiero(s)?|intere(s|ses)?\s*(pagado|bancario|leasing|factoring)|comision(es)?\s*bancaria(s)?", "ER.09", 0.90),
     (r"\bimpuesto\s*(a\s*la\s*renta|primera\s*categoria)\b", "ER.10", 0.90),
     (r"\butilidad\s*neta|resultado\s*neto|net\s*income|ganancia\s*neta", "ER.11", 0.92),
+    (r"\b(depreciaci[oó]n(?:es)?|amortizaci[oó]n(?:es)?|deterioro)\s+acumulad[ao]s?\b", "ANC.01.01", 0.90),
 ]
 
 REGLAS_COMPILADAS = [(re.compile(p, re.IGNORECASE | re.UNICODE), c, conf) for p, c, conf in REGLAS_REGEX]

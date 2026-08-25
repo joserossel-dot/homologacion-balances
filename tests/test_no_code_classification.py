@@ -58,8 +58,50 @@ def test_contra_activo_sin_codigo_se_clasifica_como_activo_fijo(tmp_path):
         'DEPRECIACION ACUMULADA ACTIVOS', 'ACTIVO'
     )
 
-    assert result['standard_code'] == 'ANC.01'
+    assert result['standard_code'] == 'ANC.01.01'
     assert result['confidence'] < 0.85
+
+
+def test_diccionario_migra_depreciacion_acumulada_al_subcodigo(tmp_path):
+    pipeline = HomologationPipeline(db_path=tmp_path / 'gold.db')
+    pipeline._dictionary = [{
+        'cuenta_original': 'Depreciación Acumulada Activo Fijo',
+        'codigo_estandar': 'ANC.01',
+    }]
+
+    result = pipeline._classify_by_dictionary_exact(
+        'Depreciación Acumulada Activo Fijo'
+    )
+
+    assert result['standard_code'] == 'ANC.01.01'
+
+
+def test_reserva_patrimonial_clasifica_pat02_con_signo_indistinto(tmp_path):
+    pipeline = HomologationPipeline(db_path=tmp_path / 'gold.db')
+
+    result = pipeline._classify_by_regex_contextual('Reservas legales', 'PATRIMONIO')
+
+    assert result['standard_code'] == 'PAT.02'
+
+
+def test_perdidas_acumuladas_en_activo_clasifican_pat03(tmp_path):
+    pipeline = HomologationPipeline(db_path=tmp_path / 'gold.db')
+
+    result = pipeline._classify_by_regex_contextual(
+        'Pérdidas acumuladas', 'PATRIMONIO'
+    )
+
+    assert result['standard_code'] == 'PAT.03'
+
+
+def test_ganancias_acumuladas_negativas_clasifican_pat03(tmp_path):
+    pipeline = HomologationPipeline(db_path=tmp_path / 'gold.db')
+
+    result = pipeline._classify_by_regex_contextual(
+        'Ganancias acumuladas', 'PATRIMONIO'
+    )
+
+    assert result['standard_code'] == 'PAT.03'
 
 
 def test_process_aplica_reglas_a_la_cuenta_actual(tmp_path):
