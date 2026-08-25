@@ -23,6 +23,10 @@ class MetadataEmpresa:
     periodo_desde: Optional[str] = None
     periodo_hasta: Optional[str] = None
     giro: Optional[str] = None
+    moneda: Optional[str] = None
+    mes_cierre: Optional[str] = None
+    anio_cierre: Optional[int] = None
+    numero_meses: Optional[int] = None
     confianza: float = 0.0  # 0-1, cuántos campos se detectaron
 
 

@@ -21,12 +21,14 @@ Funcionalidad:
 """
 
 import hashlib
+import calendar
 import json
 import os
 import re
 import time
 from dataclasses import replace
 from pathlib import Path
+from datetime import date, datetime
 
 import pandas as pd
 import streamlit as st
@@ -61,6 +63,65 @@ from extractor_metadata import extraer_metadata, MetadataEmpresa
 from account_qualification import qualify_cuentas as _safe_qualify_cuentas, \
     safe_mode_enabled as _safe_mode_enabled
 from persistence.neon_store import NeonKnowledgeStore
+
+
+MESES_SELECCION = [
+    "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+    "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+]
+
+
+def _valores_periodo_metadata(meta: MetadataEmpresa) -> tuple[str, int, int]:
+    """Deriva mes, año y duración desde el período detectado."""
+    cierre = None
+    inicio = None
+    for raw, target in ((meta.periodo_hasta, "cierre"), (meta.periodo_desde, "inicio")):
+        if not raw:
+            continue
+        try:
+            parsed = datetime.strptime(str(raw), "%d/%m/%Y").date()
+        except ValueError:
+            continue
+        if target == "cierre":
+            cierre = parsed
+        else:
+            inicio = parsed
+    cierre = cierre or date.today()
+    meses = 12
+    if inicio:
+        meses = (cierre.year - inicio.year) * 12 + cierre.month - inicio.month + 1
+        meses = min(12, max(1, meses))
+    return MESES_SELECCION[cierre.month - 1], cierre.year, meses
+
+
+def _fechas_periodo_seleccionado(
+    mes: str, anio: int, numero_meses: int,
+) -> tuple[str, str]:
+    """Convierte mes de cierre y duración a fechas inclusivas del período."""
+    mes_numero = MESES_SELECCION.index(mes) + 1
+    total_inicio = anio * 12 + mes_numero - int(numero_meses)
+    anio_inicio, mes_inicio_cero = divmod(total_inicio, 12)
+    mes_inicio = mes_inicio_cero + 1
+    ultimo_dia = calendar.monthrange(int(anio), mes_numero)[1]
+    return (
+        f"01/{mes_inicio:02d}/{anio_inicio}",
+        f"{ultimo_dia:02d}/{mes_numero:02d}/{int(anio)}",
+    )
+
+
+def _aplicar_metadata_confirmada(meta: MetadataEmpresa) -> MetadataEmpresa:
+    """Aplica a cada archivo los datos generales confirmados por el usuario."""
+    meta.rut = st.session_state.company_rut
+    meta.razon_social = st.session_state.company_razon
+    meta.giro = st.session_state.company_giro
+    meta.moneda = st.session_state.company_moneda
+    meta.mes_cierre = st.session_state.company_mes
+    meta.anio_cierre = int(st.session_state.company_anio)
+    meta.numero_meses = int(st.session_state.company_numero_meses)
+    meta.periodo_desde, meta.periodo_hasta = _fechas_periodo_seleccionado(
+        meta.mes_cierre, meta.anio_cierre, meta.numero_meses,
+    )
+    return meta
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIGURACIÓN
@@ -1029,6 +1090,11 @@ def main():
             st.session_state.company_rut = meta.rut or ""
             st.session_state.company_razon = meta.razon_social or ""
             st.session_state.company_giro = meta.giro or "Otro"
+            mes_detectado, anio_detectado, meses_detectados = _valores_periodo_metadata(meta)
+            st.session_state.company_moneda = meta.moneda or "$"
+            st.session_state.company_mes = mes_detectado
+            st.session_state.company_anio = anio_detectado
+            st.session_state.company_numero_meses = meses_detectados
 
         st.subheader("📋 Confirma los datos de la empresa")
         st.caption("El sistema detectó los siguientes datos generales. Corrígelos si es necesario antes de continuar.")
@@ -1045,18 +1111,95 @@ def main():
                     default_giro_idx = giro_list.index(st.session_state.company_giro)
                 giro_sel = st.selectbox(
                     "Giro de la empresa (afecta regla D2-Terrenos)",
-                    giro_list, index=default_giro_idx
+                    giro_list, index=default_giro_idx,
+                    help="Escriba dentro del desplegable para filtrar opciones.",
                 )
 
-            submitted = st.form_submit_button("✅ Confirmar y procesar todos los balances")
+            st.markdown("##### Moneda y período informado")
+            moneda_col, otra_col = st.columns(2)
+            moneda_opciones = ["$", "M", "MM", "USD", "Otra"]
+            moneda_actual = st.session_state.company_moneda
+            moneda_indice = (
+                moneda_opciones.index(moneda_actual)
+                if moneda_actual in moneda_opciones else moneda_opciones.index("Otra")
+            )
+            with moneda_col:
+                moneda_sel = st.selectbox(
+                    "Moneda o unidad",
+                    moneda_opciones,
+                    index=moneda_indice,
+                    help=(
+                        "$: pesos; M: miles; MM: millones; USD: dólares. "
+                        "Escriba para buscar una opción."
+                    ),
+                    filter_mode="fuzzy",
+                )
+            with otra_col:
+                otra_moneda = st.text_input(
+                    "Otra moneda o unidad",
+                    value=(moneda_actual if moneda_actual not in moneda_opciones else ""),
+                    placeholder="Ejemplo: EUR, UF, UTM",
+                    help="Complete este campo únicamente si seleccionó Otra.",
+                )
+
+            periodo1, periodo2, periodo3 = st.columns(3)
+            with periodo1:
+                mes_sel = st.selectbox(
+                    "Mes de cierre",
+                    MESES_SELECCION,
+                    index=MESES_SELECCION.index(st.session_state.company_mes),
+                    help="Escriba el nombre del mes para encontrarlo.",
+                    filter_mode="fuzzy",
+                )
+            anio_actual = date.today().year
+            anios = list(range(anio_actual + 2, 1979, -1))
+            if int(st.session_state.company_anio) not in anios:
+                anios.append(int(st.session_state.company_anio))
+                anios.sort(reverse=True)
+            with periodo2:
+                anio_sel = st.selectbox(
+                    "Año de cierre",
+                    anios,
+                    index=anios.index(int(st.session_state.company_anio)),
+                    help="Escriba el año para encontrarlo.",
+                    filter_mode="fuzzy",
+                )
+            opciones_meses = list(range(1, 13))
+            with periodo3:
+                numero_meses_sel = st.selectbox(
+                    "Número de meses del período",
+                    opciones_meses,
+                    index=opciones_meses.index(
+                        int(st.session_state.company_numero_meses)
+                    ),
+                    help="Escriba un número entre 1 y 12 para encontrarlo.",
+                    filter_mode="fuzzy",
+                )
+
+            submitted = st.form_submit_button("Confirmar y procesar todos los balances")
             if submitted:
-                st.session_state.company_rut = rut
-                st.session_state.company_razon = razon
-                st.session_state.company_giro = giro_sel
-                st.session_state.metadata_confirmada = True
-                st.session_state.resultados = {}
-                st.session_state.metadata_files = {}
-                st.rerun()
+                moneda_final = otra_moneda.strip() if moneda_sel == "Otra" else moneda_sel
+                if not moneda_final:
+                    st.error("Especifique la moneda o unidad cuando seleccione Otra.")
+                else:
+                    st.session_state.company_rut = rut
+                    st.session_state.company_razon = razon
+                    st.session_state.company_giro = giro_sel
+                    st.session_state.company_moneda = moneda_final
+                    st.session_state.company_mes = mes_sel
+                    st.session_state.company_anio = int(anio_sel)
+                    st.session_state.company_numero_meses = int(numero_meses_sel)
+                    st.session_state.metadata_confirmada = True
+                    st.session_state.resultados = {}
+                    st.session_state.metadata_files = {}
+                    st.rerun()
+        st.divider()
+        st.subheader("Documento original")
+        st.caption(
+            "Revise el encabezado y el período antes de confirmar. El visor ocupa "
+            "al menos la mitad inferior de la pantalla."
+        )
+        _visor_documento(first_file, altura="58vh", mostrar_titulo=False)
         return
 
     company_giro_norm = None if st.session_state.company_giro == 'Otro' else st.session_state.company_giro.lower()
@@ -1079,7 +1222,9 @@ def main():
             if archivo.name not in st.session_state.resultados:
                 with st.spinner(f"Clasificando cuentas de {archivo.name}..."):
                     lineas_encabezado = _extraer_lineas_encabezado(archivo)
-                    meta_indiv = extraer_metadata(lineas_encabezado)
+                    meta_indiv = _aplicar_metadata_confirmada(
+                        extraer_metadata(lineas_encabezado)
+                    )
                     st.session_state.metadata_files[archivo.name] = meta_indiv
 
                     if archivo.name in st.session_state.extraction_resolved:
@@ -1203,7 +1348,9 @@ def main():
                 with st.spinner(f"Clasificando cuentas de {archivo.name}..."):
                     _t0 = time.perf_counter()
                     lineas_encabezado = _extraer_lineas_encabezado(archivo)
-                    meta_indiv = extraer_metadata(lineas_encabezado)
+                    meta_indiv = _aplicar_metadata_confirmada(
+                        extraer_metadata(lineas_encabezado)
+                    )
                     st.session_state.metadata_files[archivo.name] = meta_indiv
 
                     if archivo.name in st.session_state.extraction_resolved:
@@ -1430,8 +1577,13 @@ def main():
         c1.markdown(f"**{razon_social or '—'}** \n`{rut_empresa or '—'}`")
         periodo_str = "—"
         if meta_activo:
-            periodo_str = f"{meta_activo.periodo_desde or '—'} → {meta_activo.periodo_hasta or '—'}"
-        c2.markdown(f"**Período del Balance** \n{periodo_str}")
+            periodo_str = (
+                f"{meta_activo.periodo_desde or '—'} → "
+                f"{meta_activo.periodo_hasta or '—'} · "
+                f"{meta_activo.numero_meses or '—'} meses · "
+                f"{meta_activo.moneda or '—'}"
+            )
+        c2.markdown(f"**Período y moneda** \n{periodo_str}")
         giro_empresa = getattr(st.session_state, "company_giro", "—")
         c3.markdown(f"**Giro** \n{giro_empresa or '—'}")
         c4.markdown(f"**Archivo Activo** \n`{archivo_activo_name}`")
@@ -1490,14 +1642,17 @@ def main():
 
 
 @st.fragment
-def _visor_documento(archivo):
+def _visor_documento(
+    archivo, *, altura: str = "72vh", mostrar_titulo: bool = True,
+):
     import tempfile, base64, io, platform, shutil, subprocess, glob
     from PIL import Image
     from pathlib import Path
 
     suffix = Path(archivo.name).suffix.lower()
     archivo.seek(0)
-    st.markdown("#### 📄 Documento original")
+    if mostrar_titulo:
+        st.markdown("#### 📄 Documento original")
 
     if suffix == '.pdf':
         try:
@@ -1561,7 +1716,7 @@ def _visor_documento(archivo):
             st.session_state[clave_render] = b64
 
         html_visor = f"""
-        <div style="height: 72vh; overflow-y: auto; overflow-x: auto; border: 1px solid #d0d0d0; border-radius: 8px; background: #f5f5f5; padding: 8px; text-align: center;">
+        <div style="height: {altura}; min-height: 50vh; overflow-y: auto; overflow-x: auto; border: 1px solid #d0d0d0; border-radius: 8px; background: #f5f5f5; padding: 8px; text-align: center;">
             <img src="data:image/png;base64,{b64}" style="max-width: none; cursor: zoom-in;" title="Página {pagina} de {n_paginas} — {archivo.name}"/>
         </div>
         <div style="font-size:12px; color:#888; text-align:center; margin-top:4px;">Página {pagina} de {n_paginas} · {archivo.name}</div>
@@ -1578,7 +1733,7 @@ def _visor_documento(archivo):
                 .excel-visor td {{ padding: 3px 8px; border-bottom: 1px solid #eee; font-size: 12px; white-space: nowrap; font-family: monospace; }}
                 .excel-visor tr:nth-child(even) {{ background: #f9f9f9; }}
             </style>
-            <div style="height: 72vh; overflow-y: auto; overflow-x: auto; border: 1px solid #d0d0d0; border-radius: 8px; background: white; padding: 8px;">{html_tabla}</div>
+            <div style="height: {altura}; min-height: 50vh; overflow-y: auto; overflow-x: auto; border: 1px solid #d0d0d0; border-radius: 8px; background: white; padding: 8px;">{html_tabla}</div>
             <div style="font-size:12px; color:#888; text-align:center; margin-top:4px;">{archivo.name}</div>
             """
             st.html(html_visor)
@@ -3178,12 +3333,16 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
         export_df.to_excel(writer, index=False, sheet_name="Balance Normalizado", startrow=FILA_INICIO_BALANCE - 1)
         ws = writer.sheets["Balance Normalizado"]
 
-        meta = st.session_state.get("metadata")
+        meta = st.session_state.get("metadata_files", {}).get(archivo_nombre)
         if meta:
             ws["A1"] = "Empresa:";    ws["B1"] = meta.razon_social or ""
             ws["A2"] = "RUT:";       ws["B2"] = meta.rut or ""
             ws["A3"] = "Período:";   ws["B3"] = f'{meta.periodo_desde or ""} al {meta.periodo_hasta or ""}'
             ws["A4"] = "Giro:";      ws["B4"] = meta.giro or ""
+            ws["A5"] = "Moneda/unidad:"; ws["B5"] = meta.moneda or ""
+            ws["A6"] = "Duración:";  ws["B6"] = (
+                f"{meta.numero_meses} meses" if meta.numero_meses else ""
+            )
 
         ws.column_dimensions["A"].width = 12
         ws.column_dimensions["B"].width = 36
