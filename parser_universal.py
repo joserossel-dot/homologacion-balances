@@ -1946,6 +1946,7 @@ def parsear_linea(
     periodo_comparativo: bool = False,
     years: Optional[list[str]] = None,
     currencies: Optional[list[str]] = None,
+    leading_note_column: bool = False,
 ) -> Optional[CuentaRaw]:
     linea = linea.strip()
     if len(linea) < 4:
@@ -2069,10 +2070,37 @@ def parsear_linea(
     origen = OrigenColumna.DESCONOCIDO
     montos_periodos: dict[str, float] = {}
 
+    # Los estados financieros auditados suelen anteponer una referencia
+    # ``Nota N°`` a las columnas comparativas. Esa referencia no es un importe
+    # ni un tercer período. Sólo se descarta cuando la cabecera del documento
+    # confirmó la existencia de la columna y la fila contiene exactamente un
+    # token adicional respecto de los años detectados.
+    active_years = list(years or [])
+    numeric_years = [
+        year for year in active_years
+        if re.fullmatch(r"(?:19|20)\d{2}", year)
+    ]
+    # Etiquetas narrativas como "resultado acumulado" no representan una
+    # tercera columna cuando la cabecera ya identifica dos años explícitos.
+    if len(numeric_years) >= 2:
+        active_years = numeric_years
+    if (
+        leading_note_column
+        and len(active_years) >= 2
+        and len(montos_tokens) == len(active_years) + 1
+    ):
+        note_token = montos_tokens[0]
+        note_value = parsear_monto(note_token, separador_miles)
+        if (
+            re.fullmatch(r"\d{1,2}(?:\.\d{1,2}){0,2}", note_token)
+            and note_value is not None
+            and abs(float(note_value)) <= 99
+        ):
+            montos_tokens = montos_tokens[1:]
+
     # Dynamic year/currency mapping
     if (years or currencies) and montos_tokens:
         n_vals = len(montos_tokens)
-        active_years = years if years else []
         active_currencies = currencies if currencies else []
 
         # Determine if we map primarily by currencies or by years
@@ -2962,6 +2990,13 @@ class ParserPDF:
 
         # Scan years and currencies dynamically
         years, currencies = detectar_años_y_monedas(lineas)
+        leading_note_column = any(
+            re.search(
+                r"\bnota\b.*\b(?:19|20)\d{2}\b.*\b(?:19|20)\d{2}\b",
+                _sin_acentos(linea), re.I,
+            )
+            for linea in lineas[:80]
+        )
 
         # Pre-process lines to associate vertical labels and amounts
         lineas = asociar_lineas_verticales(lineas)
@@ -2976,7 +3011,8 @@ class ParserPDF:
                                   column_order=column_order,
                                   periodo_comparativo=periodo_comparativo,
                                   years=years,
-                                  currencies=currencies)
+                                  currencies=currencies,
+                                  leading_note_column=leading_note_column)
                 if c:
                     cuentas.append(c)
 

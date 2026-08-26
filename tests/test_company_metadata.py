@@ -52,3 +52,25 @@ def test_metadata_empresa_conserva_moneda_y_periodo_confirmados():
     assert meta.mes_cierre == "Junio"
     assert meta.anio_cierre == 2025
     assert meta.numero_meses == 6
+
+
+def test_detectar_periodos_comparativos_ignora_etiquetas_narrativas():
+    assert app_validacion._detectar_periodos_comparativos(
+        ["Estado de situación financiera", "Nota 2019 2018 acumulado"],
+        2026,
+    ) == ("2019", "2018")
+
+
+def test_valor_fila_periodo_conserva_actual_y_anterior():
+    import pandas as pd
+
+    row = pd.Series({
+        "monto": 107874,
+        "monto_periodo_2019": 107874,
+        "monto_periodo_2018": 93372,
+        "monto_periodo_actual": 107874,
+        "monto_periodo_anterior": 93372,
+    })
+
+    assert app_validacion._valor_fila_periodo(row, "2019", 0) == 107874
+    assert app_validacion._valor_fila_periodo(row, "2018", 1) == 93372

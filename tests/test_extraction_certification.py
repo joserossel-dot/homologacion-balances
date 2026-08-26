@@ -86,6 +86,23 @@ def test_ocho_columnas_prevalece_sobre_anio_detectado_en_cabecera():
     assert cuenta.origen_columna is parser.OrigenColumna.ACTIVO
 
 
+def test_balance_auditado_descarta_nota_y_alinea_dos_periodos():
+    cuenta = parser.parsear_linea(
+        "Efectivo y equivalentes al efectivo 6 107.874 93.372",
+        1, parser.FormatoCodigo.SIN_CODIGO, ".",
+        periodo_comparativo=True,
+        years=["2019", "2018", "acumulado"],
+        currencies=["CLP"],
+        leading_note_column=True,
+    )
+
+    assert cuenta is not None
+    assert cuenta.nombre == "Efectivo y equivalentes al efectivo"
+    assert cuenta.monto == 107874
+    assert cuenta.montos_periodos["2019"] == 107874
+    assert cuenta.montos_periodos["2018"] == 93372
+
+
 def test_extractor_coordenadas_recupera_ceros_ocr_sin_contaminar_nombre():
     page = FakePage([
         _header(),

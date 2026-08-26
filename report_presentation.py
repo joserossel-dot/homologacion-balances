@@ -17,7 +17,8 @@ ER_ORDER = (
 CALCULATED = {"ER.03", "ER.06", "ER.08", "ER.19", "ER.11"}
 
 
-def complete_catalog(grouped, catalog, has_income_detail):
+def complete_catalog(grouped, catalog, has_income_detail, amount_columns=None):
+    amount_columns = list(amount_columns or ["monto_total"])
     existing = {r["codigo_clasificado"]: r for r in grouped.to_dict("records")}
     rows = []
     for code in dict.fromkeys([*catalog, *existing]):
@@ -26,14 +27,14 @@ def complete_catalog(grouped, catalog, has_income_detail):
         row.update(codigo_clasificado=code,
                    nombre_estandar=entry.get("nombre_estandar", code),
                    categoria=entry.get("categoria", "sin_catalogo"))
-        row.setdefault("monto_total", 0.0)
+        for amount_column in amount_columns:
+            row.setdefault(amount_column, 0.0)
         row.setdefault("num_cuentas", 0)
         row["estado_presentacion"] = "Con cuentas" if row["num_cuentas"] else "Sin cuentas asignadas"
         if entry.get("clasificable") is False:
             row["estado_presentacion"] = "Calculado" if code in existing else "No disponible"
         rows.append(row)
     by_code = {r["codigo_clasificado"]: r for r in rows}
-    amounts = {k: float(r["monto_total"]) for k, r in by_code.items()}
     detail_codes = [k for k, r in by_code.items() if r["categoria"] == "resultado"
                     and catalog.get(k, {}).get("clasificable") is not False and k not in CALCULATED]
     formulas = {
@@ -43,10 +44,28 @@ def complete_catalog(grouped, catalog, has_income_detail):
         "ER.19": [k for k in detail_codes if k != "ER.10"],
         "ER.11": detail_codes,
     }
-    for code, dependencies in formulas.items():
-        if code in by_code:
-            by_code[code]["monto_total"] = sum(amounts.get(k, 0) for k in dependencies) if has_income_detail else None
-            by_code[code]["estado_presentacion"] = "Calculado" if has_income_detail else "No disponible"
+    for amount_column in amount_columns:
+        amounts = {k: float(r[amount_column]) for k, r in by_code.items()}
+        income_available = (
+            has_income_detail.get(amount_column, False)
+            if isinstance(has_income_detail, dict) else bool(has_income_detail)
+        )
+        for code, dependencies in formulas.items():
+            if code in by_code:
+                by_code[code][amount_column] = (
+                    sum(amounts.get(k, 0) for k in dependencies)
+                    if income_available else None
+                )
+                by_code[code][f"estado_{amount_column}"] = (
+                    "Calculado" if income_available else "No disponible"
+                )
+    for code in formulas:
+        if code not in by_code:
+            continue
+        states = [by_code[code].get(f"estado_{column}") for column in amount_columns]
+        by_code[code]["estado_presentacion"] = (
+            "Calculado" if "Calculado" in states else "No disponible"
+        )
     def order(row):
         category = row["categoria"]
         code = row["codigo_clasificado"]
@@ -57,30 +76,45 @@ def complete_catalog(grouped, catalog, has_income_detail):
     return pd.DataFrame(sorted(rows, key=order)), formulas
 
 
-def add_report_sheets(workbook, complete, formulas, *, start_row, unit,
+def add_report_sheets(workbook, complete, formulas, *, account_detail, start_row, unit,
                       meta, processed_at, source_name, pages, definitive, reasons,
-                      tolerance=1000):
+                      tolerance=1000, period_columns=None):
     """Extiende el exportador operativo, con fórmulas auditables y datos separados."""
     from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
     from openpyxl.utils import get_column_letter
     from openpyxl.formatting.rule import FormulaRule
+    from openpyxl.worksheet.table import Table, TableStyleInfo
 
     blue, grey = "1F4E79", "EAF0F6"
     numeric_format = '#,##0.00;[Red](#,##0.00);0.00'
     balance = workbook["Balance Normalizado"]
+    period_columns = list(period_columns or [("Importe", "monto_total")])
     rows = complete.to_dict("records")
     index = {r["codigo_clasificado"]: start_row + i + 1 for i, r in enumerate(rows)}
-    def ref(code):
-        return f"'Balance Normalizado'!C{index[code]}"
+    amount_positions = {
+        amount_column: 3 + position
+        for position, (_, amount_column) in enumerate(period_columns)
+    }
+    def ref(code, amount_column="monto_total"):
+        column = get_column_letter(amount_positions[amount_column])
+        return f"'Balance Normalizado'!{column}{index[code]}"
     for code, dependencies in formulas.items():
-        if code in index and complete.loc[complete.codigo_clasificado == code, "estado_presentacion"].iloc[0] == "Calculado":
-            refs = [ref(k) for k in dependencies if k in index]
-            balance.cell(index[code], 3, "=SUM(" + ",".join(refs) + ")" if refs else "=0")
+        if code in index:
+            record = complete.loc[complete.codigo_clasificado == code].iloc[0]
+            for _, amount_column in period_columns:
+                if record.get(f"estado_{amount_column}") != "Calculado":
+                    continue
+                refs = [ref(k, amount_column) for k in dependencies if k in index]
+                balance.cell(
+                    index[code], amount_positions[amount_column],
+                    "=SUM(" + ",".join(refs) + ")" if refs else "=0",
+                )
     for i, record in enumerate(rows, start=start_row+1):
-        balance.cell(i, 6, CATEGORY_LABELS.get(record["categoria"], record["categoria"]))
-        balance.cell(i, 7, record["estado_presentacion"])
-    balance.cell(start_row, 6, "Grupo")
-    balance.cell(start_row, 7, "Estado")
+        group_column = 5 + len(period_columns)
+        balance.cell(i, group_column, CATEGORY_LABELS.get(record["categoria"], record["categoria"]))
+        balance.cell(i, group_column + 1, record["estado_presentacion"])
+    balance.cell(start_row, 5 + len(period_columns), "Grupo")
+    balance.cell(start_row, 6 + len(period_columns), "Estado")
     balance["E2"], balance["F2"] = "Fecha de proceso", processed_at
     balance["E3"], balance["F3"] = "Analista", None
 
@@ -98,40 +132,98 @@ def add_report_sheets(workbook, complete, formulas, *, start_row, unit,
     ]
     for entry in metadata:
         summary.append(entry)
-    summary.append(["Control del balance", f"Importe ({unit})"])
+    summary.append(["Control del balance", *[
+        f"{label} ({unit})" for label, _ in period_columns
+    ]])
     category_rows = {}
     for category in CATEGORY_ORDER[:-1]:
         row = summary.max_row + 1
         category_rows[category] = row
-        refs = [ref(r["codigo_clasificado"]) for r in rows if r["categoria"] == category]
-        summary.append([CATEGORY_LABELS[category], "=SUM(" + ",".join(refs) + ")" if refs else "=0"])
-    summary.append(["TOTAL ACTIVOS", f"=SUM(B{category_rows['activo_corriente']}:B{category_rows['activo_no_corriente']})"])
+        formulas_periodo = []
+        for _, amount_column in period_columns:
+            refs = [ref(r["codigo_clasificado"], amount_column) for r in rows if r["categoria"] == category]
+            formulas_periodo.append("=SUM(" + ",".join(refs) + ")" if refs else "=0")
+        summary.append([CATEGORY_LABELS[category], *formulas_periodo])
+    period_count = len(period_columns)
+    def row_formulas(builder):
+        return [builder(get_column_letter(2 + position)) for position in range(period_count)]
+    summary.append(["TOTAL ACTIVOS", *row_formulas(
+        lambda col: f"=SUM({col}{category_rows['activo_corriente']}:{col}{category_rows['activo_no_corriente']})"
+    )])
     asset_row = summary.max_row
-    summary.append(["TOTAL PASIVOS", f"=SUM(B{category_rows['pasivo_corriente']}:B{category_rows['pasivo_no_corriente']})"])
+    summary.append(["TOTAL PASIVOS", *row_formulas(
+        lambda col: f"=SUM({col}{category_rows['pasivo_corriente']}:{col}{category_rows['pasivo_no_corriente']})"
+    )])
     liability_row = summary.max_row
-    summary.append(["TOTAL PATRIMONIO", f"=B{category_rows['patrimonio']}"])
+    summary.append(["TOTAL PATRIMONIO", *row_formulas(
+        lambda col: f"={col}{category_rows['patrimonio']}"
+    )])
     equity_row = summary.max_row
-    summary.append(["PASIVO + PATRIMONIO", f"=SUM(B{liability_row}:B{equity_row})"])
+    summary.append(["PASIVO + PATRIMONIO", *row_formulas(
+        lambda col: f"=SUM({col}{liability_row}:{col}{equity_row})"
+    )])
     right_row = summary.max_row
-    summary.append(["Diferencia de cuadratura", f"=B{asset_row}-B{right_row}"])
+    summary.append(["Diferencia de cuadratura", *row_formulas(
+        lambda col: f"={col}{asset_row}-{col}{right_row}"
+    )])
     delta_row = summary.max_row
-    summary.append(["Tolerancia de cuadratura", tolerance])
+    summary.append(["Tolerancia de cuadratura", *([tolerance] * period_count)])
     tolerance_row = summary.max_row
-    summary.append(["Cuadratura aritmética", f'=IF(ABS(B{delta_row})<=B{tolerance_row},"CUADRA DENTRO DE TOLERANCIA","NO CUADRA")'])
+    summary.append(["Cuadratura aritmética", *row_formulas(
+        lambda col: f'=IF(ABS({col}{delta_row})<={col}{tolerance_row},"CUADRA DENTRO DE TOLERANCIA","NO CUADRA")'
+    )])
     summary.append(["Estado de emisión", "DEFINITIVO" if definitive else "BORRADOR: REQUIERE REVISIÓN"])
-    summary.append(["Advertencia", "La cuadratura no sustituye la revisión de clasificación y extracción."])
-    for reason in reasons:
-        summary.append(["Pendiente de resolver", reason])
+    summary.append(["Advertencia", "La cuadratura no sustituye la revisión de clasificación y extracción. Consulte Control de emisión para los pendientes."])
+
+    # Contrato rígido para integraciones: encabezado siempre en la fila 26 y
+    # una fila por cuenta fuente, sin subtotales ni celdas combinadas.
+    detail_headers = [
+        "codigo_homologado", "nombre_homologado", "codigo_original",
+        "nombre_original",
+    ]
+    for label, _ in period_columns:
+        suffix = "" if len(period_columns) == 1 else f"_{label}"
+        detail_headers.extend([f"valor_extraido{suffix}", f"valor_homologado{suffix}"])
+    while summary.max_row < 25:
+        summary.append([])
+    summary.append(detail_headers)
+    detail_columns = ["Código Estándar", "Nombre Estándar", "Cód. Original", "Nombre"]
+    for label, _ in period_columns:
+        if len(period_columns) == 1:
+            detail_columns.extend(["Monto Extraído", "Monto Normalizado"])
+        else:
+            detail_columns.extend([f"Monto Extraído {label}", f"Monto Normalizado {label}"])
+    detail_rows = account_detail.reindex(columns=detail_columns).copy()
+    detail_rows = detail_rows.where(pd.notna(detail_rows), None)
+    for values in detail_rows.itertuples(index=False, name=None):
+        summary.append(list(values))
+    last_detail_row = max(26, 26 + len(detail_rows))
+    account_table = Table(
+        displayName="CuentasClasificadas",
+        ref=f"A26:{get_column_letter(len(detail_headers))}{last_detail_row}",
+    )
+    account_table.tableStyleInfo = TableStyleInfo(
+        name="TableStyleMedium2", showFirstColumn=False, showLastColumn=False,
+        showRowStripes=True, showColumnStripes=False,
+    )
+    summary.add_table(account_table)
 
     income = workbook.create_sheet("Estado de Resultados")
     income.append(["Estado de resultados", unit, "Ingresos positivos, gastos negativos"])
-    income.append(["Código", "Clasificación", f"Importe ({unit})", "Tipo"])
+    income.append(["Código", "Clasificación", *[
+        f"{label} ({unit})" for label, _ in period_columns
+    ], "Tipo"])
     for record in rows:
         if record["categoria"] != "resultado":
             continue
         code = record["codigo_clasificado"]
-        value = None if record["estado_presentacion"] == "No disponible" else "=" + ref(code)
-        income.append([code, record["nombre_estandar"], value, record["estado_presentacion"]])
+        values = [
+            "=" + ref(code, amount_column)
+            if record.get(f"estado_{amount_column}", record["estado_presentacion"]) != "No disponible"
+            else None
+            for _, amount_column in period_columns
+        ]
+        income.append([code, record["nombre_estandar"], *values, record["estado_presentacion"]])
     income.append(["", "No sumar los resultados calculados nuevamente al detalle."])
     income.append(["", "EBITDA: ventas + costo de ventas + gastos de administración + gastos de venta (importes con signo)."])
     # La validez del resultado se contrasta en Control de emisión, no se deduce
@@ -157,11 +249,12 @@ def add_report_sheets(workbook, complete, formulas, *, start_row, unit,
     summary.column_dimensions["A"].width = 33
     summary.column_dimensions["B"].width = 92
     income.column_dimensions["B"].width = 66
-    income.column_dimensions["D"].width = 25
+    income.column_dimensions[get_column_letter(3 + len(period_columns))].width = 25
     balance.column_dimensions["B"].width = 48
     balance.column_dimensions["F"].width = 40
+    accounts_column = 3 + len(period_columns)
     for row in range(start_row + 1, start_row + len(rows) + 1):
-        balance.cell(row, 4).number_format = "0"
+        balance.cell(row, accounts_column).number_format = "0"
     for sheet, headers in ((summary, (1, 11)), (income, (1, 2)), (balance, (start_row,))):
         for header in headers:
             for cell in sheet[header]:
@@ -173,10 +266,20 @@ def add_report_sheets(workbook, complete, formulas, *, start_row, unit,
             cell.fill = PatternFill("solid", fgColor=grey)
             cell.font = Font(bold=True)
             cell.border = Border(top=Side(style="thin", color=blue))
-    summary.conditional_formatting.add(
-        f"B{delta_row}", FormulaRule(
-            formula=[f"ABS(B{delta_row})>B{tolerance_row}"],
-            fill=PatternFill("solid", fgColor="FFC7CE")))
+    for row in range(27, last_detail_row + 1):
+        for column in range(5, 5 + 2 * period_count):
+            summary.cell(row, column).number_format = numeric_format
+            summary.cell(row, column).alignment = Alignment(horizontal="right")
+    summary.column_dimensions["C"].width = 20
+    summary.column_dimensions["D"].width = 44
+    for column in range(5, 5 + 2 * period_count):
+        summary.column_dimensions[get_column_letter(column)].width = 22
+    for position in range(period_count):
+        column = get_column_letter(2 + position)
+        summary.conditional_formatting.add(
+            f"{column}{delta_row}", FormulaRule(
+                formula=[f"ABS({column}{delta_row})>{column}{tolerance_row}"],
+                fill=PatternFill("solid", fgColor="FFC7CE")))
     for i, record in enumerate([r for r in rows if r["categoria"] == "resultado"], start=3):
         if record["codigo_clasificado"] in CALCULATED:
             for cell in income[i]:

@@ -27,6 +27,8 @@ class MetadataEmpresa:
     mes_cierre: Optional[str] = None
     anio_cierre: Optional[int] = None
     numero_meses: Optional[int] = None
+    periodos_detectados: tuple[str, ...] = ()
+    periodos_seleccionados: tuple[str, ...] = ()
     confianza: float = 0.0  # 0-1, cuántos campos se detectaron
 
 

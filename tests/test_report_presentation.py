@@ -1,9 +1,9 @@
 from io import BytesIO
 import pandas as pd
-from openpyxl import load_workbook
+from openpyxl import Workbook, load_workbook
 from streamlit.testing.v1 import AppTest
 from reporting_integrity import catalogo_local
-from report_presentation import complete_catalog, ER_ORDER
+from report_presentation import add_report_sheets, complete_catalog, ER_ORDER
 from test_report_integrity import report_app, afuminsal
 
 
@@ -48,6 +48,18 @@ def test_export_has_summary_metadata_units_formulas_and_full_income():
     assert summary["B5"].value == "$"
     assert summary["B6"].value
     assert summary["B7"].value is None
+    assert [summary.cell(26, column).value for column in range(1, 7)] == [
+        "codigo_homologado", "nombre_homologado", "codigo_original",
+        "nombre_original", "valor_extraido", "valor_homologado",
+    ]
+    detail = list(summary.iter_rows(min_row=27, max_row=35, max_col=6, values_only=True))
+    assert len(detail) == len(afuminsal(False))
+    gasto = next(row for row in detail if row[3] == "Gastos administración")
+    assert gasto == ("ER.04", "Gastos de Administración", "Gastos administración",
+                     "Gastos administración", 16376428, -16376428)
+    assert summary.tables["CuentasClasificadas"].ref == "A26:F35"
+    assert summary["E27"].number_format.startswith("#,##0")
+    assert str(summary.print_title_rows) == "$1:$11"
     summary_rows = {r[0].value: r[1].value for r in summary}
     for label in ("TOTAL ACTIVOS", "TOTAL PASIVOS", "TOTAL PATRIMONIO", "Diferencia de cuadratura", "Cuadratura aritmética"):
         assert summary_rows[label].startswith("=")
@@ -61,3 +73,66 @@ def test_export_has_summary_metadata_units_formulas_and_full_income():
     at.run(timeout=20)
     second = load_workbook(BytesIO(at.session_state.export_kwargs["data"]))
     assert second["Resumen"]["B6"].value == first_stamp
+
+
+def test_comparative_report_keeps_two_periods_in_summary_detail_and_income():
+    grouped = pd.DataFrame([
+        dict(codigo_clasificado="AC.01", monto_total=100, monto_total_2018=80,
+             num_cuentas=1),
+        dict(codigo_clasificado="PC.01", monto_total=40, monto_total_2018=30,
+             num_cuentas=1),
+        dict(codigo_clasificado="PAT.01", monto_total=60, monto_total_2018=50,
+             num_cuentas=1),
+        dict(codigo_clasificado="ER.01", monto_total=25, monto_total_2018=20,
+             num_cuentas=1),
+        dict(codigo_clasificado="ER.04", monto_total=-10, monto_total_2018=-8,
+             num_cuentas=1),
+    ])
+    complete, formulas = complete_catalog(
+        grouped, catalogo_local(),
+        {"monto_total": True, "monto_total_2018": True},
+        amount_columns=["monto_total", "monto_total_2018"],
+    )
+    book = Workbook()
+    balance = book.active
+    balance.title = "Balance Normalizado"
+    headers = ["Código", "Cuenta", "2019", "2018", "Cuentas", "Tipo"]
+    for column, header in enumerate(headers, 1):
+        balance.cell(7, column, header)
+    for row_number, row in enumerate(complete.to_dict("records"), 8):
+        balance.cell(row_number, 1, row["codigo_clasificado"])
+        balance.cell(row_number, 2, row["nombre_estandar"])
+        balance.cell(row_number, 3, row["monto_total"])
+        balance.cell(row_number, 4, row["monto_total_2018"])
+    detail = pd.DataFrame([{
+        "Código Estándar": "AC.01", "Nombre Estándar": "Caja y Bancos",
+        "Cód. Original": "1101", "Nombre": "Caja",
+        "Monto Extraído 2019": 100, "Monto Normalizado 2019": 100,
+        "Monto Extraído 2018": 80, "Monto Normalizado 2018": 80,
+    }])
+    meta = type("Meta", (), {
+        "razon_social": "Comparativa", "rut": "", "periodo_desde": "",
+        "periodo_hasta": "", "moneda": "$",
+    })()
+
+    add_report_sheets(
+        book, complete, formulas, account_detail=detail, start_row=7, unit="$",
+        meta=meta, processed_at="2026-08-26", source_name="comparativo.pdf",
+        pages=[5, 6, 7], definitive=True, reasons=[],
+        period_columns=[("2019", "monto_total"), ("2018", "monto_total_2018")],
+    )
+
+    summary = book["Resumen"]
+    assert [summary.cell(11, column).value for column in range(1, 4)] == [
+        "Control del balance", "2019 ($)", "2018 ($)",
+    ]
+    assert [summary.cell(26, column).value for column in range(1, 9)] == [
+        "codigo_homologado", "nombre_homologado", "codigo_original",
+        "nombre_original", "valor_extraido_2019", "valor_homologado_2019",
+        "valor_extraido_2018", "valor_homologado_2018",
+    ]
+    assert summary.tables["CuentasClasificadas"].ref == "A26:H27"
+    income = book["Estado de Resultados"]
+    assert [income.cell(2, column).value for column in range(1, 6)] == [
+        "Código", "Clasificación", "2019 ($)", "2018 ($)", "Tipo",
+    ]

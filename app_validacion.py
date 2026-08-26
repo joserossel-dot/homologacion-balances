@@ -56,7 +56,7 @@ from config.regex_rules import REGLAS_REGEX, REGLAS_COMPILADAS
 from parser_universal import (
     ParserPDF, CuentaRaw, OrigenColumna, RAW_MONETARY_COLUMNS,
     FormatoCodigo, ResultadoParseo,
-    certificar_extraccion_columnas, parsear_excel,
+    certificar_extraccion_columnas, detectar_años_y_monedas, parsear_excel,
 )
 from parsers.column_interpretation import es_ingreso as es_ingreso_col, es_gasto as es_gasto_col
 from parsers.account_type_resolver import (
@@ -126,10 +126,85 @@ def _aplicar_metadata_confirmada(meta: MetadataEmpresa) -> MetadataEmpresa:
     meta.mes_cierre = st.session_state.company_mes
     meta.anio_cierre = int(st.session_state.company_anio)
     meta.numero_meses = int(st.session_state.company_numero_meses)
+    meta.periodos_detectados = tuple(
+        st.session_state.get("company_periodos_detectados", ())
+    )
+    meta.periodos_seleccionados = tuple(
+        st.session_state.get(
+            "company_periodos_seleccionados", (str(meta.anio_cierre),),
+        )
+    )
     meta.periodo_desde, meta.periodo_hasta = _fechas_periodo_seleccionado(
         meta.mes_cierre, meta.anio_cierre, meta.numero_meses,
     )
     return meta
+
+
+def _detectar_periodos_comparativos(
+    lineas: list[str], anio_fallback: int,
+) -> tuple[str, ...]:
+    """Devuelve hasta dos años explícitos respetando el orden del documento."""
+    years, _ = detectar_años_y_monedas(lineas)
+    numeric = []
+    for year in years:
+        if re.fullmatch(r"(?:19|20)\d{2}", str(year)) and year not in numeric:
+            numeric.append(str(year))
+    fallback = str(int(anio_fallback))
+    if not numeric:
+        numeric.append(fallback)
+    return tuple(numeric[:2])
+
+
+def _periodos_seleccionados() -> tuple[str, ...]:
+    selected = tuple(st.session_state.get("company_periodos_seleccionados", ()))
+    if selected:
+        return selected
+    return (str(int(st.session_state.get("company_anio", date.today().year))),)
+
+
+def _valor_periodo(
+    montos_periodos: dict, periodo: str, posicion: int,
+    monto_fallback: float | None = None,
+) -> float | None:
+    """Obtiene el valor anual sin confundir alias actual/anterior o moneda."""
+    if periodo in montos_periodos:
+        return montos_periodos[periodo]
+    alias = "actual" if posicion == 0 else "anterior"
+    if alias in montos_periodos:
+        return montos_periodos[alias]
+    return monto_fallback if posicion == 0 else None
+
+
+def _montos_periodos_cuenta(cuenta: CuentaRaw) -> dict[str, float | None]:
+    return {
+        periodo: _valor_periodo(
+            cuenta.montos_periodos, periodo, posicion, cuenta.monto,
+        )
+        for posicion, periodo in enumerate(_periodos_seleccionados())
+    }
+
+
+def _campos_periodos_cuenta(cuenta: CuentaRaw) -> tuple[float | None, dict]:
+    valores = _montos_periodos_cuenta(cuenta)
+    periodos = _periodos_seleccionados()
+    principal = valores.get(periodos[0], cuenta.monto)
+    campos = {
+        f"monto_periodo_{periodo}": valores.get(periodo)
+        for periodo in periodos
+    }
+    campos["monto_periodo_actual"] = valores.get(periodos[0])
+    campos["monto_periodo_anterior"] = (
+        valores.get(periodos[1]) if len(periodos) > 1 else None
+    )
+    return principal, campos
+
+
+def _cuenta_tiene_saldo_seleccionado(cuenta: CuentaRaw) -> bool:
+    valores = _montos_periodos_cuenta(cuenta).values()
+    presentes = [float(valor) for valor in valores if valor is not None]
+    if presentes:
+        return any(valor != 0 for valor in presentes)
+    return cuenta.monto is None or float(cuenta.monto) != 0
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIGURACIÓN
@@ -1047,6 +1122,10 @@ def _confirmar_alcance_documentos(archivos) -> bool:
     signature = tuple((a.name, hashlib.sha256(a.getvalue()).hexdigest()) for a in archivos)
     if (st.session_state.get("document_scope_confirmed") == signature
             and not st.session_state.get("document_scope_editing", False)):
+        # Conserva el valor del selector aunque esta vista se omita durante el
+        # procesamiento; al volver a editar el alcance, Streamlit puede
+        # reconstruir el mismo widget sin perder su estado.
+        st.session_state.setdefault("document_scope_preview", archivos[0].name)
         return True
     st.subheader("Seleccione las páginas que se analizarán")
     st.info(
@@ -1056,7 +1135,10 @@ def _confirmar_alcance_documentos(archivos) -> bool:
     )
     if st.session_state.get("document_scope_editing"):
         st.warning("Cambiar las páginas vuelve a procesar ese documento y reemplaza sus correcciones en esta sesión. Los documentos sin cambios conservan sus resultados.")
-    preview_name = st.selectbox("Documento a visualizar", [a.name for a in archivos])
+    preview_name = st.selectbox(
+        "Documento a visualizar", [a.name for a in archivos],
+        key="document_scope_preview",
+    )
     selections = {}
     errors = []
     with st.form("document_scope"):
@@ -1094,6 +1176,9 @@ def _confirmar_alcance_documentos(archivos) -> bool:
                 if previous.get(name) != digest or previous_pages.get(name) != selections.get(name):
                     revisions = st.session_state.setdefault("extraction_revisions", {})
                     revisions[name] = revisions.get(name, 0) + 1
+                    st.session_state.metadata_confirmada = False
+                    st.session_state.company_periodos_detectados = ()
+                    st.session_state.company_periodos_seleccionados = ()
                     for state_key in ("resultados", "metadata_files", "document_intel", "extraction_pending",
                                       "extraction_resolved", "extraction_certifications", "processed_at",
                                       "quality_controls"):
@@ -1101,7 +1186,7 @@ def _confirmar_alcance_documentos(archivos) -> bool:
             st.session_state.document_pages = selections
             st.session_state.document_scope_confirmed = signature
             st.session_state.document_scope_editing = False
-            st.rerun()
+            return True
     st.divider()
     _visor_documento(next(a for a in archivos if a.name == preview_name),
                      altura="58vh", mostrar_titulo=True)
@@ -1184,6 +1269,8 @@ def main():
         st.session_state.document_scope_confirmed = None
         st.session_state.document_scope_editing = False
         st.session_state.document_pages = {}
+        st.session_state.company_periodos_detectados = ()
+        st.session_state.company_periodos_seleccionados = ()
         _mostrar_resumen_catalogo(catalogo)
         return
 
@@ -1203,6 +1290,17 @@ def main():
             st.session_state.company_mes = mes_detectado
             st.session_state.company_anio = anio_detectado
             st.session_state.company_numero_meses = meses_detectados
+            periodos_detectados = _detectar_periodos_comparativos(
+                lineas_encabezado, anio_detectado,
+            )
+            st.session_state.company_periodos_detectados = periodos_detectados
+            seleccion_guardada = tuple(
+                st.session_state.get("company_periodos_seleccionados", ())
+            )
+            if not seleccion_guardada or not set(seleccion_guardada).issubset(
+                periodos_detectados
+            ):
+                st.session_state.company_periodos_seleccionados = periodos_detectados
 
         st.subheader("📋 Confirma los datos de la empresa")
         st.caption("El sistema detectó los siguientes datos generales. Corrígelos si es necesario antes de continuar.")
@@ -1284,6 +1382,44 @@ def main():
                     filter_mode="fuzzy",
                 )
 
+            periodos_detectados = tuple(
+                st.session_state.get(
+                    "company_periodos_detectados", (str(anio_sel),),
+                )
+            )
+            if len(periodos_detectados) >= 2:
+                actual, anterior = periodos_detectados[:2]
+                opciones_periodo = {
+                    f"Ambos períodos: {actual} y {anterior}": (actual, anterior),
+                    f"Sólo {actual}": (actual,),
+                    f"Sólo {anterior}": (anterior,),
+                }
+            else:
+                unico = periodos_detectados[0]
+                opciones_periodo = {f"Sólo {unico}": (unico,)}
+            seleccion_actual = tuple(
+                st.session_state.get(
+                    "company_periodos_seleccionados", periodos_detectados,
+                )
+            )
+            etiquetas_periodo = list(opciones_periodo)
+            indice_periodo = next(
+                (
+                    indice for indice, etiqueta in enumerate(etiquetas_periodo)
+                    if opciones_periodo[etiqueta] == seleccion_actual
+                ),
+                0,
+            )
+            alcance_periodos = st.selectbox(
+                "Períodos a extraer",
+                etiquetas_periodo,
+                index=indice_periodo,
+                help=(
+                    "Ambos conserva una sola clasificación por cuenta y un "
+                    "importe independiente para cada período."
+                ),
+            )
+
             submitted = st.form_submit_button("Confirmar y procesar todos los balances")
             if submitted:
                 moneda_final = otra_moneda.strip() if moneda_sel == "Otra" else moneda_sel
@@ -1297,6 +1433,12 @@ def main():
                     st.session_state.company_mes = mes_sel
                     st.session_state.company_anio = int(anio_sel)
                     st.session_state.company_numero_meses = int(numero_meses_sel)
+                    st.session_state.company_periodos_seleccionados = (
+                        opciones_periodo[alcance_periodos]
+                    )
+                    st.session_state.company_anio = int(
+                        st.session_state.company_periodos_seleccionados[0]
+                    )
                     st.session_state.metadata_confirmada = True
                     st.session_state.resultados = {}
                     st.session_state.metadata_files = {}
@@ -1346,19 +1488,28 @@ def main():
                     for c in cuentas:
                         if c.monto is None and not c.codigo:
                             continue
-                        if c.monto is not None and float(c.monto) == 0:
+                        if not _cuenta_tiene_saldo_seleccionado(c):
                             continue
                         if not c.codigo and PATRON_NO_CUENTA.match(c.nombre.strip()):
                             continue
+                        monto_seleccionado, campos_periodos = (
+                            _campos_periodos_cuenta(c)
+                        )
+                        cuenta_clasificacion = replace(
+                            c, monto=monto_seleccionado,
+                        )
                         _t0_legacy = time.perf_counter()
-                        r = motor.clasificar(c, company_giro_norm)
+                        r = motor.clasificar(
+                            cuenta_clasificacion, company_giro_norm,
+                        )
                         _t1_legacy = (time.perf_counter() - _t0_legacy) * 1000
                         origen_efectivo = _origen_efectivo(
-                            c.origen_columna, c.monto, c.nombre,
+                            c.origen_columna, monto_seleccionado, c.nombre,
                         )
                         if (r.get('codigo_estandar') and
                                 not _codigo_compatible_con_origen(
-                                    r['codigo_estandar'], c.origen_columna, c.monto,
+                                    r['codigo_estandar'], c.origen_columna,
+                                    monto_seleccionado,
                                     c.nombre)):
                             r = {
                                 **r,
@@ -1372,9 +1523,8 @@ def main():
                             'codigo_original': c.codigo or '',
                             'nombre_original': c.nombre,
                             'nombre_normalizado': normalizar_nombre(c.nombre),
-                            'monto': c.monto,
-                            'monto_periodo_actual': c.montos_periodos.get('actual'),
-                            'monto_periodo_anterior': c.montos_periodos.get('anterior'),
+                            'monto': monto_seleccionado,
+                            **campos_periodos,
                             'columnas_derivadas': ', '.join(c.columnas_derivadas),
                             'origen_columna': c.origen_columna.value,
                             'origen_columna_efectiva': origen_efectivo,
@@ -1388,7 +1538,7 @@ def main():
                             'nota': r.get('nota_regla_especial', ''),
                             'confianza_extraccion': c.confianza_extraccion,
                             'origen_columna_display': _etiqueta_origen(
-                                c.origen_columna, c.monto, c.nombre,
+                                c.origen_columna, monto_seleccionado, c.nombre,
                             ),
                             'nombre_revision_usuario': '',
                             'tipo_revision': '',
@@ -1476,11 +1626,13 @@ def main():
                     for c in cuentas:
                         if c.monto is None and not c.codigo:
                             continue
-                        if c.monto is not None and float(c.monto) == 0:
+                        if not _cuenta_tiene_saldo_seleccionado(c):
                             continue
                         if not c.codigo and PATRON_NO_CUENTA.match(c.nombre.strip()):
                             continue
-                        ab = AccountAdapter.from_cuenta_raw(c)
+                        monto_seleccionado, campos_periodos = _campos_periodos_cuenta(c)
+                        cuenta_clasificacion = replace(c, monto=monto_seleccionado)
+                        ab = AccountAdapter.from_cuenta_raw(cuenta_clasificacion)
                         interp = BalanceInterpreter(ab)
                         classification_amount = interp.classification_amount
                         origen_efectivo = _origen_efectivo(
@@ -1556,9 +1708,8 @@ def main():
                             'codigo_original': c.codigo or '',
                             'nombre_original': c.nombre,
                             'nombre_normalizado': normalizar_nombre(c.nombre),
-                            'monto': c.monto,
-                            'monto_periodo_actual': c.montos_periodos.get('actual'),
-                            'monto_periodo_anterior': c.montos_periodos.get('anterior'),
+                            'monto': monto_seleccionado,
+                            **campos_periodos,
                             'columnas_derivadas': ', '.join(c.columnas_derivadas),
                             'origen_columna': c.origen_columna.value,
                             'origen_columna_efectiva': origen_efectivo,
@@ -3613,53 +3764,140 @@ def _control_emision(df, catalogo, diagnostico, quality_control=None):
             'incidencias': pd.DataFrame(incidencias), 'resultado': resultado}
 
 
+def _valor_fila_periodo(row: pd.Series, periodo: str, posicion: int):
+    """Recupera el importe elegido para un período sin alterar la fila fuente."""
+    columna = f"monto_periodo_{periodo}"
+    if columna in row.index and pd.notna(row.get(columna)):
+        return float(row[columna])
+    alias = "monto_periodo_actual" if posicion == 0 else "monto_periodo_anterior"
+    if alias in row.index and pd.notna(row.get(alias)):
+        return float(row[alias])
+    if posicion == 0 and pd.notna(row.get("monto")):
+        return float(row["monto"])
+    return None
+
+
+def _preparar_periodo_reporte(
+        df: pd.DataFrame, catalogo: dict, periodo: str, posicion: int) -> dict:
+    """Genera clasificación, conciliación y cuadratura independientes por período."""
+    periodo_df = df.copy()
+    periodo_df["monto"] = periodo_df.apply(
+        lambda row: _valor_fila_periodo(row, periodo, posicion), axis=1,
+    )
+    clasificadas = periodo_df[
+        (periodo_df["codigo_clasificado"] != "")
+        & (periodo_df["codigo_clasificado"] != "__EXCLUIR__")
+        & (~periodo_df["es_total"])
+    ].copy()
+    clasificadas = _con_saldo_relevante(clasificadas)
+    clasificadas["monto"] = pd.to_numeric(
+        clasificadas["monto"], errors="coerce",
+    ).fillna(0)
+    clasificadas["monto_presentacion"] = clasificadas.apply(
+        lambda row: _monto_presentacion(
+            row["codigo_clasificado"], row["monto"], row["nombre_original"],
+            row.get("origen_columna"), catalogo,
+        ), axis=1,
+    )
+    agrupado = clasificadas.groupby("codigo_clasificado").agg(
+        monto_total=("monto_presentacion", "sum"),
+        num_cuentas=("nombre_original", "count"),
+    ).reset_index()
+    agrupado["nombre_estandar"] = agrupado["codigo_clasificado"].map(
+        lambda code: catalogo.get(code, {}).get("nombre_estandar", code)
+    )
+    agrupado["categoria"] = agrupado["codigo_clasificado"].map(
+        lambda code: catalogo.get(code, {}).get("categoria", "")
+    )
+    conciliacion = conciliar_resultados(periodo_df.to_dict("records"), catalogo)
+    resultado_periodo = conciliacion["resultado_origen"]
+    if resultado_periodo is not None:
+        existentes = set(agrupado["codigo_clasificado"])
+        derivados = []
+        for codigo_resultado in ("ER.11", "PAT.04"):
+            if codigo_resultado in existentes:
+                continue
+            info = catalogo.get(codigo_resultado, {})
+            derivados.append({
+                "codigo_clasificado": codigo_resultado,
+                "monto_total": (
+                    conciliacion["resultado_homologado"] or 0.0
+                    if codigo_resultado == "ER.11" else resultado_periodo
+                ),
+                "num_cuentas": 0,
+                "nombre_estandar": info.get("nombre_estandar", codigo_resultado),
+                "categoria": info.get("categoria", ""),
+            })
+        if derivados:
+            agrupado = pd.concat([agrupado, pd.DataFrame(derivados)], ignore_index=True)
+    diagnostico = _diagnosticar_cuadratura(periodo_df, agrupado, clasificadas)
+    return {
+        "periodo": periodo, "df": periodo_df, "clasificadas": clasificadas,
+        "agrupado": agrupado, "conciliacion": conciliacion,
+        "diagnostico": diagnostico,
+    }
+
+
 def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
     st.button('Revisar o cambiar clasificaciones', on_click=_solicitar_revision_completa,
               args=(archivo_nombre,), use_container_width=True)
-    clasificadas = df[(df['codigo_clasificado'] != '') & (df['codigo_clasificado'] != '__EXCLUIR__') & (~df['es_total'])].copy()
-    clasificadas = _con_saldo_relevante(clasificadas)
+    periodos = _periodos_seleccionados()
+    reportes_periodo = [
+        _preparar_periodo_reporte(df, catalogo, periodo, posicion)
+        for posicion, periodo in enumerate(periodos)
+    ]
+    principal = reportes_periodo[0]
+    clasificadas = principal["clasificadas"]
     if clasificadas.empty:
         st.info("No hay cuentas clasificadas todavía.")
         return
-
-    clasificadas['monto'] = clasificadas['monto'].fillna(0)
-    clasificadas['monto_presentacion'] = clasificadas.apply(
-        lambda row: _monto_presentacion(
-            row['codigo_clasificado'], row['monto'], row['nombre_original'],
-            row.get('origen_columna'), catalogo,
-        ), axis=1,
-    )
-    agrupado = clasificadas.groupby('codigo_clasificado').agg(
-        monto_total=('monto_presentacion', 'sum'),
-        num_cuentas=('nombre_original', 'count'),
-    ).reset_index()
-    agrupado['nombre_estandar'] = agrupado['codigo_clasificado'].map(lambda c: catalogo.get(c, {}).get('nombre_estandar', c))
-    agrupado['categoria'] = agrupado['codigo_clasificado'].map(lambda c: catalogo.get(c, {}).get('categoria', ''))
-
-    conciliacion = conciliar_resultados(df.to_dict('records'), catalogo)
+    agrupado = principal["agrupado"].copy()
+    conciliacion = principal["conciliacion"]
     resultado_periodo = conciliacion['resultado_origen']
-    if resultado_periodo is not None:
-        derivados = []
-        for codigo_resultado in ('ER.11', 'PAT.04'):
-            if codigo_resultado not in set(agrupado['codigo_clasificado']):
-                info = catalogo.get(codigo_resultado, {})
-                derivados.append({
-                    'codigo_clasificado': codigo_resultado,
-                    'monto_total': (conciliacion['resultado_homologado'] or 0.0)
-                        if codigo_resultado == 'ER.11' else resultado_periodo,
-                    'num_cuentas': 0,
-                    'nombre_estandar': info.get('nombre_estandar', codigo_resultado),
-                    'categoria': info.get('categoria', ''),
-                })
-        if derivados:
-            agrupado = pd.concat([agrupado, pd.DataFrame(derivados)], ignore_index=True)
+    period_columns = [(
+        periodos[0] if len(periodos) > 1 else "Importe", "monto_total",
+    )]
+    for reporte in reportes_periodo[1:]:
+        amount_column = f"monto_total_{reporte['periodo']}"
+        period_columns.append((reporte["periodo"], amount_column))
+        valores = reporte["agrupado"][["codigo_clasificado", "monto_total"]].rename(
+            columns={"monto_total": amount_column}
+        )
+        agrupado = agrupado.merge(valores, on="codigo_clasificado", how="outer")
+        agrupado["nombre_estandar"] = agrupado.apply(
+            lambda row: row.get("nombre_estandar")
+            if pd.notna(row.get("nombre_estandar")) else catalogo.get(
+                row["codigo_clasificado"], {}
+            ).get("nombre_estandar", row["codigo_clasificado"]), axis=1,
+        )
+        agrupado["categoria"] = agrupado.apply(
+            lambda row: row.get("categoria")
+            if pd.notna(row.get("categoria")) else catalogo.get(
+                row["codigo_clasificado"], {}
+            ).get("categoria", ""), axis=1,
+        )
+        agrupado["num_cuentas"] = agrupado["num_cuentas"].fillna(0)
+        agrupado["monto_total"] = agrupado["monto_total"].fillna(0)
+        agrupado[amount_column] = agrupado[amount_column].fillna(0)
 
     orden_cat = ['activo_corriente', 'activo_no_corriente', 'pasivo_corriente', 'pasivo_no_corriente', 'patrimonio', 'resultado']
     agrupado['orden'] = agrupado['categoria'].map(lambda c: orden_cat.index(c) if c in orden_cat else 99)
     agrupado = agrupado.sort_values(['orden', 'codigo_clasificado'])
 
-    diagnostico = _diagnosticar_cuadratura(df, agrupado, clasificadas)
+    diagnostico = principal["diagnostico"]
     _mostrar_resumen_cuadratura(diagnostico, df, archivo_nombre)
+    if len(reportes_periodo) > 1:
+        st.subheader("Control comparativo por período")
+        st.dataframe(pd.DataFrame([{
+            "Período": reporte["periodo"],
+            "Activo": reporte["diagnostico"]["activo"],
+            "Pasivo + Patrimonio": reporte["diagnostico"]["pasivo_patrimonio"],
+            "Diferencia": reporte["diagnostico"]["diferencia"],
+            "Cuadratura": "Cuadra" if reporte["diagnostico"]["cuadra"] else "Requiere revisión",
+            "Resultado original": reporte["conciliacion"]["resultado_origen"],
+            "Resultado homologado": reporte["conciliacion"]["resultado_homologado"],
+            "Diferencia resultado": reporte["conciliacion"]["diferencia"],
+        } for reporte in reportes_periodo]), hide_index=True, use_container_width=True)
     from pipeline.operational_quality import analyze_operational_quality
     enforce_export = os.environ.get(
         "QUALITY_CONTROL_ENFORCE_EXPORT", "false",
@@ -3672,8 +3910,27 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
     _mostrar_control_calidad_operativo(quality_control)
 
     emision = _control_emision(df, catalogo, diagnostico, quality_control)
+    for reporte in reportes_periodo[1:]:
+        if not reporte["diagnostico"]["cuadra"]:
+            emision["definitivo"] = False
+            emision["motivos"].append(
+                f"El período {reporte['periodo']} no cuadra: diferencia "
+                f"{reporte['diagnostico']['diferencia']:,.2f}"
+            )
+        problemas_resultado = reporte["conciliacion"].get("problemas", [])
+        if problemas_resultado:
+            emision["definitivo"] = False
+            emision["motivos"].extend(
+                f"Período {reporte['periodo']}: {problema}"
+                for problema in problemas_resultado
+            )
+    amount_columns = [column for _, column in period_columns]
+    income_available = {
+        column: reporte["conciliacion"]["resultado_homologado"] is not None
+        for reporte, (_, column) in zip(reportes_periodo, period_columns)
+    }
     presentacion, formulas_reporte = complete_catalog(
-        agrupado, catalogo, conciliacion["resultado_homologado"] is not None,
+        agrupado, catalogo, income_available, amount_columns=amount_columns,
     )
     _validar_cuadre_utilidad(emision['resultado'])
     total_cols = st.columns(3)
@@ -3721,9 +3978,17 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
         sub = presentacion[presentacion['categoria'] == cat]
         if sub.empty: continue
         st.subheader(LABELS_CAT.get(cat, cat))
-        tabla = sub[['codigo_clasificado', 'nombre_estandar', 'monto_total', 'num_cuentas']].copy()
-        tabla.columns = ['Código', 'Cuenta Estándar', 'Monto Total', '# Cuentas Agrupadas']
-        tabla['Monto Total'] = tabla['Monto Total'].map(lambda x: f"{x:,.2f}" if pd.notna(x) else "No disponible")
+        columnas_tabla = ['codigo_clasificado', 'nombre_estandar', *amount_columns, 'num_cuentas']
+        tabla = sub[columnas_tabla].copy()
+        nombres_montos = {column: f"Monto {label}" for label, column in period_columns}
+        tabla = tabla.rename(columns={
+            'codigo_clasificado': 'Código', 'nombre_estandar': 'Cuenta Estándar',
+            'num_cuentas': '# Cuentas Agrupadas', **nombres_montos,
+        })
+        for nombre_monto in nombres_montos.values():
+            tabla[nombre_monto] = tabla[nombre_monto].map(
+                lambda value: f"{value:,.2f}" if pd.notna(value) else "No disponible"
+            )
         st.dataframe(tabla, use_container_width=True, hide_index=True)
         if cat == 'resultado':
             st.caption('Ingresos positivos y gastos negativos. El resultado neto es un cálculo y no se suma nuevamente al detalle.')
@@ -3747,11 +4012,17 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
     import io
     from openpyxl.styles import Font, PatternFill
     
-    export_df = presentacion[["codigo_clasificado", "nombre_estandar", "monto_total", "num_cuentas"]].copy()
+    export_df = presentacion[[
+        "codigo_clasificado", "nombre_estandar", *amount_columns, "num_cuentas",
+    ]].copy()
     meta = st.session_state.get('metadata_files', {}).get(archivo_nombre)
     unidad = (getattr(meta, 'moneda', None) or 'unidad original')
-    columna_monto = f'Monto Total ({unidad})'
-    export_df.columns = ["Código", "Cuenta Estándar", columna_monto, "# Cuentas Agrupadas"]
+    columnas_exportacion = ["Código", "Cuenta Estándar"] + [
+        f"Monto Total ({unidad})" if len(period_columns) == 1
+        else f"Monto Total {label} ({unidad})"
+        for label, _ in period_columns
+    ] + ["# Cuentas Agrupadas"]
+    export_df.columns = columnas_exportacion
     export_df['Tipo de fila'] = presentacion['codigo_clasificado'].map(
         lambda c: 'Calculado, no sumar al detalle' if catalogo.get(c, {}).get('clasificable') is False else 'Cuenta'
     )
@@ -3805,45 +4076,68 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
             cell.fill = header_fill
             cell.font = header_font
 
-        for i, row in enumerate(ws.iter_rows(min_row=FILA_INICIO_BALANCE + 1, max_row=FILA_INICIO_BALANCE + len(export_df), max_col=4), start=0):
+        for i, row in enumerate(ws.iter_rows(
+                min_row=FILA_INICIO_BALANCE + 1,
+                max_row=FILA_INICIO_BALANCE + len(export_df),
+                max_col=len(export_df.columns)), start=0):
             if i % 2 == 0:
                 for cell in row: cell.fill = PatternFill("solid", fgColor=GRIS)
 
         fila_sep = FILA_INICIO_BALANCE + len(export_df) + 3
 
         catalogo_local = catalogo
-        det = clasificadas[
-            (clasificadas['codigo_clasificado'] != '') &
-            (clasificadas['codigo_clasificado'] != '__EXCLUIR__') &
-            (~clasificadas['es_total'])
-        ][['codigo_clasificado', 'codigo_original', 'nombre_original',
-           'nombre_revision_usuario', 'monto', 'origen_columna',
-           'origen_columna_efectiva', 'metodo', 'confianza']].copy()
+        detail_indices = pd.Index([])
+        for reporte in reportes_periodo:
+            detail_indices = detail_indices.union(reporte["clasificadas"].index)
+        columnas_base = [
+            'codigo_clasificado', 'codigo_original', 'nombre_original',
+            'nombre_revision_usuario', 'origen_columna',
+            'origen_columna_efectiva', 'metodo', 'confianza',
+        ]
+        det = df.loc[detail_indices, columnas_base].copy()
 
         det['nombre_visual'] = det['nombre_revision_usuario'].where(det['nombre_revision_usuario'] != '', det['nombre_original'])
         det['nombre_estandar'] = det['codigo_clasificado'].map(lambda c: catalogo_local.get(c, {}).get('nombre_estandar', c))
-        det['monto_normalizado'] = det.apply(
-            lambda row: _monto_presentacion(
-                row['codigo_clasificado'], row['monto'], row['nombre_visual'],
-                row.get('origen_columna'), catalogo,
-            ), axis=1,
-        )
+        columnas_detalle_periodo = []
+        for posicion, periodo in enumerate(periodos):
+            extraido = f"monto_extraido_{periodo}"
+            normalizado = f"monto_normalizado_{periodo}"
+            det[extraido] = df.loc[det.index].apply(
+                lambda row, p=periodo, pos=posicion: _valor_fila_periodo(row, p, pos),
+                axis=1,
+            )
+            det[normalizado] = det.apply(
+                lambda row, col=extraido: _monto_presentacion(
+                    row['codigo_clasificado'], row[col], row['nombre_visual'],
+                    row.get('origen_columna'), catalogo,
+                ) if pd.notna(row[col]) else None,
+                axis=1,
+            )
+            columnas_detalle_periodo.extend([extraido, normalizado])
         detalle_completo = det[[
             'codigo_clasificado', 'nombre_estandar', 'codigo_original',
             'nombre_visual', 'origen_columna', 'origen_columna_efectiva',
-            'monto', 'monto_normalizado', 'metodo', 'confianza',
+            *columnas_detalle_periodo, 'metodo', 'confianza',
         ]].copy()
 
         # Reconstrucción de la lógica de ordenamiento nativo
         detalle_completo = detalle_completo.sort_values(
-            ['codigo_clasificado', 'monto'],
-            key=lambda x: x.abs() if x.dtype.kind == 'f' else x,
+            ['codigo_clasificado', columnas_detalle_periodo[0]],
+            key=lambda x: x.abs() if x.dtype.kind in 'fi' else x,
             ascending=[True, False]
         )
+        nombres_detalle_periodo = []
+        for periodo in periodos:
+            if len(periodos) == 1:
+                nombres_detalle_periodo.extend(['Monto Extraído', 'Monto Normalizado'])
+            else:
+                nombres_detalle_periodo.extend([
+                    f'Monto Extraído {periodo}', f'Monto Normalizado {periodo}',
+                ])
         detalle_completo.columns = [
             'Código Estándar', 'Nombre Estándar',
             'Cód. Original', 'Nombre', 'Columna Extraída', 'Naturaleza Efectiva',
-            'Monto Extraído', 'Monto Normalizado',
+            *nombres_detalle_periodo,
             'Método Clasificación', 'Confianza'
         ]
         detalle_completo['Confianza'] = detalle_completo['Confianza'].apply(
@@ -3877,11 +4171,13 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
         )
         add_report_sheets(
             writer.book, presentacion, formulas_reporte,
+            account_detail=detalle_completo,
             start_row=FILA_INICIO_BALANCE, unit=unidad, meta=meta,
             processed_at=processed_at, source_name=archivo_nombre,
             pages=st.session_state.get("document_pages", {}).get(archivo_nombre),
             definitive=emision["definitivo"], reasons=emision["motivos"],
             tolerance=diagnostico["tolerancia"],
+            period_columns=period_columns,
         )
 
     buf.seek(0)
