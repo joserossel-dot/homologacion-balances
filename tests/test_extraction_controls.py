@@ -168,3 +168,30 @@ app._mostrar_correccion_extraccion("balance.pdf")
     assert not at.session_state.extraction_resolved
     assert len(at.session_state.extraction_pending["balance.pdf"].cuentas) == 2
     assert at.session_state.extraction_pending["balance.pdf"].certificacion_extraccion.estado == "fallida"
+
+
+def test_editores_agrupados_con_separadores_y_columnas_finales_primero():
+    import json
+    at = AppTest.from_string("""
+import streamlit as st
+import app_validacion as app
+import parser_universal as parser
+lines = ["110101 Caja 100 0 100 0 100 0 0 0", "Sumas 200 0 100 0 100 0 0 0"]
+cuentas = [parser.parsear_linea(line, i, parser.FormatoCodigo.COMPACTO, ".") for i, line in enumerate(lines)]
+st.session_state.extraction_pending = {"balance.pdf": parser.ResultadoParseo(
+    archivo="balance.pdf", formato_codigo=parser.FormatoCodigo.COMPACTO,
+    separador_miles=".", requirio_ocr=False, rotacion_aplicada=0,
+    cuentas=cuentas, certificacion_extraccion=parser.certificar_extraccion_columnas(cuentas),
+)}
+app._mostrar_correccion_extraccion("balance.pdf")
+""").run()
+    assert not at.exception
+    editors = [el for el in at.dataframe if "total" in el.value.columns]
+    assert len(editors) == 2
+    assert editors[0].proto.form_id == editors[1].proto.form_id
+    assert editors[0].proto.form_id.startswith("extraction_batch_")
+    assert list(editors[0].proto.column_order)[3:7] == ["activo", "pasivo", "perdida", "ganancia"]
+    for editor in editors:
+        config = json.loads(editor.proto.columns)
+        for column in parser.RAW_MONETARY_COLUMNS:
+            assert config[column]["type_config"]["format"] == "localized"

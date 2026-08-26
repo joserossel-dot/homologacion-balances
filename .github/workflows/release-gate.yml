@@ -45,6 +45,12 @@ jobs:
           tests/test_cmcc_pipeline.py
           tests/test_cmcc_review_pipeline.py
           tests/test_ui_knowledge_manager.py
+          tests/test_document_scope.py
+          tests/test_pending_parser_regressions.py
+          tests/test_report_presentation.py
+          tests/test_report_integrity.py
+          tests/test_extraction_controls.py
+          tests/test_homologation_column_gate.py
           -k "not test_no_se_crea_runtime_en_import"
       - name: Require Neon secret
         run: test -n "$DATABASE_URL"

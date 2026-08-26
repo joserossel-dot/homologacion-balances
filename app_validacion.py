@@ -30,6 +30,10 @@ import time
 from dataclasses import replace
 from pathlib import Path
 from datetime import date, datetime
+from io import BytesIO
+from html import escape
+from document_scope import page_count, parse_pages, select_pdf, render_page
+from report_presentation import complete_catalog, add_report_sheets
 
 import pandas as pd
 import streamlit as st
@@ -1027,6 +1031,83 @@ class MotorHibridoLocal:
 # INTERFAZ DE USUARIO PRINCIPAL (MAIN)
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _contenido_para_extraer(archivo) -> bytes:
+    content = archivo.getvalue()
+    if Path(archivo.name).suffix.lower() == ".pdf":
+        pages = st.session_state.setdefault("document_pages", {}).get(archivo.name)
+        if pages is not None:
+            return select_pdf(content, pages)
+    return content
+
+
+def _confirmar_alcance_documentos(archivos) -> bool:
+    if len({a.name for a in archivos}) != len(archivos):
+        st.error("Hay archivos con el mismo nombre. Renómbrelos para mantener separadas sus páginas y correcciones.")
+        return False
+    signature = tuple((a.name, hashlib.sha256(a.getvalue()).hexdigest()) for a in archivos)
+    if (st.session_state.get("document_scope_confirmed") == signature
+            and not st.session_state.get("document_scope_editing", False)):
+        return True
+    st.subheader("Seleccione las páginas que se analizarán")
+    st.info(
+        "Revise el documento completo en el visor inferior. Si contiene el mismo balance "
+        "en varios formatos, elija sólo uno. En informes auditados seleccione las páginas "
+        "del estado y sus continuaciones, sin volver a incluir sus anexos o duplicados."
+    )
+    if st.session_state.get("document_scope_editing"):
+        st.warning("Cambiar las páginas vuelve a procesar ese documento y reemplaza sus correcciones en esta sesión. Los documentos sin cambios conservan sus resultados.")
+    preview_name = st.selectbox("Documento a visualizar", [a.name for a in archivos])
+    selections = {}
+    errors = []
+    with st.form("document_scope"):
+        for archivo in archivos:
+            if Path(archivo.name).suffix.lower() != ".pdf":
+                continue
+            try:
+                count = page_count(archivo.getvalue())
+            except Exception:
+                errors.append(f"No se pudo abrir {archivo.name} como PDF.")
+                continue
+            st.write(f"{archivo.name}: {count} páginas")
+            key = hashlib.sha256(archivo.name.encode() + archivo.getvalue()).hexdigest()[:16]
+            saved_pages = st.session_state.get("document_pages", {}).get(archivo.name, [])
+            saved_subset = bool(saved_pages) and saved_pages != list(range(1, count + 1))
+            mode = st.radio("Páginas a analizar", ["Todas", "Sólo las seleccionadas"],
+                            index=1 if saved_subset else 0,
+                            key=f"scope_mode_{key}", horizontal=True)
+            text = st.text_input("Páginas o rangos", placeholder="1, 3-5",
+                                 value=", ".join(map(str, saved_pages)) if saved_subset else "",
+                                 key=f"scope_pages_{key}")
+            try:
+                selections[archivo.name] = list(range(1, count + 1)) if mode == "Todas" else parse_pages(text, count)
+            except ValueError as exc:
+                errors.append(f"{archivo.name}: {exc}")
+        submitted = st.form_submit_button("Confirmar páginas y continuar")
+    if submitted:
+        if errors:
+            for error in errors:
+                st.error(error)
+        else:
+            previous = dict(st.session_state.get("document_scope_confirmed") or ())
+            previous_pages = st.session_state.get("document_pages", {})
+            for name, digest in signature:
+                if previous.get(name) != digest or previous_pages.get(name) != selections.get(name):
+                    revisions = st.session_state.setdefault("extraction_revisions", {})
+                    revisions[name] = revisions.get(name, 0) + 1
+                    for state_key in ("resultados", "metadata_files", "document_intel", "extraction_pending",
+                                      "extraction_resolved", "extraction_certifications", "processed_at",
+                                      "quality_controls"):
+                        st.session_state.setdefault(state_key, {}).pop(name, None)
+            st.session_state.document_pages = selections
+            st.session_state.document_scope_confirmed = signature
+            st.session_state.document_scope_editing = False
+            st.rerun()
+    st.divider()
+    _visor_documento(next(a for a in archivos if a.name == preview_name),
+                     altura="58vh", mostrar_titulo=True)
+    return False
+
+
 def main():
     st.title("📊 Homologación de Balances Tributarios Chilenos")
     st.caption(
@@ -1067,6 +1148,10 @@ def main():
         archivos = st.file_uploader(
             "Balances tributarios", type=['pdf', 'xlsx', 'xls'], accept_multiple_files=True
         )
+        if archivos and st.session_state.get("document_scope_confirmed"):
+            if st.button("Cambiar páginas a analizar"):
+                st.session_state.document_scope_editing = True
+                st.rerun()
         giro = st.selectbox(
             "Giro de la empresa (afecta regla D2-Terrenos)",
             ['Otro', 'Inmobiliaria', 'Construcción', 'Promotora'],
@@ -1096,7 +1181,13 @@ def main():
         st.session_state.extraction_resolved = {}
         st.session_state.extraction_certifications = {}
         st.session_state.metadata_confirmada = False
+        st.session_state.document_scope_confirmed = None
+        st.session_state.document_scope_editing = False
+        st.session_state.document_pages = {}
         _mostrar_resumen_catalogo(catalogo)
+        return
+
+    if not _confirmar_alcance_documentos(archivos):
         return
 
     if not st.session_state.get('metadata_confirmada', False):
@@ -1658,6 +1749,11 @@ def main():
             _tab_knowledge_manager()
 
 
+@st.cache_data(max_entries=12, show_spinner=False)
+def _render_pdf_cached(content: bytes, page: int) -> bytes:
+    return render_page(content, page)
+
+
 @st.fragment
 def _visor_documento(
     archivo, *, altura: str = "72vh", mostrar_titulo: bool = True,
@@ -1672,73 +1768,42 @@ def _visor_documento(
         st.markdown("#### 📄 Documento original")
 
     if suffix == '.pdf':
+        content = archivo.getvalue()
+        contenido_id = hashlib.sha256(content).hexdigest()[:16]
         try:
-            contenido_id = hashlib.sha1(archivo.getvalue()).hexdigest()[:12]
+            n_paginas = page_count(content)
         except Exception:
-            contenido_id = hashlib.sha1(archivo.name.encode('utf-8')).hexdigest()[:12]
-        clave_imgs = f"_imgs_{contenido_id}"
-        if clave_imgs not in st.session_state:
-            with st.spinner("Cargando páginas del documento..."):
-                with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
-                    tmp.write(archivo.read())
-                    tmp_path = Path(tmp.name)
-                archivo.seek(0)
-                
-                try:
-                    from pdf2image import convert_from_path
-                    
-                    # CORRECCIÓN 1: Configuración inteligente según el sistema operativo
-                    if platform.system() == "Darwin":
-                        # Entorno local (Mac)
-                        pdftoppm_path = shutil.which('pdftoppm')
-                        poppler_dir = str(Path(pdftoppm_path).parent) if pdftoppm_path else '/opt/homebrew/bin'
-                        imgs = convert_from_path(str(tmp_path), dpi=180, poppler_path=poppler_dir)
-                    else:
-                        # Entorno Render (Linux) - No necesita poppler_path, lo detecta global
-                        imgs = convert_from_path(str(tmp_path), dpi=180)
-                        
-                    st.session_state[clave_imgs] = imgs
-                except Exception:
-                    # CORRECCIÓN 2: Fallback dinámico (busca pdftoppm de forma segura en cualquier Linux)
-                    pdftoppm_bin = shutil.which('pdftoppm') or 'pdftoppm'
-                    tmpdir = tempfile.mkdtemp()
-                    subprocess.run([pdftoppm_bin, '-png', '-r', '180', str(tmp_path), f'{tmpdir}/page'], capture_output=True)
-                    img_files = sorted(glob.glob(f'{tmpdir}/page*.png'))
-                    imgs = [Image.open(f) for f in img_files]
-                    st.session_state[clave_imgs] = imgs
-
-        imgs = st.session_state.get(clave_imgs, [])
-        n_paginas = len(imgs)
-        if not imgs:
-            st.warning("No se pudo renderizar el documento.")
+            st.error("No se pudo abrir el PDF para visualizarlo.")
             return
-
-        ctrl1, ctrl2, ctrl3 = st.columns([2, 2, 2])
-        with ctrl1: pagina = st.number_input(f"Página (1-{n_paginas})", min_value=1, max_value=n_paginas, value=1, step=1, key=f"visor_pagina_{contenido_id}")
-        with ctrl2: zoom = st.slider("Zoom", min_value=50, max_value=200, value=100, step=10, format="%d%%", key=f"visor_zoom_{contenido_id}")
-        with ctrl3: rotacion = st.select_slider("Rotación", options=[0, 90, 180, 270], value=0, format_func=lambda x: f"{x}°", key=f"visor_rot_{contenido_id}")
-
-        clave_render = f"_visor_render_{contenido_id}_{pagina}_{zoom}_{rotacion}"
-        b64 = st.session_state.get(clave_render)
-        if b64 is None:
-            img = imgs[pagina - 1]
-            if rotacion != 0: img = img.rotate(-rotacion, expand=True)
+        ctrl1, ctrl2, ctrl3 = st.columns(3)
+        with ctrl1:
+            pagina = st.number_input(f"Página (1-{n_paginas})", min_value=1,
+                                     max_value=n_paginas, value=1, step=1,
+                                     key=f"visor_pagina_{contenido_id}")
+        with ctrl2:
+            zoom = st.slider("Zoom", 50, 200, 100, 10, format="%d%%",
+                             key=f"visor_zoom_{contenido_id}")
+        with ctrl3:
+            rotacion = st.select_slider("Rotación", options=[0, 90, 180, 270],
+                                        key=f"visor_rot_{contenido_id}")
+        try:
+            img = Image.open(BytesIO(_render_pdf_cached(content, int(pagina))))
+            if rotacion:
+                img = img.rotate(-rotacion, expand=True)
             if zoom != 100:
-                w, h = img.size
-                img = img.resize((int(w * zoom / 100), int(h * zoom / 100)), Image.LANCZOS)
-
+                img = img.resize((int(img.width * zoom / 100), int(img.height * zoom / 100)))
             buf = io.BytesIO()
-            img.save(buf, format='PNG')
+            img.save(buf, format="PNG")
             b64 = base64.b64encode(buf.getvalue()).decode()
-            st.session_state[clave_render] = b64
-
-        html_visor = f"""
-        <div style="height: {altura}; min-height: 50vh; overflow-y: auto; overflow-x: auto; border: 1px solid #d0d0d0; border-radius: 8px; background: #f5f5f5; padding: 8px; text-align: center;">
-            <img src="data:image/png;base64,{b64}" style="max-width: none; cursor: zoom-in;" title="Página {pagina} de {n_paginas} — {archivo.name}"/>
+        except Exception:
+            st.error("No se pudo mostrar esta página. El documento original no se modificó.")
+            return
+        st.html(f"""
+        <div style="height:{altura};min-height:50vh;overflow:auto;border:1px solid #d0d0d0;background:#f5f5f5;text-align:center">
+          <img src="data:image/png;base64,{b64}" style="max-width:none" />
         </div>
-        <div style="font-size:12px; color:#888; text-align:center; margin-top:4px;">Página {pagina} de {n_paginas} · {archivo.name}</div>
-        """
-        st.html(html_visor)
+        <p>Página {pagina} de {n_paginas} · {escape(archivo.name)}</p>
+        """)
 
     elif suffix in ('.xlsx', '.xls'):
         archivo.seek(0)
@@ -1765,12 +1830,9 @@ def _extraer_lineas_encabezado(archivo) -> list[str]:
     suffix = Path(archivo.name).suffix.lower()
     archivo.seek(0)
     if suffix == '.pdf':
-        with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
-            tmp.write(archivo.read())
-            tmp_path = Path(tmp.name)
         try:
             import pdfplumber
-            with pdfplumber.open(tmp_path) as pdf:
+            with pdfplumber.open(BytesIO(_contenido_para_extraer(archivo))) as pdf:
                 texto = pdf.pages[0].extract_text() or ""
                 return texto.split('\n')[:40]
         except Exception:
@@ -2130,6 +2192,13 @@ def _explicar_diferencia_controles(certification) -> str:
     return ""
 
 
+def _config_importes_extraccion():
+    labels = ["Debe", "Haber", "Saldo deudor", "Saldo acreedor",
+              "Activo", "Pasivo", "Pérdidas", "Ganancias"]
+    return {key: st.column_config.NumberColumn(label, format="localized")
+            for key, label in zip(RAW_MONETARY_COLUMNS, labels)}
+
+
 def _mostrar_correccion_extraccion(filename: str) -> None:
     """Editor seguro previo a homologación para extracciones OCR fallidas."""
     resultado = st.session_state.extraction_pending.get(filename)
@@ -2211,7 +2280,18 @@ def _mostrar_correccion_extraccion(filename: str) -> None:
                     "Diferencia": float(diferencias[column]),
                 }
                 for column in columnas_con_diferencia
-            ]), use_container_width=True, hide_index=True)
+            ]), use_container_width=True, hide_index=True, column_config={
+                key: st.column_config.NumberColumn(key, format="localized")
+                for key in ("Suma de cuentas", "Control extraído", "Diferencia")
+            })
+            final_errors = [c for c in columnas_con_diferencia if c in RAW_MONETARY_COLUMNS[4:]]
+            if not final_errors:
+                st.info(
+                    "Las sumas de Activo, Pasivo, Pérdidas y Ganancias coinciden con el "
+                    "control leído. Las diferencias mostradas están en movimientos o saldos. "
+                    "No cambie importes finales que coincidan con el PDF: revise los controles "
+                    "y las filas señaladas. La validación individual sigue siendo necesaria."
+                )
 
     st.markdown("#### Qué debe hacer el analista")
     st.info(
@@ -2241,6 +2321,20 @@ def _mostrar_correccion_extraccion(filename: str) -> None:
         st.dataframe(
             nombres_inconsistentes.rename(columns={"linea": "Fila", "cuenta": "Cuenta"}),
             use_container_width=True, hide_index=True,
+        )
+        with st.expander("Detalle de las diferencias y posibles valores", expanded=True):
+            st.dataframe(source[source["inconsistente"]][
+                ["linea", "cuenta", "diagnostico", "accion_sugerida", "valores_sugeridos"]
+            ].rename(columns={"linea": "Fila", "cuenta": "Cuenta",
+                              "diagnostico": "Motivo", "accion_sugerida": "Qué revisar",
+                              "valores_sugeridos": "Posible corrección, verificar contra PDF"}),
+                         hide_index=True, use_container_width=True)
+    else:
+        st.info(
+            "No hay filas con errores individuales detectados. El problema está en la "
+            "comparación de las sumas con los controles. Revise primero el subtotal leído "
+            "y si falta alguna cuenta o se repite un grupo; no hay una cifra individual "
+            "identificada para corregir automáticamente."
         )
     with st.expander("Ingresar una cuenta omitida por la extracción"):
         st.caption(
@@ -2287,74 +2381,81 @@ def _mostrar_correccion_extraccion(filename: str) -> None:
                 revisions[filename] = revision + 1
                 st.success("Cuenta incorporada. Revise la certificación actualizada.")
                 st.rerun()
-    controles = source[source["total"]].copy()
-    detalle = source[~source["total"]].copy()
-    st.markdown("#### Cuentas y filas por revisar")
-    edited = st.data_editor(
-        detalle,
-        hide_index=True,
-        use_container_width=True,
-        disabled=[
-            "linea", "codigo", "cuenta", "inconsistente", "prioridad",
-            "diagnostico", "accion_sugerida",
-            "valores_sugeridos",
-        ],
-        key=f"extraction_editor_{filename}_{revision}",
-        column_config={
-            "linea": st.column_config.NumberColumn("Fila", format="%d"),
-            "codigo": "Código",
-            "cuenta": "Cuenta",
-            "inconsistente": st.column_config.CheckboxColumn("Revisar"),
-            "prioridad": st.column_config.NumberColumn(
-                "Prioridad", help="1: revisar primero; 2: validar tipo de fila; 3: sin señal directa.",
-            ),
-            "diagnostico": st.column_config.TextColumn(
-                "Qué detectó el sistema", width="large",
-            ),
-            "accion_sugerida": st.column_config.TextColumn(
-                "Qué debe hacer", width="large",
-            ),
-            "valores_sugeridos": st.column_config.TextColumn(
-                "Leído → valor contablemente posible", width="large",
-            ),
-            "excluir": st.column_config.CheckboxColumn(
-                "Excluir", help="Úselo sólo para pies, firmas, notas o texto que no sea una cuenta."
-            ),
-            "debitos": st.column_config.NumberColumn("Debe", format="%.0f"),
-            "creditos": st.column_config.NumberColumn("Haber", format="%.0f"),
-            "saldo_deudor": st.column_config.NumberColumn("Saldo deudor", format="%.0f"),
-            "saldo_acreedor": st.column_config.NumberColumn("Saldo acreedor", format="%.0f"),
-            "activo": st.column_config.NumberColumn("Activo", format="%.0f"),
-            "pasivo": st.column_config.NumberColumn("Pasivo", format="%.0f"),
-            "perdida": st.column_config.NumberColumn("Pérdidas", format="%.0f"),
-            "ganancia": st.column_config.NumberColumn("Ganancias", format="%.0f"),
-            "total": st.column_config.CheckboxColumn(
-                "Subtotal/total",
-                help="Marque filas de control; no se sumarán como cuentas.",
-            ),
-        },
-    )
-    if not controles.empty:
-        with st.expander(f"Controles reconocidos: {len(controles)} (no se suman como cuentas)"):
-            st.caption(
-                "No requieren exclusión. Edite un importe sólo si está mal leído. "
-                "Desmarque Subtotal/total únicamente si la fila es realmente una cuenta."
-            )
-            controles_editados = st.data_editor(
-                controles.drop(columns=["excluir"]),
-                hide_index=True,
-                use_container_width=True,
-                key=f"extraction_controls_{filename}_{revision}",
-                disabled=[column for column in controles.columns
-                          if column not in (*RAW_MONETARY_COLUMNS, "total", "excluir")],
-                column_config={
-                    "linea": "Fila", "cuenta": "Control impreso",
-                    "total": st.column_config.CheckboxColumn("Subtotal/total"),
-                },
-            )
-            controles_editados["excluir"] = False
-            edited = pd.concat([edited, controles_editados], ignore_index=True)
-    if st.button("🔎 Verificar correcciones y continuar", type="primary"):
+    st.caption("Puede corregir varias celdas antes de guardar. Los números conservan su precisión; los separadores se adaptan al idioma del navegador.")
+    with st.form(f"extraction_batch_{filename}_{revision}"):
+        controles = source[source["total"]].copy()
+        detalle = source[~source["total"]].copy()
+        st.markdown("#### Cuentas y filas por revisar")
+        edited = st.data_editor(
+            detalle,
+            hide_index=True,
+            use_container_width=True,
+            column_order=["linea", "cuenta", "inconsistente", "activo", "pasivo", "perdida", "ganancia",
+                          "debitos", "creditos", "saldo_deudor", "saldo_acreedor", "total", "excluir"],
+            disabled=[
+                "linea", "codigo", "cuenta", "inconsistente", "prioridad",
+                "diagnostico", "accion_sugerida",
+                "valores_sugeridos",
+            ],
+            key=f"extraction_editor_{filename}_{revision}",
+            column_config={
+                "linea": st.column_config.NumberColumn("Fila", format="%d"),
+                "codigo": "Código",
+                "cuenta": "Cuenta",
+                "inconsistente": st.column_config.CheckboxColumn("Revisar"),
+                "prioridad": st.column_config.NumberColumn(
+                    "Prioridad", help="1: revisar primero; 2: validar tipo de fila; 3: sin señal directa.",
+                ),
+                "diagnostico": st.column_config.TextColumn(
+                    "Qué detectó el sistema", width="large",
+                ),
+                "accion_sugerida": st.column_config.TextColumn(
+                    "Qué debe hacer", width="large",
+                ),
+                "valores_sugeridos": st.column_config.TextColumn(
+                    "Leído → valor contablemente posible", width="large",
+                ),
+                "excluir": st.column_config.CheckboxColumn(
+                    "Excluir", help="Úselo sólo para pies, firmas, notas o texto que no sea una cuenta."
+                ),
+                "debitos": st.column_config.NumberColumn("Debe", format="localized"),
+                "creditos": st.column_config.NumberColumn("Haber", format="localized"),
+                "saldo_deudor": st.column_config.NumberColumn("Saldo deudor", format="localized"),
+                "saldo_acreedor": st.column_config.NumberColumn("Saldo acreedor", format="localized"),
+                "activo": st.column_config.NumberColumn("Activo", format="localized"),
+                "pasivo": st.column_config.NumberColumn("Pasivo", format="localized"),
+                "perdida": st.column_config.NumberColumn("Pérdidas", format="localized"),
+                "ganancia": st.column_config.NumberColumn("Ganancias", format="localized"),
+                "total": st.column_config.CheckboxColumn(
+                    "Subtotal/total",
+                    help="Marque filas de control; no se sumarán como cuentas.",
+                ),
+            },
+        )
+        if not controles.empty:
+            with st.expander(f"Controles reconocidos: {len(controles)} (no se suman como cuentas)"):
+                st.caption(
+                    "No requieren exclusión. Edite un importe sólo si está mal leído. "
+                    "Desmarque Subtotal/total únicamente si la fila es realmente una cuenta."
+                )
+                controles_editados = st.data_editor(
+                    controles.drop(columns=["excluir"]),
+                    hide_index=True,
+                    use_container_width=True,
+                    column_order=["linea", "cuenta", *RAW_MONETARY_COLUMNS, "total"],
+                    key=f"extraction_controls_{filename}_{revision}",
+                    disabled=[column for column in controles.columns
+                              if column not in (*RAW_MONETARY_COLUMNS, "total", "excluir")],
+                    column_config={
+                        "linea": "Fila", "cuenta": "Control impreso",
+                        **_config_importes_extraccion(),
+                        "total": st.column_config.CheckboxColumn("Subtotal/total"),
+                    },
+                )
+                controles_editados["excluir"] = False
+                edited = pd.concat([edited, controles_editados], ignore_index=True)
+        submitted = st.form_submit_button("🔎 Verificar correcciones y continuar", type="primary")
+    if submitted:
         corrected, certification = _aplicar_correcciones_extraccion(
             resultado.cuentas, edited,
         )
@@ -2379,13 +2480,14 @@ def _extraer_cuentas(archivo) -> tuple[list[CuentaRaw], object]:
     archivo es PDF y el análisis documental corrió; None en caso contrario.
     """
     suffix = Path(archivo.name).suffix.lower()
+    st.session_state.setdefault("processed_at", {})[archivo.name] = datetime.now().astimezone().isoformat()
     if suffix == '.pdf':
         import tempfile
-        with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
-            tmp.write(archivo.read())
-            tmp_path = Path(tmp.name)
-        parser = ParserPDF()
-        resultado = parser.parsear(tmp_path)
+        with tempfile.TemporaryDirectory(prefix="balance-seleccion-") as directory:
+            tmp_path = Path(directory) / "seleccion.pdf"
+            tmp_path.write_bytes(_contenido_para_extraer(archivo))
+            parser = ParserPDF()
+            resultado = parser.parsear(tmp_path)
         for adv in resultado.advertencias: st.warning(adv)
         document_context = getattr(resultado, 'document_context', None)
         signature = getattr(document_context, 'signature', None)
@@ -2791,8 +2893,14 @@ def _registrar_decision(archivo_nombre, idx, row, codigo, motivo):
     })
 
 
-def _solicitar_revision_completa(archivo_nombre):
+def _clave_revision_documento(archivo_nombre):
     doc_key = hashlib.sha1(archivo_nombre.encode('utf-8')).hexdigest()[:10]
+    revision = st.session_state.get("extraction_revisions", {}).get(archivo_nombre, 0)
+    return f"{doc_key}_{revision}" if revision else doc_key
+
+
+def _solicitar_revision_completa(archivo_nombre):
+    doc_key = _clave_revision_documento(archivo_nombre)
     st.session_state[f'revision_vista_{doc_key}'] = 'Todas (incluye confirmadas y excluidas)'
     st.session_state[f'revision_busqueda_{doc_key}'] = ''
     st.session_state['vista_trabajo_solicitada'] = '🔍 Cola de Revisión'
@@ -2800,7 +2908,7 @@ def _solicitar_revision_completa(archivo_nombre):
 
 @st.fragment
 def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, archivo_nombre: str):
-    doc_key = hashlib.sha1(archivo_nombre.encode('utf-8')).hexdigest()[:10]
+    doc_key = _clave_revision_documento(archivo_nombre)
     vista = st.radio(
         'Cuentas a revisar', ['Pendientes', 'Todas (incluye confirmadas y excluidas)'],
         horizontal=True, key=f'revision_vista_{doc_key}',
@@ -3564,7 +3672,19 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
     _mostrar_control_calidad_operativo(quality_control)
 
     emision = _control_emision(df, catalogo, diagnostico, quality_control)
+    presentacion, formulas_reporte = complete_catalog(
+        agrupado, catalogo, conciliacion["resultado_homologado"] is not None,
+    )
     _validar_cuadre_utilidad(emision['resultado'])
+    total_cols = st.columns(3)
+    for target, label, categories in (
+        (total_cols[0], "Total activos", ("activo_corriente", "activo_no_corriente")),
+        (total_cols[1], "Total pasivos", ("pasivo_corriente", "pasivo_no_corriente")),
+        (total_cols[2], "Total patrimonio", ("patrimonio",)),
+    ):
+        total = presentacion[presentacion["categoria"].isin(categories)]["monto_total"].sum()
+        target.metric(label, f"{total:,.2f}")
+    st.caption("Se muestran todas las clasificaciones del catálogo. Cero indica que no hay importes asignados; no acredita por sí solo la integridad de la extracción.")
     if emision['definitivo']:
         st.success('Controles de emisión aprobados para este reporte.')
     else:
@@ -3598,12 +3718,12 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
     }
 
     for cat in orden_cat:
-        sub = agrupado[agrupado['categoria'] == cat]
+        sub = presentacion[presentacion['categoria'] == cat]
         if sub.empty: continue
         st.subheader(LABELS_CAT.get(cat, cat))
         tabla = sub[['codigo_clasificado', 'nombre_estandar', 'monto_total', 'num_cuentas']].copy()
         tabla.columns = ['Código', 'Cuenta Estándar', 'Monto Total', '# Cuentas Agrupadas']
-        tabla['Monto Total'] = tabla['Monto Total'].map(lambda x: f"{x:,.0f}")
+        tabla['Monto Total'] = tabla['Monto Total'].map(lambda x: f"{x:,.2f}" if pd.notna(x) else "No disponible")
         st.dataframe(tabla, use_container_width=True, hide_index=True)
         if cat == 'resultado':
             st.caption('Ingresos positivos y gastos negativos. El resultado neto es un cálculo y no se suma nuevamente al detalle.')
@@ -3627,12 +3747,12 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
     import io
     from openpyxl.styles import Font, PatternFill
     
-    export_df = agrupado[["codigo_clasificado", "nombre_estandar", "monto_total", "num_cuentas"]].copy()
+    export_df = presentacion[["codigo_clasificado", "nombre_estandar", "monto_total", "num_cuentas"]].copy()
     meta = st.session_state.get('metadata_files', {}).get(archivo_nombre)
     unidad = (getattr(meta, 'moneda', None) or 'unidad original')
     columna_monto = f'Monto Total ({unidad})'
     export_df.columns = ["Código", "Cuenta Estándar", columna_monto, "# Cuentas Agrupadas"]
-    export_df['Tipo de fila'] = agrupado['codigo_clasificado'].map(
+    export_df['Tipo de fila'] = presentacion['codigo_clasificado'].map(
         lambda c: 'Calculado, no sumar al detalle' if catalogo.get(c, {}).get('clasificable') is False else 'Cuenta'
     )
     
@@ -3752,6 +3872,17 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
         ws.column_dimensions["H"].width = 20
         ws.column_dimensions["I"].width = 22
         ws.column_dimensions["J"].width = 12
+        processed_at = st.session_state.setdefault("processed_at", {}).setdefault(
+            archivo_nombre, datetime.now().astimezone().isoformat(),
+        )
+        add_report_sheets(
+            writer.book, presentacion, formulas_reporte,
+            start_row=FILA_INICIO_BALANCE, unit=unidad, meta=meta,
+            processed_at=processed_at, source_name=archivo_nombre,
+            pages=st.session_state.get("document_pages", {}).get(archivo_nombre),
+            definitive=emision["definitivo"], reasons=emision["motivos"],
+            tolerance=diagnostico["tolerancia"],
+        )
 
     buf.seek(0)
     

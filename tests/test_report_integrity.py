@@ -250,7 +250,7 @@ def test_reporte_real_ui_y_excel(mal, monkeypatch):
     assert ('BORRADOR' in wb['Balance Normalizado']['F1'].value) is mal
     assert wb['Balance Normalizado']['C7'].value == 'Monto Total ($)'
     assert 'Control de emisión' in wb.sheetnames
-    rows = list(wb['Balance Normalizado'].iter_rows(min_row=8, max_row=18, values_only=True))
+    rows = list(wb['Balance Normalizado'].iter_rows(min_row=8, max_row=7+len(catalogo_local()), values_only=True))
     gastos = next(row for row in rows if row[0] == 'ER.04')
     assert gastos[2] == (-37999483 if mal else -16376428)
     assert not any(m.label == 'Subtotal' and m.value == '52,613,358' for m in at.metric)

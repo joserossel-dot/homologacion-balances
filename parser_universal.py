@@ -297,6 +297,19 @@ def _extraer_tabla_balance_por_coordenadas(
     if not header_words and not column_centers:
         return [], None
 
+    if not header_words and column_centers:
+        # No heredar una tabla de ocho columnas al comenzar otro estado de
+        # una sola columna (p. ej. balance tributario seguido del clasificado).
+        numeric_counts = []
+        for group in grupos:
+            if any(re.search(r"[A-Za-z]", str(w["text"])) for w in group):
+                numeric_counts.append(sum(
+                    bool(PATRON_MONTOS.fullmatch(normalizar_token_ocr(str(w["text"]))))
+                    for w in group
+                ))
+        if sum(1 <= n <= 3 for n in numeric_counts) >= 5 and not any(n >= 6 for n in numeric_counts):
+            return [], None
+
     if header_words:
         ordered = [detected["nombre"]] + [detected[key] for key in RAW_MONETARY_COLUMNS]
         centers = [
@@ -317,6 +330,19 @@ def _extraer_tabla_balance_por_coordenadas(
             continue
         text_words: list[dict] = []
         amount_cells: list[list[dict]] = [[] for _ in range(8)]
+        # Cuando están presentes los ocho importes completos, sus posiciones
+        # distinguen los números de una glosa ("BANCOESTADO 1", "Art. 42").
+        ordered_group = sorted(grupo, key=lambda w: float(w["x0"]))
+        tail = ordered_group[-8:]
+        full_amount_tail = (
+            len(ordered_group) > 8
+            and all(PATRON_MONTOS.fullmatch(normalizar_token_ocr(str(w["text"])))
+                    for w in tail)
+            and all(min(range(8), key=lambda j: abs(
+                (float(w["x0"]) + float(w["x1"])) / 2 - amount_centers[j]
+            )) == i for i, w in enumerate(tail))
+        )
+        tail_boundary = float(tail[0]["x0"]) if full_amount_tail else text_boundary
         for word in grupo:
             token = str(word["text"]).strip()
             xmid = (float(word["x0"]) + float(word["x1"])) / 2
@@ -333,7 +359,7 @@ def _extraer_tabla_balance_por_coordenadas(
             )
             if es_cero_en_celda:
                 es_monto = True
-            if not es_monto or float(word["x1"]) < text_boundary:
+            if not es_monto or float(word["x1"]) < tail_boundary:
                 text_words.append(word)
                 continue
             nearest = min(
@@ -2396,6 +2422,53 @@ def parsear_linea(
     )
 
 
+def marcar_subtotales_jerarquicos(cuentas: list[CuentaRaw]) -> int:
+    """Reconoce padres por prefijo y sumas de descendientes, sin alterar montos."""
+    def code(c):
+        match = re.match(r"^(\d+)\s*-\s*\D", c.nombre)
+        return re.sub(r"[.\-]", "", c.codigo) if c.codigo else (match[1] if match else "")
+
+    codes = [code(c) for c in cuentas]
+    marked = 0
+    # De abajo hacia arriba: los padres internos no se vuelven a sumar.
+    for i in range(len(cuentas) - 1, -1, -1):
+        parent = cuentas[i]
+        prefix = codes[i]
+        if parent.es_total or not prefix or not parent.montos_columnas:
+            continue
+        children = []
+        for j in range(i + 1, len(cuentas)):
+            child_code = codes[j]
+            if not child_code or not child_code.startswith(prefix) or len(child_code) <= len(prefix):
+                break
+            if not cuentas[j].es_total:
+                children.append(cuentas[j])
+        if not children or any(not c.montos_columnas for c in children):
+            continue
+        sums = {k: sum(c.montos_columnas.get(k, 0) for c in children) for k in RAW_MONETARY_COLUMNS}
+        values = parent.montos_columnas
+        if not any(values.values()):
+            continue
+        # Los grupos pueden incluir movimientos de cuentas saldadas omitidas
+        # del detalle. Sólo aceptar ese excedente si es igual en Debe/Haber,
+        # no negativo y ambos saldos netos reproducen los descendientes.
+        extra_debe = values.get("debitos", 0) - sums["debitos"]
+        extra_haber = values.get("creditos", 0) - sums["creditos"]
+        checks = [
+            extra_debe - extra_haber,
+            values.get("saldo_deudor", 0) - values.get("saldo_acreedor", 0)
+            - sums["saldo_deudor"] + sums["saldo_acreedor"],
+            values.get("activo", 0) - values.get("pasivo", 0)
+            + values.get("perdida", 0) - values.get("ganancia", 0)
+            - sums["activo"] + sums["pasivo"] - sums["perdida"] + sums["ganancia"],
+        ]
+        if min(extra_debe, extra_haber) >= -0.01 and all(abs(x) <= 0.01 for x in checks):
+            parent.es_total = True
+            parent.columnas_derivadas = [*parent.columnas_derivadas, "subtotal_jerarquico"]
+            marked += 1
+    return marked
+
+
 def _error_identidades_cuenta(cuenta: CuentaRaw) -> float:
     values = cuenta.montos_columnas
     if set(values) != set(RAW_MONETARY_COLUMNS):
@@ -2908,6 +2981,12 @@ class ParserPDF:
                     cuentas.append(c)
 
         cuentas, cuentas_partidas = fusionar_cuentas_partidas(cuentas)
+        jerarquicos = marcar_subtotales_jerarquicos(cuentas)
+        if jerarquicos:
+            advertencias.append(
+                f"Se reconocieron {jerarquicos} subtotales jerárquicos por código y "
+                "sumas de sus cuentas. Se conservan como controles, sin duplicar el detalle."
+            )
         if cuentas_partidas:
             advertencias.append(
                 f"Se reconstruyeron {cuentas_partidas} cuentas partidas entre "
@@ -3067,8 +3146,8 @@ class ParserPDF:
                                 page, coordinate_centers,
                             )
                         )
+                        coordinate_centers = detected_centers
                         if tabla_coordenadas:
-                            coordinate_centers = detected_centers
                             self._extraction_method = "coordinates_8_amounts"
                             lineas.extend(tabla_coordenadas)
                         else:
