@@ -16,6 +16,7 @@ Pipeline:
 import csv
 import io
 import logging
+import math
 import re
 import shutil
 import subprocess
@@ -466,6 +467,9 @@ class CertificacionExtraccion:
     resultado_ejercicio: Optional[float] = None
     tipo_resultado: Optional[str] = None
     columnas_total_reconstruidas: list[str] = field(default_factory=list)
+    # Independiente del estado de certificación de las ocho columnas.
+    columnas_finales_validadas: bool = False
+    observaciones_auxiliares: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -927,6 +931,82 @@ def verificar_cuadre_balance(cuentas: list[CuentaRaw]) -> tuple[bool, dict, list
     return cuadra, totales_calculados, alertas
 
 
+def _validar_columnas_finales(
+    cuentas, detalle, subtotal, calculados, finales, puentes, tolerancia,
+) -> bool:
+    """Valida importes homologables sin reescribir movimientos ni saldos.
+
+    No basta la igualdad global: cada fila necesita respaldo en movimiento o
+    saldo; no se admiten filas monetarias omitidas, partidas en varios destinos
+    ni discrepancias en los controles finales impresos.
+    """
+    columnas = RAW_MONETARY_COLUMNS[4:]
+    if not detalle:
+        return False
+    incluidos = {id(c) for c in detalle}
+    for c in cuentas:
+        if not c.es_total and id(c) not in incluidos and (
+            c.codigo or (c.monto is not None and c.monto != 0)
+            or any(c.montos_columnas.values())
+        ):
+            return False
+    if not all(
+        math.isfinite(float(values.get(col, 0)))
+        for values in (subtotal, calculados)
+        for col in columnas
+    ):
+        return False
+    if any(abs(calculados[col] - subtotal[col]) > tolerancia for col in columnas):
+        return False
+    resultado = subtotal["activo"] - subtotal["pasivo"]
+    if abs(resultado - (subtotal["ganancia"] - subtotal["perdida"])) > tolerancia:
+        return False
+    for c in detalle:
+        v = c.montos_columnas
+        if not all(math.isfinite(float(v[col])) for col in RAW_MONETARY_COLUMNS):
+            return False
+        pobladas = [col for col in columnas if v[col] != 0]
+        if len(pobladas) > 1:
+            return False
+        if pobladas and c.origen_columna.value != pobladas[0]:
+            return False
+        derivadas = set(c.columnas_derivadas)
+        if derivadas.intersection(columnas):
+            return False
+        importe = v[pobladas[0]] if pobladas else 0
+        if c.monto is None or not math.isfinite(c.monto) or abs(c.monto - importe) > tolerancia:
+            return False
+        neto_final = v["activo"] + v["perdida"] - v["pasivo"] - v["ganancia"]
+        respaldo_movimiento = (
+            not derivadas.intersection({"debitos", "creditos"})
+            and abs(v["debitos"] - v["creditos"] - neto_final) <= tolerancia
+        )
+        respaldo_saldo = (
+            not derivadas.intersection({"saldo_deudor", "saldo_acreedor"})
+            and abs(v["saldo_deudor"] - v["saldo_acreedor"] - neto_final) <= tolerancia
+        )
+        if not (respaldo_movimiento or respaldo_saldo):
+            return False
+    puente_esperado = dict.fromkeys(columnas, 0.0)
+    for col in (("pasivo", "perdida") if resultado >= 0 else ("activo", "ganancia")):
+        puente_esperado[col] = abs(resultado)
+    if puentes:
+        if any(
+            not math.isfinite(float(puentes[-1].montos_columnas.get(col, 0)))
+            or abs(puentes[-1].montos_columnas.get(col, 0) - puente_esperado[col]) > tolerancia
+            for col in columnas
+        ):
+            return False
+    if finales:
+        if any(
+            not math.isfinite(float(finales[-1].montos_columnas[col]))
+            or abs(finales[-1].montos_columnas[col] - subtotal[col] - puente_esperado[col]) > tolerancia
+            for col in columnas
+        ):
+            return False
+    return True
+
+
 def certificar_extraccion_columnas(
     cuentas: list[CuentaRaw], metodo: str = "",
     tolerancia_absoluta: float = 10.0,
@@ -1208,6 +1288,37 @@ def certificar_extraccion_columnas(
             + (" y el subtotal fue completado" if total_derivado else "")
             + "; requieren revisión humana."
         )
+    columnas_finales_validadas = (
+        not set(subtotal_referencia.columnas_derivadas).intersection(RAW_MONETARY_COLUMNS[4:])
+        and _validar_columnas_finales(
+            cuentas, filas_detalle, total_impreso, calculados, finales,
+            puentes_resultado, tolerancia_absoluta,
+        )
+    )
+    observaciones_auxiliares = []
+    if columnas_finales_validadas:
+        for cuenta in filas_detalle:
+            if cuenta.linea not in filas_inconsistentes:
+                continue
+            v = cuenta.montos_columnas
+            neto = v["activo"] + v["perdida"] - v["pasivo"] - v["ganancia"]
+            movimiento_respalda = (
+                not set(cuenta.columnas_derivadas).intersection({"debitos", "creditos"})
+                and abs(v["debitos"] - v["creditos"] - neto) <= tolerancia_absoluta
+            )
+            observaciones_auxiliares.append({
+                "Fila": cuenta.linea,
+                "Cuenta": cuenta.nombre,
+                "Revisar": "Saldo deudor / Saldo acreedor" if movimiento_respalda else "Debe / Haber",
+                "Detalle": (
+                    f"Saldo deudor leído: {v['saldo_deudor']:,.0f}; saldo acreedor leído: "
+                    f"{v['saldo_acreedor']:,.0f}. El movimiento respalda el importe final "
+                    f"de {cuenta.monto:,.0f}; no cambie la columna de clasificación."
+                    if movimiento_respalda else
+                    f"Debe leído: {v['debitos']:,.0f}; Haber leído: {v['creditos']:,.0f}. "
+                    "El saldo respalda el importe final; no cambie la columna de clasificación."
+                ),
+            })
     return CertificacionExtraccion(
         estado="fallida" if failed else (
             "parcial" if filas_derivadas or total_derivado else "certificada"
@@ -1223,6 +1334,8 @@ def certificar_extraccion_columnas(
         resultado_ejercicio=resultado_ejercicio,
         tipo_resultado=tipo_resultado,
         columnas_total_reconstruidas=columnas_total_reconstruidas,
+        columnas_finales_validadas=columnas_finales_validadas,
+        observaciones_auxiliares=observaciones_auxiliares,
     )
 
 

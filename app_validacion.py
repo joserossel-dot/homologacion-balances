@@ -1035,6 +1035,8 @@ def main():
         st.session_state.extraction_pending = {}
     if 'extraction_resolved' not in st.session_state:
         st.session_state.extraction_resolved = {}
+    if 'extraction_certifications' not in st.session_state:
+        st.session_state.extraction_certifications = {}
     if 'correcciones' not in st.session_state:
         st.session_state.correcciones = []
 
@@ -1078,6 +1080,7 @@ def main():
         st.session_state.metadata_files = {}
         st.session_state.extraction_pending = {}
         st.session_state.extraction_resolved = {}
+        st.session_state.extraction_certifications = {}
         st.session_state.metadata_confirmada = False
         _mostrar_resumen_catalogo(catalogo)
         return
@@ -1209,7 +1212,7 @@ def main():
         if k not in nombres_subidos:
             st.session_state.resultados.pop(k, None)
             st.session_state.metadata_files.pop(k, None)
-    for state_key in ('extraction_pending', 'extraction_resolved'):
+    for state_key in ('extraction_pending', 'extraction_resolved', 'extraction_certifications'):
         state = st.session_state.get(state_key, {})
         for k in list(state.keys()):
             if k not in nombres_subidos:
@@ -1584,6 +1587,10 @@ def main():
         c3.markdown(f"**Giro** \n{giro_empresa or '—'}")
         c4.markdown(f"**Archivo Activo** \n`{archivo_activo_name}`")
 
+    _mostrar_advertencias_auxiliares(
+        st.session_state.extraction_certifications.get(archivo_activo_name)
+    )
+
     # Sprint 31 — Información del documento (análisis documental, solo lectura)
     _doc_ctx = st.session_state.document_intel.get(archivo_activo_name)
     if _doc_ctx is not None:
@@ -1948,13 +1955,22 @@ def _diagnosticar_filas_extraccion(
         }
         populated = [label for label, value in classification_values.items() if value != 0]
         saldo_total = values["saldo_deudor"] + values["saldo_acreedor"]
-        if abs(classification_error) > tolerancia and len(populated) == 1:
+        neto_final = values["activo"] + values["perdida"] - values["pasivo"] - values["ganancia"]
+        movimiento_respalda_final = (
+            len(populated) == 1
+            and abs(values["debitos"] - values["creditos"] - neto_final) <= tolerancia
+        )
+        if abs(classification_error) > tolerancia and len(populated) == 1 and not movimiento_respalda_final:
             label = populated[0]
             suggested.append(
                 f"{label}: {classification_values[label]:,.0f} → {saldo_total:,.0f}"
             )
 
-        if is_inconsistent and abs(movement_error) > tolerancia:
+        if is_inconsistent and movimiento_respalda_final and abs(movement_error) > tolerancia:
+            reason = "El movimiento respalda el importe final, pero el saldo intermedio difiere"
+            action = "Revise Saldo deudor y Saldo acreedor; no cambie el importe final respaldado por Debe menos Haber."
+            priority = 1
+        elif is_inconsistent and abs(movement_error) > tolerancia:
             if abs(classification_error) > tolerancia:
                 reason = "No coinciden movimiento, saldo y columna de clasificación"
                 action = (
@@ -2001,6 +2017,72 @@ def _diagnosticar_filas_extraccion(
             "error_clasificacion": round(classification_error, 2),
         }
     return diagnostics
+
+
+def _permite_clasificar_extraccion(certification) -> bool:
+    return bool(certification) and (
+        certification.estado in {"certificada", "parcial"}
+        or bool(getattr(certification, "columnas_finales_validadas", False))
+    )
+
+
+def _tabla_control_auxiliar(certification) -> pd.DataFrame:
+    labels = ("Debe", "Haber", "Saldo deudor", "Saldo acreedor")
+    return pd.DataFrame([
+        {
+            "Columna": label,
+            "Suma de cuentas": certification.totales_calculados.get(col, 0),
+            "Subtotal impreso": certification.totales_impresos.get(col, 0),
+            "Diferencia": certification.diferencias.get(col, 0),
+        }
+        for col, label in zip(RAW_MONETARY_COLUMNS[:4], labels)
+        if abs(certification.diferencias.get(col, 0)) > 10
+    ])
+
+
+def _mostrar_advertencias_auxiliares(certification) -> None:
+    if not (
+        getattr(certification, "columnas_finales_validadas", False)
+        and certification.estado == "fallida"
+    ):
+        return
+    st.warning(
+        "Clasificación habilitada: Activo, Pasivo, Pérdidas y Ganancias coinciden "
+        "con los controles impresos y cuadran. Quedan diferencias en movimientos "
+        "o saldos intermedios; no se certifican las ocho columnas. No cambie los "
+        "importes finales ni excluya los totales para resolver esas diferencias."
+    )
+    with st.expander("Detalle de advertencias de movimientos y saldos"):
+        tabla = _tabla_control_auxiliar(certification)
+        if not tabla.empty:
+            st.dataframe(tabla, hide_index=True, use_container_width=True)
+        if certification.observaciones_auxiliares:
+            st.dataframe(pd.DataFrame(certification.observaciones_auxiliares), hide_index=True, use_container_width=True)
+        st.caption("Las cifras originales se conservan. Estas observaciones también se incluyen en el Excel exportado.")
+
+
+def _exportar_advertencias_auxiliares(writer, certification) -> None:
+    if not (
+        getattr(certification, "columnas_finales_validadas", False)
+        and certification.estado == "fallida"
+    ):
+        return
+    sheet = "Control de extracción"
+    resumen = pd.DataFrame([
+        {"Control": "Importes para homologación", "Estado": "Cuatro columnas finales validadas contra controles impresos"},
+        {"Control": "Certificación de ocho columnas", "Estado": "No certificada: diferencias en movimientos o saldos"},
+        {"Control": "Tratamiento", "Estado": "Cifras originales conservadas; no se aplicaron ajustes automáticos"},
+    ])
+    resumen.to_excel(writer, sheet_name=sheet, index=False)
+    tabla = _tabla_control_auxiliar(certification)
+    startrow = len(resumen) + 3
+    if not tabla.empty:
+        tabla.to_excel(writer, sheet_name=sheet, index=False, startrow=startrow)
+        startrow += len(tabla) + 3
+    if certification.observaciones_auxiliares:
+        pd.DataFrame(certification.observaciones_auxiliares).to_excel(
+            writer, sheet_name=sheet, index=False, startrow=startrow,
+        )
 
 
 def _mostrar_etapa_correccion_extraccion(archivo, filename: str) -> None:
@@ -2264,14 +2346,15 @@ def _mostrar_correccion_extraccion(filename: str) -> None:
         )
         resultado.cuentas = corrected
         resultado.certificacion_extraccion = certification
+        st.session_state.setdefault("extraction_certifications", {})[filename] = certification
         revisions[filename] = revision + 1
-        if certification.estado not in {"certificada", "parcial"}:
+        if not _permite_clasificar_extraccion(certification):
             st.rerun()
         else:
             st.session_state.extraction_resolved[filename] = corrected
             st.session_state.extraction_pending.pop(filename, None)
             st.session_state.resultados.pop(filename, None)
-            st.success("Extracción validada. Iniciando clasificación…")
+            st.success("Importes para homologación validados. Iniciando clasificación.")
             st.rerun()
 
 
@@ -2300,7 +2383,8 @@ def _extraer_cuentas(archivo) -> tuple[list[CuentaRaw], object]:
             )
             return [], document_context
         certificacion = getattr(resultado, 'certificacion_extraccion', None)
-        if certificacion is not None and certificacion.estado == 'fallida':
+        st.session_state.setdefault("extraction_certifications", {})[archivo.name] = certificacion
+        if certificacion is not None and certificacion.estado == 'fallida' and not _permite_clasificar_extraccion(certificacion):
             st.error(
                 "La extracción no reproduce los totales impresos del balance. "
                 "El documento no será homologado hasta corregir filas o columnas."
@@ -2371,7 +2455,8 @@ def _extraer_cuentas(archivo) -> tuple[list[CuentaRaw], object]:
         certificacion = certificar_extraccion_columnas(
             cuentas, metodo="excel_8_columns",
         )
-        if certificacion.estado == "fallida":
+        st.session_state.setdefault("extraction_certifications", {})[archivo.name] = certificacion
+        if certificacion.estado == "fallida" and not _permite_clasificar_extraccion(certificacion):
             st.error(
                 "Las ocho columnas del Excel no reproducen sus controles "
                 "impresos. La homologación queda pausada hasta revisar las filas."
@@ -2398,7 +2483,7 @@ def _extraer_cuentas(archivo) -> tuple[list[CuentaRaw], object]:
                 "El Excel cuadra en su ecuación final, pero requiere revisión "
                 "humana de sus filas antes de exportar."
             )
-        else:
+        elif certificacion.estado == "no_evaluable":
             st.info(
                 "El Excel no contiene un subtotal independiente de ocho columnas; "
                 "su extracción no puede certificarse automáticamente."
@@ -3411,6 +3496,9 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
         FILA_INICIO_BALANCE = 7
         export_df.to_excel(writer, index=False, sheet_name="Balance Normalizado", startrow=FILA_INICIO_BALANCE - 1)
+        _exportar_advertencias_auxiliares(
+            writer, st.session_state.get("extraction_certifications", {}).get(archivo_nombre),
+        )
         ws = writer.sheets["Balance Normalizado"]
 
         meta = st.session_state.get("metadata_files", {}).get(archivo_nombre)
