@@ -23,6 +23,7 @@ Funcionalidad:
 import hashlib
 import calendar
 import json
+import math
 import os
 import re
 import time
@@ -63,6 +64,9 @@ from extractor_metadata import extraer_metadata, MetadataEmpresa
 from account_qualification import qualify_cuentas as _safe_qualify_cuentas, \
     safe_mode_enabled as _safe_mode_enabled
 from persistence.neon_store import NeonKnowledgeStore
+from reporting_integrity import (
+    resultado_compatible, importe_resultado_homologado, conciliar_resultados,
+)
 
 
 MESES_SELECCION = [
@@ -532,9 +536,14 @@ def _es_partida_patrimonial(nombre: str | None) -> bool:
     return is_patrimonial_reserve_name(nombre) or is_accumulated_result_name(nombre)
 
 
-def _monto_presentacion(codigo: str | None, monto, nombre: str | None = None) -> float:
+def _monto_presentacion(codigo: str | None, monto, nombre: str | None = None,
+                        origen=None, catalogo=None) -> float:
     """Aplica el signo contable sin alterar el importe extraído auditable."""
     valor = 0.0 if pd.isna(monto) else float(monto)
+    if str(codigo or '').startswith('ER.') and origen is not None:
+        resultado = importe_resultado_homologado(codigo, valor, origen, catalogo)
+        if resultado is not None:
+            return resultado
     if str(codigo or '') == 'PAT.10':
         return -abs(valor)
     if str(codigo or '').startswith('ANC') and _es_contra_activo(nombre):
@@ -562,9 +571,14 @@ def _resultado_periodo(clasificadas: pd.DataFrame) -> float | None:
 
 
 def _codigo_compatible_con_origen(
-        codigo: str | None, origen_columna, monto, nombre: str | None = None) -> bool:
+        codigo: str | None, origen_columna, monto, nombre: str | None = None,
+        catalogo=None) -> bool:
     """Impide sugerencias que contradigan la columna efectiva del balance."""
     origen_efectivo = _origen_efectivo(origen_columna, monto, nombre)
+    if not resultado_compatible(codigo, origen_efectivo, catalogo):
+        return False
+    if str(codigo or '').startswith('ER.') and origen_efectivo in {'ganancia', 'perdida'}:
+        return True
     # Una depreciación/amortización acumulada puede venir físicamente en la
     # columna Pasivo por su saldo acreedor, pero contablemente es contra-activo
     # y debe poder homologarse dentro del activo fijo (ANC).
@@ -612,7 +626,7 @@ def _alternativas_revision(
         if not codigo or codigo not in catalogo:
             return
         if not _codigo_compatible_con_origen(
-            codigo, origen_columna, monto, nombre,
+            codigo, origen_columna, monto, nombre, catalogo,
         ):
             return
         item = {
@@ -2766,25 +2780,54 @@ def _tab_resumen(df: pd.DataFrame):
     st.dataframe(dist_df, use_container_width=True, hide_index=True)
 
 
+def _registrar_decision(archivo_nombre, idx, row, codigo, motivo):
+    """Historial de esta sesión; Neon conserva además la validación y sugerencia previa."""
+    st.session_state.setdefault('historial_decisiones', []).append({
+        'Archivo': archivo_nombre, 'Fila': str(idx),
+        'Cuenta': row.get('nombre_original', ''),
+        'Clasificación anterior': row.get('codigo_clasificado', ''),
+        'Clasificación nueva': codigo, 'Método anterior': row.get('metodo', ''),
+        'Motivo': motivo, 'Fecha': datetime.now().isoformat(timespec='seconds'),
+    })
+
+
+def _solicitar_revision_completa(archivo_nombre):
+    doc_key = hashlib.sha1(archivo_nombre.encode('utf-8')).hexdigest()[:10]
+    st.session_state[f'revision_vista_{doc_key}'] = 'Todas (incluye confirmadas y excluidas)'
+    st.session_state[f'revision_busqueda_{doc_key}'] = ''
+    st.session_state['vista_trabajo_solicitada'] = '🔍 Cola de Revisión'
+
+
 @st.fragment
 def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, archivo_nombre: str):
-    pendientes = _pendientes_revision(df)
+    doc_key = hashlib.sha1(archivo_nombre.encode('utf-8')).hexdigest()[:10]
+    vista = st.radio(
+        'Cuentas a revisar', ['Pendientes', 'Todas (incluye confirmadas y excluidas)'],
+        horizontal=True, key=f'revision_vista_{doc_key}',
+    )
+    busqueda = st.text_input('Buscar cuenta o código', key=f'revision_busqueda_{doc_key}')
+    pendientes = (_pendientes_revision(df) if vista == 'Pendientes'
+                  else _con_saldo_relevante(df[~df['es_total']]))
+    if busqueda.strip() and not pendientes.empty:
+        texto = pendientes[['nombre_original', 'codigo_original', 'codigo_clasificado']].fillna('').astype(str).agg(' '.join, axis=1)
+        pendientes = pendientes[texto.str.contains(busqueda.strip(), case=False, regex=False)]
+    st.caption('Puede cambiar una decisión confirmada o recuperar una cuenta excluida. Elija la nueva clasificación y pulse Confirmar; no necesita volver a cargar el documento.')
 
     if pendientes.empty:
-        st.success("✅ No hay cuentas pendientes de revisión.")
+        st.info("No hay cuentas en esta vista. Seleccione Todas para revisar decisiones anteriores o cambie la búsqueda.")
         return
 
     # Catálogo ordenado por grupos de presentación y sin cuentas no
     # seleccionables (cálculo / TOTAL). Ver catalog_selection.py.
     opciones_codigo = [''] + opciones_clasificacion(catalogo) + ['➕ NUEVA CATEGORÍA', '🚫 NO INCLUIR']
 
-    doc_key = hashlib.sha1(archivo_nombre.encode('utf-8')).hexdigest()[:10]
     checkbox_prefix = f"chk_{doc_key}"
     if st.session_state.get('lote_archivo') != archivo_nombre:
         st.session_state.lote_archivo = archivo_nombre
         st.session_state.lote_seleccion = set()
     elif 'lote_seleccion' not in st.session_state:
         st.session_state.lote_seleccion = set()
+    st.session_state.lote_seleccion.intersection_update(pendientes.index)
 
     n_sel = len(st.session_state.lote_seleccion)
     with st.container(border=True):
@@ -2813,6 +2856,7 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                         df.at[idx_lote, 'origen_columna'],
                         df.at[idx_lote, 'monto'],
                         df.at[idx_lote, 'nombre_original'],
+                        catalogo,
                     )
                 ]
                 if incompatibles:
@@ -2825,6 +2869,7 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                 fallback_json_lote = False
                 validaciones_lote = []
                 for idx_lote in list(st.session_state.lote_seleccion):
+                    _registrar_decision(archivo_nombre, idx_lote, df.loc[idx_lote].copy(), codigo_lote, 'Confirmación en lote')
                     nombre_orig = df.at[idx_lote, 'nombre_original']
                     codigo_sugerido = df.at[idx_lote, 'codigo_clasificado'] or None
                     metodo_sugerido = df.at[idx_lote, 'metodo']
@@ -2850,7 +2895,8 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                         entrada = {'cuenta_original': nombre_orig, 'codigo_estandar': codigo_lote, 'fuente': 'validacion_humana_lote'}
                         st.session_state.diccionario.append(entrada)
                         st.session_state.correcciones.append(entrada)
-                    propagar_clasificacion_resultados(nombre_orig, codigo_lote, 'validacion_humana_lote_propagada')
+                    if "diccionario" in alcance_lote:
+                        propagar_clasificacion_resultados(nombre_orig, codigo_lote, 'validacion_humana_lote_propagada')
                     procesados += 1
                 persistido = _persistir_validaciones_lote(validaciones_lote)
                 fallback_json_lote = not persistido
@@ -2899,7 +2945,7 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
     visible = pendientes.iloc[start:start + page_size]
     st.caption(
         f"Mostrando {start + 1}–{min(start + page_size, len(pendientes))} "
-        f"de {len(pendientes)} pendientes · página {page} de {total_pages}."
+        f"de {len(pendientes)} cuentas · página {page} de {total_pages}."
     )
 
     for idx, row in visible.iterrows():
@@ -2938,6 +2984,7 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                 )
                 st.caption("Columna de origen del balance")
                 st.markdown(f"**{_nombre_mostrar(row)}**")
+                st.caption(f"Decisión actual: {row.get('codigo_clasificado') or 'Sin clasificar'} · {row.get('metodo', '')}")
                 monto_val = row['monto']
                 if pd.notna(monto_val):
                     color = 'blue' if monto_val > 0 else ('red' if monto_val < 0 else 'gray')
@@ -2964,7 +3011,8 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                     st.divider()
                     nuevo_nombre = st.text_input("Nombre", value=_nombre_mostrar(row), key=f"ed_nombre_{doc_key}_{idx}")
                     opciones_nat = ['ACTIVO', 'PASIVO', 'PERDIDA', 'GANANCIA']
-                    idx_nat = opciones_nat.index(col_actual) if col_actual in opciones_nat else 0
+                    columna_fisica = str(col_extraida).upper()
+                    idx_nat = opciones_nat.index(columna_fisica) if columna_fisica in opciones_nat else 0
                     nueva_nat = st.selectbox("Columna contable", opciones_nat, index=idx_nat, key=f"ed_nat_{doc_key}_{idx}")
                     monto_inicial = row['monto'] if pd.notna(row['monto']) else 0.0
                     nuevo_monto = st.number_input("Monto", value=float(monto_inicial), format="%.0f", key=f"ed_monto_{doc_key}_{idx}")
@@ -2979,6 +3027,13 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                         if col_changed or monto_changed:
                             sel_clave = st.session_state.get(f"sel_{doc_key}_{idx}", '')
                             codigo_final = sel_clave if sel_clave not in ('', '➕ NUEVA CATEGORÍA', '🚫 NO INCLUIR') else ''
+                            codigo_final = codigo_final or str(row.get('codigo_clasificado') or '')
+                            if codigo_final and not _codigo_compatible_con_origen(
+                                codigo_final, nueva_nat, nuevo_monto, nuevo_nombre, catalogo,
+                            ):
+                                st.error('La corrección contradice la clasificación actual. Seleccione una categoría compatible antes de guardarla.')
+                                st.stop()
+                            _registrar_decision(archivo_nombre, idx, row.copy(), codigo_final, 'Corrección de datos de la cuenta')
                             df_mod.at[idx, 'nombre_original'] = nuevo_nombre
                             df_mod.at[idx, 'nombre_revision_usuario'] = ''
                             df_mod.at[idx, 'origen_columna'] = nueva_nat.lower()
@@ -2991,12 +3046,12 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                                 df_mod.at[idx, 'codigo_clasificado'] = codigo_final
                             df_mod.at[idx, 'metodo'] = 'manual_revision'
                             df_mod.at[idx, 'confianza'] = 1.0
-                            df_mod.at[idx, 'requiere_revision'] = False
+                            df_mod.at[idx, 'requiere_revision'] = True
                             df_mod.at[idx, 'tipo_revision'] = 'correccion_extraccion'
                             df_mod.at[idx, 'origen'] = 'Manual'
                             df_mod.at[idx, 'regla'] = 'manual_revision'
                             df_mod.at[idx, 'evidencia'] = 'Corrección manual de extracción'
-                            propagar_clasificacion_resultados(nuevo_nombre, codigo_final or df_mod.at[idx, 'codigo_clasificado'], 'manual_revision_propagada')
+                            # Una corrección de extracción es local y debe confirmarse.
                             st.toast(f"'{nuevo_nombre[:35]}' corregida ✅", icon="✅")
                         else:
                             df_mod.at[idx, 'nombre_revision_usuario'] = nuevo_nombre
@@ -3017,7 +3072,7 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                 if (not mostrar_todas and sugerido
                         and not _codigo_compatible_con_origen(
                             sugerido, row.get('origen_columna'), row.get('monto'),
-                            _nombre_mostrar(row))):
+                            _nombre_mostrar(row), catalogo)):
                     sugerido = ''
                 st.write(f"Sugerido: **{sugerido or '(ninguno)'}**")
 
@@ -3070,7 +3125,7 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                         if codigo in ('➕ NUEVA CATEGORÍA', '🚫 NO INCLUIR')
                         or _codigo_compatible_con_origen(
                             codigo, row.get('origen_columna'), row.get('monto'),
-                            _nombre_mostrar(row))
+                            _nombre_mostrar(row), catalogo)
                     ]
                 default_idx = (opciones_fila.index(sugerido)
                                if sugerido in opciones_fila else 0)
@@ -3102,13 +3157,18 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                          'patrimonio', 'resultado'],
                         key=f"new_cat_{doc_key}_{idx}"
                     )
+                    naturaleza_resultado = st.selectbox(
+                        'Naturaleza de la nueva categoría', ['ganancia', 'perdida'],
+                        key=f'new_naturaleza_{doc_key}_{idx}',
+                    ) if nuevo_cat == 'resultado' else None
 
                 if not es_nueva_cat and seleccion not in ('', '🚫 NO INCLUIR'):
                     alcance = st.radio(
                         "¿Aplicar esta clasificación?",
                         ["Solo para este caso",
                          "Agregar al diccionario (aplica a casos futuros iguales)"],
-                        index=1, key=f"alc_{doc_key}_{idx}", horizontal=True
+                        index=1 if row.get('requiere_revision', False) else 0,
+                        key=f"alc_{doc_key}_{idx}", horizontal=True
                     )
                 else:
                     alcance = "Solo para este caso"
@@ -3129,6 +3189,19 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                                 'es_activo_liquido': False,
                                 'afecta_ebitda': False,
                             }
+                            if naturaleza_resultado:
+                                nueva_entrada['naturaleza'] = 'deudora' if naturaleza_resultado == 'perdida' else 'acreedora'
+                                nueva_entrada['signo_normal'] = -1 if naturaleza_resultado == 'perdida' else 1
+                            candidato = nuevo_codigo.strip().upper()
+                            prefijos = {'activo_corriente': 'AC.', 'activo_no_corriente': 'ANC.',
+                                        'pasivo_corriente': 'PC.', 'pasivo_no_corriente': 'PNC.',
+                                        'patrimonio': 'PAT.', 'resultado': 'ER.'}
+                            if candidato in catalogo or not candidato.startswith(prefijos[nuevo_cat]):
+                                st.error('Use un código nuevo con el prefijo de la categoría seleccionada. No se puede redefinir una categoría existente desde esta cuenta.')
+                                st.stop()
+                            if not _codigo_compatible_con_origen(candidato, row.get('origen_columna'), row.get('monto'), _nombre_mostrar(row), {**catalogo, candidato: nueva_entrada}):
+                                st.error('La nueva categoría contradice la naturaleza de esta cuenta. No fue creada.')
+                                st.stop()
                             catalogo[nuevo_codigo.strip().upper()] = nueva_entrada
                             if not _persistir_catalogo(nueva_entrada):
                                 with open(BASE_DIR / 'catalogo_maestro.json', 'w', encoding='utf-8') as f:
@@ -3139,6 +3212,7 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                             st.error("Debes ingresar código y nombre.")
 
                     elif seleccion == '🚫 NO INCLUIR':
+                        _registrar_decision(archivo_nombre, idx, row.copy(), '__EXCLUIR__', 'Exclusión por analista')
                         st.session_state.resultados[archivo_nombre].at[idx, 'codigo_clasificado'] = '__EXCLUIR__'
                         st.session_state.resultados[archivo_nombre].at[idx, 'metodo'] = 'excluido_analista'
                         st.session_state.resultados[archivo_nombre].at[idx, 'confianza'] = 1.0
@@ -3161,7 +3235,8 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                         if "diccionario" in alcance and not persistido:
                             with open(BASE_DIR / 'diccionario.json', 'w', encoding='utf-8') as f:
                                 json.dump(st.session_state.diccionario, f, ensure_ascii=False, indent=2)
-                        propagar_clasificacion_resultados(row['nombre_original'], '__EXCLUIR__', 'excluido_analista_propagado')
+                        if "diccionario" in alcance:
+                            propagar_clasificacion_resultados(row['nombre_original'], '__EXCLUIR__', 'excluido_analista_propagado')
                         st.session_state.lote_seleccion.discard(idx)
                         st.toast(f"'{_nombre_mostrar(row)[:35]}' excluida", icon="🚫")
                         st.rerun()
@@ -3170,6 +3245,10 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                         codigo_final = seleccion
 
                     if codigo_final:
+                        if not _codigo_compatible_con_origen(codigo_final, row.get('origen_columna'), row.get('monto'), _nombre_mostrar(row), catalogo):
+                            st.error('La categoría contradice la naturaleza contable. No se cambió la cuenta ni se guardó en el diccionario.')
+                            st.stop()
+                        _registrar_decision(archivo_nombre, idx, row.copy(), codigo_final, 'Confirmación individual')
                         st.session_state.resultados[archivo_nombre].at[idx, 'codigo_clasificado'] = codigo_final
                         st.session_state.resultados[archivo_nombre].at[idx, 'metodo'] = 'validacion_humana'
                         st.session_state.resultados[archivo_nombre].at[idx, 'confianza'] = 1.0
@@ -3197,7 +3276,8 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                             st.toast(f"'{_nombre_mostrar(row)[:35]}' → {codigo_final} guardado 📚", icon="✅")
                         else:
                             st.toast(f"'{_nombre_mostrar(row)[:35]}' → {codigo_final} (solo este caso)", icon="✅")
-                        propagar_clasificacion_resultados(row['nombre_original'], codigo_final, 'validacion_humana_propagada')
+                        if "diccionario" in alcance:
+                            propagar_clasificacion_resultados(row['nombre_original'], codigo_final, 'validacion_humana_propagada')
                         st.rerun()
 
 
@@ -3386,7 +3466,48 @@ def _mostrar_control_calidad_operativo(control) -> None:
         )
 
 
+def _control_emision(df, catalogo, diagnostico, quality_control=None):
+    """Control independiente, sin mutar decisiones ni importes del analista."""
+    incidencias = []
+    for idx, row in df[~df['es_total']].iterrows():
+        codigo = str(row.get('codigo_clasificado') or '')
+        monto = pd.to_numeric(row.get('monto'), errors='coerce')
+        motivos = []
+        if pd.isna(monto) or not math.isfinite(float(monto)):
+            motivos.append('Importe ausente o no válido')
+        elif monto == 0:
+            continue
+        if codigo == '__EXCLUIR__':
+            motivos.append('Cuenta con saldo excluida; revise si debe reincorporarse')
+        elif codigo not in catalogo:
+            motivos.append('Sin clasificación válida')
+        elif not _codigo_compatible_con_origen(
+            codigo, row.get('origen_columna'), monto, row.get('nombre_original'), catalogo,
+        ):
+            motivos.append('La categoría contradice la naturaleza efectiva de la cuenta')
+        if row.get('requiere_revision', False):
+            motivos.append('Decisión pendiente de confirmación')
+        if motivos:
+            incidencias.append({
+                'Fila': str(idx), 'Cuenta': row.get('nombre_original', ''),
+                'Clasificación': codigo, 'Columna original': row.get('origen_columna', ''),
+                'Monto': monto, 'Qué corregir': '; '.join(motivos),
+            })
+    resultado = conciliar_resultados(df.to_dict('records'), catalogo)
+    motivos = list(resultado['problemas'])
+    if incidencias:
+        motivos.append(f'{len(incidencias)} cuenta(s) requieren corregir o confirmar su clasificación')
+    if not diagnostico['cuadra']:
+        motivos.append('Activo no coincide con Pasivo más Patrimonio')
+    if quality_control is not None and not quality_control.export_allowed:
+        motivos.extend(quality_control.reasons or ['El control posterior no autoriza la emisión definitiva'])
+    return {'definitivo': not motivos, 'motivos': motivos,
+            'incidencias': pd.DataFrame(incidencias), 'resultado': resultado}
+
+
 def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
+    st.button('Revisar o cambiar clasificaciones', on_click=_solicitar_revision_completa,
+              args=(archivo_nombre,), use_container_width=True)
     clasificadas = df[(df['codigo_clasificado'] != '') & (df['codigo_clasificado'] != '__EXCLUIR__') & (~df['es_total'])].copy()
     clasificadas = _con_saldo_relevante(clasificadas)
     if clasificadas.empty:
@@ -3396,7 +3517,8 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
     clasificadas['monto'] = clasificadas['monto'].fillna(0)
     clasificadas['monto_presentacion'] = clasificadas.apply(
         lambda row: _monto_presentacion(
-            row['codigo_clasificado'], row['monto'], row['nombre_original']
+            row['codigo_clasificado'], row['monto'], row['nombre_original'],
+            row.get('origen_columna'), catalogo,
         ), axis=1,
     )
     agrupado = clasificadas.groupby('codigo_clasificado').agg(
@@ -3406,7 +3528,8 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
     agrupado['nombre_estandar'] = agrupado['codigo_clasificado'].map(lambda c: catalogo.get(c, {}).get('nombre_estandar', c))
     agrupado['categoria'] = agrupado['codigo_clasificado'].map(lambda c: catalogo.get(c, {}).get('categoria', ''))
 
-    resultado_periodo = _resultado_periodo(clasificadas)
+    conciliacion = conciliar_resultados(df.to_dict('records'), catalogo)
+    resultado_periodo = conciliacion['resultado_origen']
     if resultado_periodo is not None:
         derivados = []
         for codigo_resultado in ('ER.11', 'PAT.04'):
@@ -3414,7 +3537,8 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
                 info = catalogo.get(codigo_resultado, {})
                 derivados.append({
                     'codigo_clasificado': codigo_resultado,
-                    'monto_total': resultado_periodo,
+                    'monto_total': (conciliacion['resultado_homologado'] or 0.0)
+                        if codigo_resultado == 'ER.11' else resultado_periodo,
                     'num_cuentas': 0,
                     'nombre_estandar': info.get('nombre_estandar', codigo_resultado),
                     'categoria': info.get('categoria', ''),
@@ -3438,6 +3562,18 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
     )
     st.session_state.setdefault("quality_controls", {})[archivo_nombre] = quality_control
     _mostrar_control_calidad_operativo(quality_control)
+
+    emision = _control_emision(df, catalogo, diagnostico, quality_control)
+    _validar_cuadre_utilidad(emision['resultado'])
+    if emision['definitivo']:
+        st.success('Controles de emisión aprobados para este reporte.')
+    else:
+        st.error('Sólo se permite descargar un BORRADOR. Corrija los motivos antes de emitir el reporte definitivo.')
+        for motivo in emision['motivos']:
+            st.write(motivo)
+        if not emision['incidencias'].empty:
+            st.dataframe(emision['incidencias'], hide_index=True, use_container_width=True)
+        st.caption('Pulse Revisar o cambiar clasificaciones, seleccione Todas y busque la cuenta. Puede modificar decisiones manuales y recuperar cuentas excluidas.')
 
     resultado_periodo_display = resultado_periodo or 0.0
     r1, r2, r3 = st.columns(3)
@@ -3469,7 +3605,10 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
         tabla.columns = ['Código', 'Cuenta Estándar', 'Monto Total', '# Cuentas Agrupadas']
         tabla['Monto Total'] = tabla['Monto Total'].map(lambda x: f"{x:,.0f}")
         st.dataframe(tabla, use_container_width=True, hide_index=True)
-        st.metric(f"Subtotal", f"{sub['monto_total'].sum():,.0f}")
+        if cat == 'resultado':
+            st.caption('Ingresos positivos y gastos negativos. El resultado neto es un cálculo y no se suma nuevamente al detalle.')
+        else:
+            st.metric(f"Subtotal", f"{sub['monto_total'].sum():,.0f}")
         st.divider()
 
     # Ajuste Patrimonio Efectivo
@@ -3489,8 +3628,13 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
     from openpyxl.styles import Font, PatternFill
     
     export_df = agrupado[["codigo_clasificado", "nombre_estandar", "monto_total", "num_cuentas"]].copy()
-    export_df.columns = ["Código", "Cuenta Estándar", "Monto Total (M$)", "# Cuentas Agrupadas"]
-    export_df["Monto Total (M$)"] = export_df["Monto Total (M$)"].round(0).astype(int)
+    meta = st.session_state.get('metadata_files', {}).get(archivo_nombre)
+    unidad = (getattr(meta, 'moneda', None) or 'unidad original')
+    columna_monto = f'Monto Total ({unidad})'
+    export_df.columns = ["Código", "Cuenta Estándar", columna_monto, "# Cuentas Agrupadas"]
+    export_df['Tipo de fila'] = agrupado['codigo_clasificado'].map(
+        lambda c: 'Calculado, no sumar al detalle' if catalogo.get(c, {}).get('clasificable') is False else 'Cuenta'
+    )
     
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
@@ -3500,6 +3644,23 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
             writer, st.session_state.get("extraction_certifications", {}).get(archivo_nombre),
         )
         ws = writer.sheets["Balance Normalizado"]
+        estado_emision = 'DEFINITIVO' if emision['definitivo'] else 'BORRADOR: REQUIERE REVISIÓN'
+        ws['E1'] = 'Estado de emisión'
+        ws['F1'] = estado_emision
+        ws['F1'].font = Font(bold=True, color='008000' if emision['definitivo'] else 'C00000')
+        control_filas = [
+            {'Control': 'Estado de emisión', 'Valor': estado_emision},
+            {'Control': 'Resultado según columnas originales', 'Valor': conciliacion['resultado_origen']},
+            {'Control': 'Resultado según categorías homologadas', 'Valor': conciliacion['resultado_homologado']},
+            {'Control': 'Diferencia de resultado', 'Valor': conciliacion['diferencia']},
+            {'Control': 'Diferencia Activo menos Pasivo y Patrimonio', 'Valor': diagnostico['diferencia']},
+        ] + [{'Control': 'Pendiente de resolver', 'Valor': m} for m in emision['motivos']]
+        pd.DataFrame(control_filas).to_excel(writer, sheet_name='Control de emisión', index=False)
+        if not emision['incidencias'].empty:
+            emision['incidencias'].to_excel(writer, sheet_name='Cuentas a corregir', index=False)
+        historial = [h for h in st.session_state.get('historial_decisiones', []) if h['Archivo'] == archivo_nombre]
+        if historial:
+            pd.DataFrame(historial).to_excel(writer, sheet_name='Decisiones de esta sesión', index=False)
 
         meta = st.session_state.get("metadata_files", {}).get(archivo_nombre)
         if meta:
@@ -3530,7 +3691,7 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
 
         fila_sep = FILA_INICIO_BALANCE + len(export_df) + 3
 
-        catalogo_local = cargar_catalogo()
+        catalogo_local = catalogo
         det = clasificadas[
             (clasificadas['codigo_clasificado'] != '') &
             (clasificadas['codigo_clasificado'] != '__EXCLUIR__') &
@@ -3543,7 +3704,8 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
         det['nombre_estandar'] = det['codigo_clasificado'].map(lambda c: catalogo_local.get(c, {}).get('nombre_estandar', c))
         det['monto_normalizado'] = det.apply(
             lambda row: _monto_presentacion(
-                row['codigo_clasificado'], row['monto'], row['nombre_visual']
+                row['codigo_clasificado'], row['monto'], row['nombre_visual'],
+                row.get('origen_columna'), catalogo,
             ), axis=1,
         )
         detalle_completo = det[[
@@ -3564,10 +3726,6 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
             'Monto Extraído', 'Monto Normalizado',
             'Método Clasificación', 'Confianza'
         ]
-        for columna_monto in ('Monto Extraído', 'Monto Normalizado'):
-            detalle_completo[columna_monto] = detalle_completo[columna_monto].apply(
-            lambda x: round(x, 0) if pd.notna(x) else 0
-            )
         detalle_completo['Confianza'] = detalle_completo['Confianza'].apply(
             lambda x: f"{x:.0%}" if pd.notna(x) else ""
         )
@@ -3597,76 +3755,33 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
 
     buf.seek(0)
     
-    meta_state = st.session_state.get("metadata")
+    meta_state = meta
     razon_fn = (meta_state.razon_social or "empresa").replace(" ", "_")[:30] if meta_state else "empresa"
     rut_fn   = (meta_state.rut or "").replace(".", "").replace("-", "") if meta_state else ""
     nombre_archivo = f"Balance_Unificado-{razon_fn}-{rut_fn}"
+    if not emision['definitivo']:
+        nombre_archivo = 'BORRADOR-' + nombre_archivo
 
     st.download_button(
-        "⬇️ Descargar balance normalizado (Excel)", data=buf.getvalue(),
+        'Descargar reporte definitivo (Excel)' if emision['definitivo'] else 'Descargar BORRADOR con diagnóstico (Excel)', data=buf.getvalue(),
         file_name=f"{nombre_archivo}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        disabled=not quality_control.export_allowed,
     )
 
-    _validar_cuadre_utilidad(df, agrupado, clasificadas)
-
-
-def _validar_cuadre_utilidad(df: pd.DataFrame, agrupado: pd.DataFrame, clasificadas: pd.DataFrame):
-    TOLERANCIA = 1_000
-    er11_row = agrupado[agrupado['codigo_clasificado'] == 'ER.11']
-    pat04_row = agrupado[agrupado['codigo_clasificado'] == 'PAT.04']
-
-    er11 = er11_row['monto_total'].sum() if not er11_row.empty else None
-    pat04 = pat04_row['monto_total'].sum() if not pat04_row.empty else None
-
-    st.subheader("🔍 Validación: Cuadre Utilidad del Ejercicio")
-
-    if er11 is None and pat04 is None:
-        st.warning("No se encontraron cuentas clasificadas como ER.11 ni PAT.04.")
+def _validar_cuadre_utilidad(resultado):
+    st.subheader('Conciliación independiente del estado de resultados')
+    if resultado['resultado_origen'] is None and resultado['resultado_homologado'] is None:
+        st.info('El documento no contiene detalle de ingresos y gastos para conciliar el resultado.')
         return
-    if er11 is None:
-        st.warning(f"⚠️ No hay cuentas de ER.11. PAT.04 = **${pat04:,.0f}**.")
-        return
-    if pat04 is None:
-        st.warning(f"⚠️ No hay cuentas de PAT.04. ER.11 = **${er11:,.0f}**.")
-        return
-
-    diferencia = abs(er11 - pat04)
-    cuadra = diferencia <= TOLERANCIA
-
     c1, c2, c3 = st.columns(3)
-    c1.metric("Utilidad Neta ER (ER.11)", f"${er11:,.0f}")
-    c2.metric("Resultado Patrimonio (PAT.04)", f"${pat04:,.0f}")
-    c3.metric("Diferencia", f"${diferencia:,.0f}", delta="✅ Cuadra" if cuadra else f"❌ Descuadre", delta_color="normal" if cuadra else "inverse")
-
-    if cuadra:
-        st.success("✅ La utilidad del período cuadra correctamente.")
-        return
-
-    st.error(f"❌ Descuadre detectado de ${diferencia:,.0f}. Ejecutando diagnósticos avanzados...")
-    tab_a, tab_b, tab_c = st.tabs(["A — Detalle del ER", "B — Buscar signo cambiado", "C — Cuentas excluidas / sin clasificar"])
-
-    with tab_a:
-        er_codigos = [c for c in agrupado['codigo_clasificado'] if c.startswith('ER')]
-        er_df = agrupado[agrupado['codigo_clasificado'].isin(er_codigos)].copy()
-        if not er_df.empty:
-            er_df = er_df.sort_values('monto_total', key=abs, ascending=False)
-            st.dataframe(er_df[['codigo_clasificado', 'nombre_estandar', 'monto_total']], use_container_width=True, hide_index=True)
-
-    with tab_b:
-        MARGEN_BUSQUEDA = max(diferencia * 0.05, 1_000)
-        candidatos = clasificadas[(clasificadas['monto'].abs() - diferencia).abs() <= MARGEN_BUSQUEDA].copy()
-        if not candidatos.empty:
-            candidatos['_nombre_display'] = candidatos['nombre_revision_usuario'].where(candidatos['nombre_revision_usuario'] != '', candidatos['nombre_original'])
-            st.dataframe(candidatos[['_nombre_display', 'monto', 'codigo_clasificado']], use_container_width=True, hide_index=True)
-        else:
-            st.info("No se hallaron cuentas directas con el monto de la diferencia.")
-
-    with tab_c:
-        excluidas = df[df['codigo_clasificado'] == '__EXCLUIR__'].copy()
-        if not excluidas.empty:
-            excluidas['_nombre_display'] = excluidas['nombre_revision_usuario'].where(excluidas['nombre_revision_usuario'] != '', excluidas['nombre_original'])
-            st.dataframe(excluidas[['_nombre_display', 'monto']], use_container_width=True, hide_index=True)
+    def mostrar(valor):
+        return 'Sin detalle' if valor is None else f'{valor:,.2f}'
+    c1.metric('Resultado según columnas originales', mostrar(resultado['resultado_origen']))
+    c2.metric('Resultado según categorías homologadas', mostrar(resultado['resultado_homologado']))
+    c3.metric('Diferencia del resultado', mostrar(resultado['diferencia']))
+    if resultado['cuadra']:
+        st.success('Las categorías de ingresos y gastos reproducen el resultado de las columnas originales.')
+    else:
+        st.error('Las categorías asignadas no reproducen el resultado de origen o falta detalle para comprobarlo. Revise las cuentas indicadas antes de emitir.')
 
 
 def _tab_diccionario():

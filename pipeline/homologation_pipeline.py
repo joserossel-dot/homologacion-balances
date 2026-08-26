@@ -29,6 +29,7 @@ from reglas_especiales import ProcesadorReglasEspeciales
 from decision.engine import DecisionEngine
 from semantic.semantic_engine import SemanticEngine
 from semantic.matcher import SemanticMatcher
+from reporting_integrity import resultado_compatible
 
 logger = logging.getLogger(__name__)
 
@@ -735,6 +736,8 @@ class HomologationPipeline:
 
     @staticmethod
     def _is_code_allowed_for_tipo(standard_code: str | None, tipo: str) -> bool:
+        if not resultado_compatible(standard_code, tipo):
+            return False
         if tipo == "DESCONOCIDO" or not standard_code:
             return True
         _PREFIX_TIPO: dict[str, set[str]] = {
