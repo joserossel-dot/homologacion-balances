@@ -1561,11 +1561,7 @@ def main():
 
     if df.empty:
         if archivo_activo_name in st.session_state.extraction_pending:
-            visor, correccion = st.columns([1, 1], gap="medium")
-            with visor:
-                _visor_documento(archivo_activo)
-            with correccion:
-                _mostrar_correccion_extraccion(archivo_activo_name)
+            _mostrar_etapa_correccion_extraccion(archivo_activo, archivo_activo_name)
         else:
             st.warning(f"No se extrajeron cuentas del archivo {archivo_activo_name}.")
         st.stop()
@@ -1803,10 +1799,10 @@ def _aplicar_correcciones_extraccion(
         if row is None or not cuenta.montos_columnas:
             corrected.append(cuenta)
             continue
-        if bool(row.get("excluir", False)):
+        if bool(row.get("excluir", False)) and not bool(row.get("total", cuenta.es_total)):
             continue
         amounts = {
-            column: numeric(row.get(column, 0))
+            column: numeric(row.get(column, cuenta.montos_columnas.get(column, 0)))
             for column in RAW_MONETARY_COLUMNS
         }
         amount = None
@@ -1894,6 +1890,17 @@ def _diagnosticar_filas_extraccion(
 
     for cuenta in cuentas:
         if not cuenta.montos_columnas:
+            continue
+        if cuenta.es_total:
+            diagnostics[int(cuenta.linea)] = {
+                "prioridad": 3,
+                "diagnostico": "Control reconocido, no se suma como cuenta",
+                "accion_sugerida": (
+                    "No necesita excluirlo. Se conserva para comprobar la cuadratura; "
+                    "corrija sus importes sólo si difieren del documento."
+                ),
+                "valores_sugeridos": "",
+            }
             continue
         values = {
             column: float(cuenta.montos_columnas.get(column, 0.0) or 0.0)
@@ -1996,17 +2003,60 @@ def _diagnosticar_filas_extraccion(
     return diagnostics
 
 
+def _mostrar_etapa_correccion_extraccion(archivo, filename: str) -> None:
+    """Corrección a ancho completo y documento en la parte inferior."""
+    _mostrar_correccion_extraccion(filename)
+    st.divider()
+    st.subheader("Documento original")
+    _visor_documento(archivo, altura="58vh", mostrar_titulo=False)
+
+
+def _explicar_diferencia_controles(certification) -> str:
+    """Distingue diferencias de movimientos de errores en saldos/clasificación."""
+    diferencias = getattr(certification, "diferencias", {}) or {}
+    if not set(RAW_MONETARY_COLUMNS).issubset(diferencias):
+        return ""
+    debe = diferencias["debitos"]
+    haber = diferencias["creditos"]
+    if (
+        abs(debe) > 10 and abs(debe - haber) <= 10
+        and all(abs(diferencias[column]) <= 10 for column in RAW_MONETARY_COLUMNS[2:])
+        and not getattr(certification, "filas_inconsistentes", [])
+    ):
+        return (
+            f"La diferencia de {abs(debe):,.0f} se repite en Debe y Haber; "
+            "los saldos y las cuatro columnas de clasificación coinciden con "
+            "el subtotal, y las cuentas cumplen sus identidades individuales. "
+            "Revise los movimientos y el subtotal impreso con el emisor: esto "
+            "no se corrige reclasificando cuentas ni excluyendo los controles. "
+            "Si el subtotal del original es incorrecto, solicite un balance corregido."
+        )
+    return ""
+
+
 def _mostrar_correccion_extraccion(filename: str) -> None:
     """Editor seguro previo a homologación para extracciones OCR fallidas."""
     resultado = st.session_state.extraction_pending.get(filename)
     if resultado is None:
         return
+    revisions = st.session_state.setdefault("extraction_revisions", {})
+    revision = revisions.get(filename, 0)
+    if revision:
+        st.caption("Sus correcciones están guardadas; el diagnóstico muestra la validación actualizada.")
     st.error(
         "La extracción aún no puede certificarse. La clasificación está pausada "
         "para evitar que una lectura incorrecta llegue al balance homologado."
     )
     rows = []
     certification = getattr(resultado, "certificacion_extraccion", None)
+    if getattr(certification, "estado", "") == "no_evaluable":
+        st.warning(
+            "Falta un subtotal impreso utilizable para validar. Eliminar los controles "
+            "no resuelve el descuadre. Conserve o ingrese el subtotal del documento."
+        )
+    explicacion_control = _explicar_diferencia_controles(certification)
+    if explicacion_control:
+        st.warning(explicacion_control)
     inconsistent = set(getattr(certification, "filas_inconsistentes", []) or [])
     diagnostics = _diagnosticar_filas_extraccion(
         resultado.cuentas, certification,
@@ -2068,11 +2118,16 @@ def _mostrar_correccion_extraccion(filename: str) -> None:
             ]), use_container_width=True, hide_index=True)
 
     st.markdown("#### Qué debe hacer el analista")
+    st.info(
+        "Los subtotales, resultados de cierre y totales reconocidos ya están "
+        "fuera de la suma de cuentas. No debe excluirlos: se conservan como "
+        "controles para contrastar las cifras extraídas con el documento."
+    )
     st.markdown(
         "1. Revise primero las filas señaladas en **Revisar** contra el PDF.  \n"
         "2. Si una fila es un pie de página, firma o texto legal, marque **Excluir**.  \n"
-        "3. Si una fila corresponde a SUBTOTAL, UTILIDAD/PÉRDIDA o TOTALES, "
-        "active **Subtotal/total**.  \n"
+        "3. Sólo si un control aún no está reconocido, active **Subtotal/total**. "
+        "Los controles ya reconocidos aparecen separados debajo de las cuentas.  \n"
         "4. Corrija una cifra únicamente cuando sea distinta de la impresa. "
         "Después pulse **Verificar y continuar**."
     )
@@ -2133,10 +2188,14 @@ def _mostrar_correccion_extraccion(filename: str) -> None:
                 resultado.certificacion_extraccion = certificar_extraccion_columnas(
                     resultado.cuentas, metodo="revision_humana_8_columnas",
                 )
+                revisions[filename] = revision + 1
                 st.success("Cuenta incorporada. Revise la certificación actualizada.")
                 st.rerun()
+    controles = source[source["total"]].copy()
+    detalle = source[~source["total"]].copy()
+    st.markdown("#### Cuentas y filas por revisar")
     edited = st.data_editor(
-        source,
+        detalle,
         hide_index=True,
         use_container_width=True,
         disabled=[
@@ -2144,7 +2203,7 @@ def _mostrar_correccion_extraccion(filename: str) -> None:
             "diagnostico", "accion_sugerida",
             "valores_sugeridos",
         ],
-        key=f"extraction_editor_{filename}",
+        key=f"extraction_editor_{filename}_{revision}",
         column_config={
             "linea": st.column_config.NumberColumn("Fila", format="%d"),
             "codigo": "Código",
@@ -2179,14 +2238,35 @@ def _mostrar_correccion_extraccion(filename: str) -> None:
             ),
         },
     )
+    if not controles.empty:
+        with st.expander(f"Controles reconocidos: {len(controles)} (no se suman como cuentas)"):
+            st.caption(
+                "No requieren exclusión. Edite un importe sólo si está mal leído. "
+                "Desmarque Subtotal/total únicamente si la fila es realmente una cuenta."
+            )
+            controles_editados = st.data_editor(
+                controles.drop(columns=["excluir"]),
+                hide_index=True,
+                use_container_width=True,
+                key=f"extraction_controls_{filename}_{revision}",
+                disabled=[column for column in controles.columns
+                          if column not in (*RAW_MONETARY_COLUMNS, "total", "excluir")],
+                column_config={
+                    "linea": "Fila", "cuenta": "Control impreso",
+                    "total": st.column_config.CheckboxColumn("Subtotal/total"),
+                },
+            )
+            controles_editados["excluir"] = False
+            edited = pd.concat([edited, controles_editados], ignore_index=True)
     if st.button("🔎 Verificar correcciones y continuar", type="primary"):
         corrected, certification = _aplicar_correcciones_extraccion(
             resultado.cuentas, edited,
         )
-        if certification.estado == "fallida":
-            st.error("La extracción aún no cuadra; no se habilitó la homologación.")
-            if certification.razones:
-                st.caption(" ".join(certification.razones))
+        resultado.cuentas = corrected
+        resultado.certificacion_extraccion = certification
+        revisions[filename] = revision + 1
+        if certification.estado not in {"certificada", "parcial"}:
+            st.rerun()
         else:
             st.session_state.extraction_resolved[filename] = corrected
             st.session_state.extraction_pending.pop(filename, None)

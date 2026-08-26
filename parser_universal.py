@@ -242,8 +242,8 @@ _HEADER_ALIASES = {
     "nombre": {"CUENTA", "NOMBRE", "DESCRIPCION", "DETALLE"},
     "debitos": {"DEBITOS", "DEBITO", "DEBE", "PEBITOS", "DEBIT0S"},
     "creditos": {"CREDITOS", "CREDITO", "HABER"},
-    "saldo_deudor": {"DEUDOR"},
-    "saldo_acreedor": {"ACREEDOR", "ACREEEDOR"},
+    "saldo_deudor": {"DEUDOR", "SDEUDOR", "SALDODEUDOR"},
+    "saldo_acreedor": {"ACREEDOR", "ACREEEDOR", "SACREEDOR", "SALDOACREEDOR"},
     "activo": {"ACTIVO", "ACTIVOS"},
     "pasivo": {"PASIVO", "PASIVOS", "PASIWO", "PATRIMONIO"},
     "perdida": {"PERDIDA", "PERDIDAS"},
@@ -975,7 +975,7 @@ def certificar_extraccion_columnas(
         and (
             "totales iguales" in normalized_name(cuenta)
             or "sumas iguales" in normalized_name(cuenta)
-            or control_key(cuenta) in {"totales", "totalgeneral"}
+            or control_key(cuenta) in {"totales", "totalgeneral", "sumastotales"}
         )
     ]
     totales_finales_validos: Optional[bool] = None
@@ -1585,7 +1585,7 @@ def normalizar_token_ocr(token: str) -> str:
 
 PATRON_TOTAL = re.compile(
     r'^(?:total(?:es)?|sub-?total(?:es)?|sumas?(?: iguales)?)\b|'
-    r'^(?:resultado(?: del ejercicio)?|utilidad(?: neta| del ejercicio)?|'
+    r'^(?:resultado(?: del ejercicio| [\x22\x27]?(?:positivo|negativo))?|utilidad(?: neta| del ejercicio)?|'
     r'perdida(?: o ganancia| neta| neto| del ejercicio)?)$',
     re.IGNORECASE
 )
@@ -1649,6 +1649,10 @@ PATRON_CODIGO_OCR = re.compile(r'^(\d{1,2}[.,/:]){2,4}\d{1,2}(?=\s)')
 
 
 def normalizar_codigo_ocr(linea: str) -> str:
+    # Separador tipográfico código/glosa, no un signo del importe.
+    linea = re.sub(
+        r"^(\d{5,10})\s*[·•]\s*(?=[A-Za-zÁÉÍÓÚÑáéíóúñ])", r"\1 ", linea,
+    )
     linea = re.sub(r"(?<=\d)[.,/:]{2,}(?=\d)", ".", linea)
     m = PATRON_CODIGO_OCR.match(linea)
     if not m:
