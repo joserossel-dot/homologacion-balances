@@ -52,7 +52,16 @@ def _sin_acentos(texto: str) -> str:
 def detectar_años_y_monedas(lineas: list[str]) -> tuple[list[str], list[str]]:
     años = []
     monedas = []
+    monedas_cabecera: list[str] = []
     patron_año = re.compile(r'\b(20\d{2})\b')
+
+    def moneda_de_token(token: str) -> Optional[str]:
+        normalizado = _sin_acentos(token).lower().strip(".,:;()[]")
+        if any(valor in normalizado for valor in ('usd', 'dolar', 'us$')):
+            return 'USD'
+        if any(valor in normalizado for valor in ('clp', 'peso', 'clp$')):
+            return 'CLP'
+        return None
 
     for l in lineas[:60]:
         l_norm = _sin_acentos(l).lower()
@@ -68,14 +77,23 @@ def detectar_años_y_monedas(lineas: list[str]) -> tuple[list[str], list[str]]:
             años.append('acumulado')
 
         # Scan tokens in order to preserve header column order
-        tokens_lower = [t.lower() for t in l.split()]
-        for t in tokens_lower:
-            if any(w in t for w in ('usd', 'dolar', 'us$', 'dolares')):
-                if 'USD' not in monedas:
-                    monedas.append('USD')
-            elif any(w in t for w in ('clp', 'peso', 'clp$', 'pesos')):
-                if 'CLP' not in monedas:
-                    monedas.append('CLP')
+        monedas_linea = [
+            moneda for token in l.split()
+            if (moneda := moneda_de_token(token)) is not None
+        ]
+        for moneda in monedas_linea:
+            if moneda not in monedas:
+                monedas.append(moneda)
+        # Una cabecera tabular repite la unidad para ambos periodos, por
+        # ejemplo ``US$ US$``. Esa evidencia es más específica que la
+        # leyenda general de monedas de una portada (CLP, UF, USD, EUR).
+        if len(monedas_linea) >= 2 and len(l.strip()) <= 50:
+            for moneda in monedas_linea:
+                if moneda not in monedas_cabecera:
+                    monedas_cabecera.append(moneda)
+
+    if monedas_cabecera:
+        monedas = monedas_cabecera
 
     if not monedas:
         for l in lineas[:60]:
@@ -1614,6 +1632,11 @@ _SECTION_HEADING_PATTERNS: tuple[tuple[re.Pattern, OrigenColumna], ...] = (
         r"(?:non[- ]?current|current)\s+liabilities|liabilities$", re.I,
     ),
      OrigenColumna.PASIVO),
+    (re.compile(
+        r"^(?:patrimonio\s+y\s+pasivos?|pasivos?\s+y\s+patrimonio)"
+        r"(?:\s+neto)?$", re.I,
+    ),
+     OrigenColumna.PASIVO),
     (re.compile(r"^(?:total\s+)?(?:patrimonio(?:\s+neto)?|equity)$", re.I),
      OrigenColumna.PASIVO),
     (re.compile(
@@ -1628,6 +1651,19 @@ _SECTION_HEADING_PATTERNS: tuple[tuple[re.Pattern, OrigenColumna], ...] = (
     ),
      OrigenColumna.PERDIDA),
 )
+
+
+def _normalizar_encabezado_seccion(nombre: str) -> str:
+    """Retira columnas auxiliares de un encabezado contable comparativo."""
+    encabezado = re.sub(
+        r"\b(?:\d{1,2}[-/]\d{1,2}[-/](?:19|20)\d{2}|(?:19|20)\d{2})\b",
+        " ", nombre,
+    )
+    encabezado = re.sub(
+        r"\b(?:nota|mus\$?|m\$|us\$|usd|clp)\b", " ", encabezado,
+        flags=re.I,
+    )
+    return re.sub(r"\s+", " ", encabezado).strip(" :,-")
 
 
 def anotar_secciones_balance_clasificado(cuentas: list[CuentaRaw]) -> int:
@@ -1674,7 +1710,7 @@ def anotar_secciones_balance_clasificado(cuentas: list[CuentaRaw]) -> int:
             seccion = None
             secciones_paralelas = True
             continue
-        encabezado = nombre
+        encabezado = _normalizar_encabezado_seccion(nombre)
         if cuenta.es_total:
             encabezado = re.sub(r"^total(?:es)?\s+", "", nombre, flags=re.I)
         nueva_seccion = None
@@ -1817,6 +1853,7 @@ def normalizar_token_ocr(token: str) -> str:
 
 PATRON_TOTAL = re.compile(
     r'^(?:total(?:es)?|sub-?total(?:es)?|sumas?(?: iguales)?)\b|'
+    r'^.+\s+total(?:es)?$|'
     r'^patrimonio\s+atribuible\s+a\b.*$|'
     r'^(?:resultado(?: del ejercicio| [\x22\x27]?(?:positivo|negativo))?|utilidad(?: neta| del ejercicio)?|'
     r'perdida(?: o ganancia| neta| neto| del ejercicio)?)$|'
@@ -1853,6 +1890,7 @@ GARBAGE_PATTERNS: list[re.Pattern] = [
     re.compile(r'^\s*(?:Notas?\s+\d+(?:\s*(?:a|l|y|al)\s*\d+)?|Ver\s+Notas?\s+\d+(?:\s*(?:a|l|y|al)\s*\d+)?)\s*$', re.I),
     re.compile(r'^\s*Las\s+notas?\s+adjuntas\b.*$', re.I),
     re.compile(r'^\s*(?:al|a\s+la)\s+\d+\s+forman?\s+parte\s+integral\b.*$', re.I),
+    re.compile(r'^\s*forman?\s+parte\s+integral\b.*$', re.I),
     re.compile(r'^\s*Art[ií]culo(?:\s+\d+)?\s+C[oó]digo\s+Tributario\b.*$', re.I),
     re.compile(r'^\s*con\s+los\s+antecedentes\s+aportados\s+por\s+el\s+Contribuyente\s*$', re.I),
     # Firmas / cargos
@@ -1868,6 +1906,17 @@ GARBAGE_PATTERNS: list[re.Pattern] = [
     re.compile(
         r'^\s*(?:al\s+)?\d{1,2}\s+de\s+\w+(?:\s+de)?\s+'
         r'(?:19|20)\d{2}(?:\s+(?:19|20)\d{2})?\s*$',
+        re.I,
+    ),
+    re.compile(
+        r'^\s*de\s+\w+(?:\s+de)?\s+(?:19|20)\d{2}'
+        r'(?:\s+(?:19|20)\d{2})?\s*$',
+        re.I,
+    ),
+    # Títulos de estados auditados que incorporan años o duración del período.
+    re.compile(
+        r'^\s*estados?\s+de\s+(?:situaci[oó]n\s+financiera|resultados?'
+        r'(?:\s+integrales?)?)\b.*$',
         re.I,
     ),
     re.compile(r'^\s*\d{1,2}/\d{1,2}/\d{2,4}\s*$'),
@@ -1937,13 +1986,21 @@ def normalizar_linea_ocr_tabla(linea: str) -> str:
     return re.sub(r"\s+", " ", limpia).strip()
 
 
-def normalizar_montos_fragmentados(linea: str) -> str:
+def normalizar_montos_fragmentados(
+    linea: str,
+    *,
+    preservar_columna_nota: bool = False,
+) -> str:
     """Une el primer dígito separado de un importe con miles agrupados.
 
     Algunos PDF posicionan visualmente el primer dígito en otro fragmento de
     texto (``2 2.029.324,87``). La regla exige al menos dos grupos de miles para
-    no unir códigos, años ni columnas contiguas de montos pequeños.
+    no unir códigos, años ni columnas contiguas de montos pequeños. Cuando
+    la cabecera confirma una columna Nota, no se aplica: ``6 1.357.245`` es
+    una referencia de nota seguida del importe, no ``61.357.245``.
     """
+    if preservar_columna_nota:
+        return linea
     return re.sub(
         r"(?<![\d.,])(\d)\s+(\d{1,2}(?:[.,]\d{3}){2,}(?:,\d{2})?)",
         r"\1\2",
@@ -2177,9 +2234,8 @@ def parsear_linea(
 
     # Los estados financieros auditados suelen anteponer una referencia
     # ``Nota N°`` a las columnas comparativas. Esa referencia no es un importe
-    # ni un tercer período. Sólo se descarta cuando la cabecera del documento
-    # confirmó la existencia de la columna y la fila contiene exactamente un
-    # token adicional respecto de los años detectados.
+    # ni un tercer período. Se descarta cuando la cabecera confirmó la columna
+    # y existe al menos un token adicional respecto de los años detectados.
     active_years = list(years or [])
     numeric_years = [
         year for year in active_years
@@ -2192,7 +2248,7 @@ def parsear_linea(
     if (
         leading_note_column
         and len(active_years) >= 2
-        and len(montos_tokens) == len(active_years) + 1
+        and len(montos_tokens) >= len(active_years) + 1
     ):
         note_token = montos_tokens[0]
         note_value = parsear_monto(note_token, separador_miles)
@@ -2207,6 +2263,23 @@ def parsear_linea(
             and abs(float(note_value)) <= 99
         ):
             montos_tokens = montos_tokens[1:]
+
+    # En estados auditados escaneados una línea horizontal puede convertirse
+    # en un cero entre los dos importes comparativos. No representa un tercer
+    # período: se elimina sólo en OCR, con dos años confirmados y dos montos no
+    # nulos a ambos lados. Ejemplo real: Nota 9, 13.734.230, -, 12.874.543.
+    if (
+        confianza_base < 1.0
+        and len(active_years) == 2
+        and len(montos_tokens) == 3
+    ):
+        valores = [parsear_monto(token, separador_miles) for token in montos_tokens]
+        if (
+            valores[0] not in (None, 0)
+            and valores[1] == 0
+            and valores[2] not in (None, 0)
+        ):
+            montos_tokens.pop(1)
 
     # Dynamic year/currency mapping
     if (years or currencies) and montos_tokens:
@@ -2953,13 +3026,23 @@ class ParserPDF:
                 document_context=documento_ctx,
             )
 
+        pre_years, _ = detectar_años_y_monedas(lineas)
+        preservar_columna_nota = detectar_columna_nota_comparativa(
+            lineas, pre_years,
+        )
         if requirio_ocr:
             lineas = [normalizar_linea_ocr_tabla(l) for l in lineas]
         elif self._extraction_method not in {
             "coordinates_8_amounts",
             "native_table_8_columns",
         }:
-            lineas = [normalizar_montos_fragmentados(l) for l in lineas]
+            lineas = [
+                normalizar_montos_fragmentados(
+                    l,
+                    preservar_columna_nota=preservar_columna_nota,
+                )
+                for l in lineas
+            ]
         lineas = [normalizar_codigo_ocr(l) for l in lineas]
 
         primer_tokens = [l.split()[0] if l.split() else '' for l in lineas[:60]]

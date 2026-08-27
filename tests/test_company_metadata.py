@@ -1,5 +1,6 @@
 import app_validacion
 from extractor_metadata import MetadataEmpresa
+from io import BytesIO
 
 
 def test_valores_periodo_metadata_detecta_ejercicio_completo():
@@ -59,6 +60,40 @@ def test_detectar_periodos_comparativos_ignora_etiquetas_narrativas():
         ["Estado de situación financiera", "Nota 2019 2018 acumulado"],
         2026,
     ) == ("2019", "2018")
+
+
+def test_encabezado_pdf_escaneado_usa_ocr_para_detectar_periodos(monkeypatch):
+    class Upload(BytesIO):
+        name = "auditado.pdf"
+
+    class FakePage:
+        def extract_text(self):
+            return ""
+
+    class FakePDF:
+        pages = [FakePage()]
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+    monkeypatch.setattr(app_validacion, "_contenido_para_extraer", lambda _archivo: b"pdf")
+    monkeypatch.setattr("pdfplumber.open", lambda _contenido: FakePDF())
+    monkeypatch.setattr(app_validacion, "render_page", lambda _contenido, _pagina: b"png")
+    monkeypatch.setattr(
+        app_validacion, "ocr_pagina",
+        lambda _imagen, _rotacion, psm=6: (
+            "Estado de Situación Financiera\nNota 2018 2017\nM$ M$"
+        ),
+    )
+
+    lineas = app_validacion._extraer_lineas_encabezado(Upload(b"pdf"))
+
+    assert app_validacion._detectar_periodos_comparativos(lineas, 2026) == (
+        "2018", "2017",
+    )
 
 
 def test_valor_fila_periodo_conserva_actual_y_anterior():

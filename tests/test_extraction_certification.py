@@ -104,6 +104,34 @@ def test_balance_auditado_descarta_nota_y_alinea_dos_periodos():
     assert cuenta.montos_periodos["2018"] == 93372
 
 
+def test_balance_auditado_ocr_descarta_guion_grafico_entre_periodos():
+    cuenta = parser.parsear_linea(
+        "Propiedad Planta y Equipo 9 13.734.230 - 12.874.543",
+        1, parser.FormatoCodigo.SIN_CODIGO, ".", confianza_base=0.75,
+        periodo_comparativo=True,
+        years=["2018", "2017"],
+        currencies=["M$"],
+        leading_note_column=True,
+    )
+
+    assert cuenta is not None
+    assert cuenta.nombre == "Propiedad Planta y Equipo"
+    assert cuenta.monto == 13_734_230
+    assert cuenta.montos_periodos["2018"] == 13_734_230
+    assert cuenta.montos_periodos["2017"] == 12_874_543
+
+
+def test_balance_clasificado_reconoce_total_con_etiqueta_al_final():
+    cuenta = parser.parsear_linea(
+        "Activos Corrientes Totales 36.395.572 27.660.631",
+        1, parser.FormatoCodigo.SIN_CODIGO, ".",
+        periodo_comparativo=True, years=["2018", "2017"],
+    )
+
+    assert cuenta is not None
+    assert cuenta.es_total is True
+
+
 def test_balance_auditado_detecta_columna_nota_con_encabezado_dividido():
     lines = [
         "Estados de Situación Financiera Consolidados Clasificados",
@@ -114,6 +142,42 @@ def test_balance_auditado_detecta_columna_nota_con_encabezado_dividido():
     years, _ = parser.detectar_años_y_monedas(lines)
 
     assert parser.detectar_columna_nota_comparativa(lines, years) is True
+
+
+def test_balance_auditado_no_fusiona_nota_de_un_digito_con_importe():
+    line = (
+        "Deudores comerciales y otras cuentas por cobrar, corrientes "
+        "6 1.357.245 2.436.366"
+    )
+
+    normalized = parser.normalizar_montos_fragmentados(
+        line, preservar_columna_nota=True,
+    )
+    account = parser.parsear_linea(
+        normalized, 1, parser.FormatoCodigo.SIN_CODIGO, ".",
+        periodo_comparativo=True,
+        years=["2018", "2017"], currencies=["USD"],
+        leading_note_column=True,
+    )
+
+    assert account is not None
+    assert account.monto == 1_357_245
+    assert account.montos_periodos["2018"] == 1_357_245
+    assert account.montos_periodos["2017"] == 2_436_366
+
+
+def test_moneda_de_cabecera_prevalece_sobre_leyenda_de_portada():
+    lines = [
+        "$ - Pesos chileno",
+        "US$ - Dólar estadounidense",
+        "Al 31 de diciembre de 2018 y 2017",
+        "US$ US$",
+    ]
+
+    years, currencies = parser.detectar_años_y_monedas(lines)
+
+    assert years == ["2018", "2017"]
+    assert currencies == ["USD"]
 
 
 def test_balance_auditado_descarta_nota_parentetica_y_conserva_ambos_periodos():
@@ -266,6 +330,26 @@ def test_balance_auditado_descarta_pie_legal_de_notas():
     assert parser._es_linea_basura(
         "al 27 forman parte integral de estos estados financieros 2"
     )
+    assert parser._es_linea_basura(
+        "forman parte integral de estos estados financieros 1"
+    )
+    assert parser._es_linea_basura("de diciembre 2018 2017")
+    assert parser._es_linea_basura(
+        "Estado de resultados integrales Por los períodos de 12 meses 2018 2017"
+    )
+
+
+def test_balance_auditado_reconoce_total_con_etiqueta_al_final():
+    cuenta = parser.parsear_linea(
+        "Patrimonio total 24.318.500 21.100.000",
+        1, parser.FormatoCodigo.SIN_CODIGO, ".",
+        periodo_comparativo=True,
+        years=["2018", "2017"],
+        currencies=["USD"],
+    )
+
+    assert cuenta is not None
+    assert cuenta.es_total is True
 
 
 def test_balance_auditado_reconoce_patrimonio_atribuible_como_subtotal():
@@ -1248,6 +1332,26 @@ def test_balance_clasificado_propaga_secciones_sin_sobrescribir_columnas():
     assert accounts[2].origen_columna is parser.OrigenColumna.PERDIDA
     assert accounts[4].origen_columna is parser.OrigenColumna.PASIVO
     assert accounts[6].origen_columna is parser.OrigenColumna.PASIVO
+
+
+def test_balance_clasificado_cambia_de_activo_a_pasivo_entre_paginas():
+    accounts = [
+        parser.CuentaRaw(1, None, "Activos no corrientes", None),
+        parser.CuentaRaw(2, None, "Propiedades, planta y equipo", 100),
+        parser.CuentaRaw(
+            3, None, "Patrimonio y pasivos 31-12-2018 31-12-2017", None,
+        ),
+        parser.CuentaRaw(4, None, "Pasivos corrientes Nota", None),
+        parser.CuentaRaw(
+            5, None, "Otros pasivos financieros, corrientes", 80,
+            origen_columna=parser.OrigenColumna.ACTIVO,
+        ),
+    ]
+
+    parser.anotar_secciones_balance_clasificado(accounts)
+
+    assert accounts[1].origen_columna is parser.OrigenColumna.ACTIVO
+    assert accounts[4].origen_columna is parser.OrigenColumna.PASIVO
 
 
 def test_fusiona_glosa_partida_con_importes_de_la_misma_linea():

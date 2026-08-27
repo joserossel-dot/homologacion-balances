@@ -56,7 +56,8 @@ from config.regex_rules import REGLAS_REGEX, REGLAS_COMPILADAS
 from parser_universal import (
     ParserPDF, CuentaRaw, OrigenColumna, RAW_MONETARY_COLUMNS,
     FormatoCodigo, ResultadoParseo,
-    certificar_extraccion_columnas, detectar_años_y_monedas, parsear_excel,
+    certificar_extraccion_columnas, detectar_años_y_monedas, ocr_pagina,
+    parsear_excel,
 )
 from parsers.column_interpretation import es_ingreso as es_ingreso_col, es_gasto as es_gasto_col
 from parsers.account_type_resolver import (
@@ -341,6 +342,7 @@ def _neon_disponible() -> bool:
 PATRON_NO_CUENTA = re.compile(
     r'^(comprendido|periodo|per[ií]odo|desde|hasta|rut|r\.u\.t|balance|'
     r'fecha|p[aá]gina|hora|moneda|firma|declaro|art[ií]culo|situaci[oó]n|'
+    r'estados?\s+de\s+(?:situaci[oó]n|resultados?)|'
     r'cifras\s+expresadas|direcci[oó]n|comuna|^giro|raz[oó]n\s+soc|'
     r'^a\s+nivel|contabilidad\s+en)',
     re.IGNORECASE
@@ -1987,9 +1989,22 @@ def _extraer_lineas_encabezado(archivo) -> list[str]:
     if suffix == '.pdf':
         try:
             import pdfplumber
-            with pdfplumber.open(BytesIO(_contenido_para_extraer(archivo))) as pdf:
+            contenido = _contenido_para_extraer(archivo)
+            with pdfplumber.open(BytesIO(contenido)) as pdf:
                 texto = pdf.pages[0].extract_text() or ""
-                return texto.split('\n')[:40]
+            lineas = texto.split('\n')[:40]
+            if any(re.search(r"(?:19|20)\d{2}", linea) for linea in lineas):
+                return lineas
+
+            # Los estados auditados suelen ser PDFs escaneados. La selección
+            # de períodos ocurre antes del parseo principal, por lo que el
+            # encabezado necesita un OCR breve de la primera página elegida.
+            png = render_page(contenido, 1)
+            with tempfile.TemporaryDirectory() as tmpdir:
+                imagen = Path(tmpdir) / "encabezado.png"
+                imagen.write_bytes(png)
+                texto_ocr = ocr_pagina(imagen, 0, psm=6)
+            return texto_ocr.split('\n')[:60]
         except Exception:
             return []
         finally:
