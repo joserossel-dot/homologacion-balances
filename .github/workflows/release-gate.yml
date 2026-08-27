@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - codex/release-operativa-neon
+      - codex/mejoras-pendientes-20260826
 
 jobs:
   certify:
@@ -20,7 +20,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install Poetry
-        run: pip install poetry
+        run: pip install poetry==2.4.1
       - name: Install dependencies
         run: poetry install --sync --no-interaction
       - name: Validate package and release configuration

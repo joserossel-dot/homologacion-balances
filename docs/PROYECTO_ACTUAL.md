@@ -448,7 +448,7 @@ Render construye un contenedor Python 3.12 con:
 - `DATABASE_URL` como secreto;
 - despliegue automático desactivado.
 
-`render.yaml` todavía apunta a `codex/release-operativa-neon`. Sin embargo, la instancia observada mostró el commit candidato `84de74b6` con la etiqueta de rama `codex/release-operativa-neon`. Esto indica una discrepancia de procedencia visible: el hash desplegado es el dato confiable, mientras `APP_RELEASE_BRANCH` es una etiqueta configurada manualmente.
+`render.yaml`, `APP_RELEASE_BRANCH` y el workflow de certificación apuntan a `codex/mejoras-pendientes-20260826`. El hash desplegado mostrado por `RENDER_GIT_COMMIT` sigue siendo la evidencia definitiva de la versión activa; `APP_RELEASE_BRANCH` identifica la línea de release configurada. El despliegue automático permanece desactivado.
 
 ## 17. Pruebas y evidencia del corte
 
@@ -495,9 +495,8 @@ La matriz privada añade casos como Parque Cultural, London38, Afuminsal y Funda
 
 1. Certificar una matriz representativa de documentos reales con resultados esperados, no sólo que el parser no falle.
 2. Verificar en cada documento que se extrajeron todas las cuentas y que cada monto pertenece al año correcto.
-3. Corregir la discrepancia entre rama declarada y hash realmente desplegado.
-4. Convertir el release gate en un control que impida desplegar un commit distinto del certificado.
-5. Definir autenticación, analista responsable y segregación de acceso antes de manejar información contable sensible de terceros.
+3. Convertir el release gate en un control que impida desplegar un commit distinto del certificado.
+4. Definir autenticación, analista responsable y segregación de acceso antes de manejar información contable sensible de terceros.
 
 ### Prioridad alta
 

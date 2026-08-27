@@ -2,7 +2,7 @@ services:
   - type: web
     name: homologacion-balances-1
     runtime: docker
-    branch: codex/release-operativa-neon
+    branch: codex/mejoras-pendientes-20260826
     dockerfilePath: ./Dockerfile
     autoDeploy: false
     healthCheckPath: /_stcore/health
@@ -12,6 +12,6 @@ services:
       - key: PYTHONUNBUFFERED
         value: "1"
       - key: APP_RELEASE_BRANCH
-        value: codex/release-operativa-neon
+        value: codex/mejoras-pendientes-20260826
       - key: QUALITY_CONTROL_ENFORCE_EXPORT
         value: "false"
