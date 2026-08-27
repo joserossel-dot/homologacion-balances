@@ -2351,7 +2351,7 @@ def _config_importes_extraccion():
 
 
 def _mostrar_correccion_extraccion(filename: str) -> None:
-    """Editor seguro previo a homologación para extracciones OCR fallidas."""
+    """Editor seguro previo a homologación para extracciones no certificadas."""
     resultado = st.session_state.extraction_pending.get(filename)
     if resultado is None:
         return
@@ -2398,7 +2398,11 @@ def _mostrar_correccion_extraccion(filename: str) -> None:
             "total": bool(cuenta.es_total),
         })
     if not rows:
-        st.warning("OCR no produjo filas tabulares que puedan corregirse.")
+        st.warning(
+            "La extracción no produjo filas tabulares editables. Revise que las "
+            "páginas seleccionadas contengan el detalle de cuentas. El problema "
+            "puede deberse al formato de la tabla y no necesariamente al OCR."
+        )
         return
     source = pd.DataFrame(rows).sort_values(
         ["prioridad", "linea"], kind="stable",

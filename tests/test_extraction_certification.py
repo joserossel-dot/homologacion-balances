@@ -103,6 +103,103 @@ def test_balance_auditado_descarta_nota_y_alinea_dos_periodos():
     assert cuenta.montos_periodos["2018"] == 93372
 
 
+def test_balance_auditado_detecta_columna_nota_con_encabezado_dividido():
+    lines = [
+        "Estados de Situación Financiera Consolidados Clasificados",
+        "31 de diciembre de",
+        "2018 2017",
+        "ACTIVOS Nota MUS$ MUS$",
+    ]
+    years, _ = parser.detectar_años_y_monedas(lines)
+
+    assert parser.detectar_columna_nota_comparativa(lines, years) is True
+
+
+def test_balance_auditado_descarta_nota_parentetica_y_conserva_ambos_periodos():
+    lines = [
+        "2018 2017",
+        "Nota MUS$ MUS$",
+        "Ingresos de actividades ordinarias (21) 110.193 124.879",
+    ]
+    years, currencies = parser.detectar_años_y_monedas(lines)
+    has_note_column = parser.detectar_columna_nota_comparativa(lines, years)
+    cuenta = parser.parsear_linea(
+        lines[-1], 2, parser.FormatoCodigo.SIN_CODIGO, ".",
+        periodo_comparativo=True,
+        years=years,
+        currencies=currencies,
+        leading_note_column=has_note_column,
+    )
+
+    assert cuenta is not None
+    assert cuenta.nombre == "Ingresos de actividades ordinarias"
+    assert cuenta.monto == 110193
+    assert cuenta.montos_periodos["2018"] == 110193
+    assert cuenta.montos_periodos["2017"] == 124879
+
+
+def test_balance_auditado_reproduce_subtotal_sin_sumar_referencias_de_nota():
+    lines = [
+        "2018 2017",
+        "ACTIVOS Nota MUS$ MUS$",
+        "Efectivo y equivalentes al efectivo (6) 2.566 6.839",
+        "Otros activos financieros, corriente (7) - 142",
+        "Otros activos no financieros, corriente (8) 629 592",
+        "Deudores comerciales y otras cuentas por cobrar (9) 26.660 22.502",
+        "Cuentas por cobrar a entidades relacionadas, corriente (10) 6.053 5.776",
+        "Inventarios (11) 5.132 3.052",
+        "Activos por impuestos corriente (12) 1.748 1.102",
+        "Total activo corriente 42.788 40.005",
+    ]
+    years, currencies = parser.detectar_años_y_monedas(lines)
+    has_note_column = parser.detectar_columna_nota_comparativa(lines, years)
+    cuentas = [
+        cuenta
+        for index, line in enumerate(lines[2:], start=2)
+        if (
+            cuenta := parser.parsear_linea(
+                line, index, parser.FormatoCodigo.SIN_CODIGO, ".",
+                periodo_comparativo=True,
+                years=years,
+                currencies=currencies,
+                leading_note_column=has_note_column,
+            )
+        )
+    ]
+    detalle = [cuenta for cuenta in cuentas if not cuenta.es_total]
+    total = next(cuenta for cuenta in cuentas if cuenta.es_total)
+
+    assert sum(cuenta.montos_periodos["2018"] for cuenta in detalle) == 42788
+    assert sum(cuenta.montos_periodos["2017"] for cuenta in detalle) == 40005
+    assert total.montos_periodos["2018"] == 42788
+    assert total.montos_periodos["2017"] == 40005
+
+
+def test_balance_auditado_descarta_pie_legal_de_notas():
+    assert parser._es_linea_basura(
+        "Las notas adjuntas números 1 al 27 forman parte integral de estos estados financieros"
+    )
+    assert parser._es_linea_basura(
+        "al 27 forman parte integral de estos estados financieros 2"
+    )
+
+
+def test_balance_auditado_reconoce_patrimonio_atribuible_como_subtotal():
+    cuenta = parser.parsear_linea(
+        "Patrimonio atribuible a los propietarios de la controladora (148) 4.352",
+        1, parser.FormatoCodigo.SIN_CODIGO, ".",
+        periodo_comparativo=True,
+        years=["2018", "2017"],
+        currencies=["USD"],
+        leading_note_column=True,
+    )
+
+    assert cuenta is not None
+    assert cuenta.es_total is True
+    assert cuenta.montos_periodos["2018"] == -148
+    assert cuenta.montos_periodos["2017"] == 4352
+
+
 def test_extractor_coordenadas_recupera_ceros_ocr_sin_contaminar_nombre():
     page = FakePage([
         _header(),

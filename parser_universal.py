@@ -85,6 +85,68 @@ def detectar_años_y_monedas(lineas: list[str]) -> tuple[list[str], list[str]]:
     return años, monedas
 
 
+def detectar_columna_nota_comparativa(
+    lineas: list[str], years: Optional[list[str]] = None,
+) -> bool:
+    """Detecta una referencia de nota antes de dos importes comparativos.
+
+    En estados financieros auditados es frecuente que los años aparezcan en
+    una línea y la cabecera ``Nota MUS$ MUS$`` en la siguiente. La referencia
+    de nota de cada fila, por ejemplo ``(21)``, no es un importe ni un tercer
+    periodo. La detección exige dos años y una cabecera breve con dos unidades
+    monetarias, o bien una cabecera que contenga directamente ambos años.
+    """
+    numeric_years = [
+        year for year in (years or [])
+        if re.fullmatch(r"(?:19|20)\d{2}", year)
+    ]
+    if len(numeric_years) < 2:
+        return False
+
+    candidates = lineas[:100]
+    for index, line in enumerate(candidates):
+        normalized = _sin_acentos(line).lower().strip()
+        if not re.search(r"\bnota\b", normalized):
+            continue
+
+        same_line_years = re.findall(r"\b(?:19|20)\d{2}\b", normalized)
+        if len(dict.fromkeys(same_line_years)) >= 2:
+            return True
+
+        unit_tokens = [
+            token.strip(".,:;()[]")
+            for token in normalized.split()
+            if (
+                "$" in token
+                or token.strip(".,:;()[]")
+                in {"usd", "clp", "uf", "mus", "miles"}
+            )
+        ]
+        if len(unit_tokens) >= 2:
+            return True
+
+        # También admite una cabecera partida en dos líneas, por ejemplo
+        # ``Nota`` seguida por ``MUS$ MUS$``. Se limita a líneas breves para
+        # no confundir una nota narrativa con una columna tabular.
+        if len(normalized) <= 40:
+            nearby = " ".join(
+                _sin_acentos(candidate).lower()
+                for candidate in candidates[max(0, index - 2):index + 3]
+            )
+            nearby_units = [
+                token.strip(".,:;()[]")
+                for token in nearby.split()
+                if (
+                    "$" in token
+                    or token.strip(".,:;()[]")
+                    in {"usd", "clp", "uf", "mus", "miles"}
+                )
+            ]
+            if len(nearby_units) >= 2:
+                return True
+    return False
+
+
 def split_side_by_side(line: str) -> list[str]:
     tokens = line.split()
     if len(tokens) < 6:
@@ -1724,6 +1786,7 @@ def normalizar_token_ocr(token: str) -> str:
 
 PATRON_TOTAL = re.compile(
     r'^(?:total(?:es)?|sub-?total(?:es)?|sumas?(?: iguales)?)\b|'
+    r'^patrimonio\s+atribuible\s+a\b.*$|'
     r'^(?:resultado(?: del ejercicio| [\x22\x27]?(?:positivo|negativo))?|utilidad(?: neta| del ejercicio)?|'
     r'perdida(?: o ganancia| neta| neto| del ejercicio)?)$',
     re.IGNORECASE
@@ -1755,6 +1818,8 @@ GARBAGE_PATTERNS: list[re.Pattern] = [
     re.compile(r'^\s*(?:19|20)\d{2}\s+(?:19|20)\d{2}\s*$'),
     # Notas al pie
     re.compile(r'^\s*(?:Notas?\s+\d+(?:\s*(?:a|l|y|al)\s*\d+)?|Ver\s+Notas?\s+\d+(?:\s*(?:a|l|y|al)\s*\d+)?)\s*$', re.I),
+    re.compile(r'^\s*Las\s+notas?\s+adjuntas\b.*$', re.I),
+    re.compile(r'^\s*(?:al|a\s+la)\s+\d+\s+forman?\s+parte\s+integral\b.*$', re.I),
     re.compile(r'^\s*Art[ií]culo(?:\s+\d+)?\s+C[oó]digo\s+Tributario\b.*$', re.I),
     re.compile(r'^\s*con\s+los\s+antecedentes\s+aportados\s+por\s+el\s+Contribuyente\s*$', re.I),
     # Firmas / cargos
@@ -2092,7 +2157,12 @@ def parsear_linea(
         note_token = montos_tokens[0]
         note_value = parsear_monto(note_token, separador_miles)
         if (
-            re.fullmatch(r"\d{1,2}(?:\.\d{1,2}){0,2}", note_token)
+            re.fullmatch(
+                r"(?:\d{1,2}(?:\.\d{1,2}){0,2}|"
+                r"\(\d{1,2}(?:\.\d{1,2}){0,2}\)|"
+                r"\[\d{1,2}(?:\.\d{1,2}){0,2}\])",
+                note_token,
+            )
             and note_value is not None
             and abs(float(note_value)) <= 99
         ):
@@ -2990,13 +3060,7 @@ class ParserPDF:
 
         # Scan years and currencies dynamically
         years, currencies = detectar_años_y_monedas(lineas)
-        leading_note_column = any(
-            re.search(
-                r"\bnota\b.*\b(?:19|20)\d{2}\b.*\b(?:19|20)\d{2}\b",
-                _sin_acentos(linea), re.I,
-            )
-            for linea in lineas[:80]
-        )
+        leading_note_column = detectar_columna_nota_comparativa(lineas, years)
 
         # Pre-process lines to associate vertical labels and amounts
         lineas = asociar_lineas_verticales(lineas)

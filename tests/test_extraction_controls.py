@@ -139,6 +139,26 @@ app._mostrar_correccion_extraccion("balance.pdf")
     assert any("Falta un subtotal" in w.value for w in at.warning)
 
 
+def test_ui_no_atribuye_a_ocr_una_tabla_nativa_no_editable():
+    at = AppTest.from_string('''
+import streamlit as st
+import app_validacion as app
+import parser_universal as parser
+st.session_state.extraction_pending = {"balance.pdf": parser.ResultadoParseo(
+    archivo="balance.pdf", formato_codigo=parser.FormatoCodigo.SIN_CODIGO,
+    separador_miles=".", requirio_ocr=False, rotacion_aplicada=0,
+    cuentas=[], certificacion_extraccion=parser.CertificacionExtraccion(
+        estado="fallida", razones=["No se recuperó una tabla utilizable."],
+    ),
+)}
+app._mostrar_correccion_extraccion("balance.pdf")
+''').run()
+
+    assert not at.exception
+    warning = next(w.value for w in at.warning if "filas tabulares" in w.value)
+    assert "no necesariamente al OCR" in warning
+
+
 def test_ui_separa_controles_sin_opcion_de_excluir_y_conserva_el_bloqueo():
     at = AppTest.from_string('''
 import streamlit as st
