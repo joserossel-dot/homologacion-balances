@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pandas as pd
+import pytest
 
 import app_validacion as app
 import parser_universal as parser
@@ -136,6 +137,66 @@ def test_balance_auditado_descarta_nota_parentetica_y_conserva_ambos_periodos():
     assert cuenta.monto == 110193
     assert cuenta.montos_periodos["2018"] == 110193
     assert cuenta.montos_periodos["2017"] == 124879
+
+
+def test_balance_auditado_une_glosas_partidas_con_nota_y_dos_periodos():
+    lines = [
+        "Inversiones contabilizadas utilizando el método",
+        "de la participación (13) 689 900",
+        "Participación en las pérdidas de asociadas",
+        "que se contabilizan utilizando el valor patrimonial (13) (211) (600)",
+        "Ganancia atribuible a los propietarios",
+        "de la controladora (3.488) 800",
+    ]
+
+    merged = parser.asociar_lineas_verticales(lines)
+
+    assert merged == [
+        "Inversiones contabilizadas utilizando el método de la participación (13) 689 900",
+        "Participación en las pérdidas de asociadas que se contabilizan utilizando el valor patrimonial (13) (211) (600)",
+        "Ganancia atribuible a los propietarios de la controladora (3.488) 800",
+    ]
+    accounts = [
+        parser.parsear_linea(
+            line, index, parser.FormatoCodigo.SIN_CODIGO, ".",
+            periodo_comparativo=True, years=["2018", "2017"],
+            currencies=["MUS$"], leading_note_column=True,
+        )
+        for index, line in enumerate(merged)
+    ]
+    assert [account.nombre for account in accounts] == [
+        "Inversiones contabilizadas utilizando el método de la participación",
+        "Participación en las pérdidas de asociadas que se contabilizan utilizando el valor patrimonial",
+        "Ganancia atribuible a los propietarios de la controladora",
+    ]
+    assert accounts[1].montos_periodos["2018"] == -211.0
+    assert accounts[1].montos_periodos["2017"] == -600.0
+    assert accounts[2].montos_periodos["2018"] == -3488.0
+    assert accounts[2].montos_periodos["2017"] == 800.0
+
+
+@pytest.mark.parametrize("line", [
+    "Ganancia bruta 2.572 6.409",
+    "Ganancia (Pérdida) antes de Impuestos (4.860) 2.058",
+    "Ganancia (pérdida) procedente de operaciones continuadas (3.462) 1.069",
+    "Ganancia (pérdida) del ejercicio (3.462) 1.069",
+])
+def test_balance_auditado_marca_resultados_calculados_como_controles(line):
+    account = parser.parsear_linea(
+        line, 1, parser.FormatoCodigo.SIN_CODIGO, ".",
+        periodo_comparativo=True, years=["2018", "2017"],
+    )
+
+    assert account is not None
+    assert account.es_total
+
+
+def test_balance_auditado_no_convierte_encabezado_de_periodos_en_cuenta():
+    assert parser.parsear_linea(
+        "31 de diciembre de 2018 2017",
+        1, parser.FormatoCodigo.SIN_CODIGO, ".",
+        periodo_comparativo=True, years=["2018", "2017"],
+    ) is None
 
 
 def test_balance_auditado_reproduce_subtotal_sin_sumar_referencias_de_nota():

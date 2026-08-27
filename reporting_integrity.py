@@ -9,7 +9,9 @@ import math
 from pathlib import Path
 
 
-RESULTADOS_MIXTOS = frozenset({"ER.13", "ER.14", "ER.15", "ER.16"})
+RESULTADOS_MIXTOS = frozenset({
+    "ER.13", "ER.14", "ER.15", "ER.16", "ER.20", "ER.21",
+})
 
 
 @lru_cache(maxsize=1)
@@ -68,6 +70,11 @@ def conciliar_resultados(filas, catalogo, tolerancia=0.01):
             continue
         codigo = str(row.get("codigo_clasificado") or "")
         nombre = str(row.get("nombre_original") or "")
+        entry = catalogo.get(codigo, {})
+        # Los desgloses de atribución explican cómo se distribuye la utilidad
+        # neta. Se muestran y exportan, pero no vuelven a sumarse al resultado.
+        if entry.get("aditivo_resultado") is False:
+            continue
         try:
             monto = float(row.get("monto"))
             if not math.isfinite(monto):
@@ -84,7 +91,6 @@ def conciliar_resultados(filas, catalogo, tolerancia=0.01):
             declarados[codigo] = declarados.get(codigo, 0.0) + monto
         if not codigo.startswith("ER."):
             continue
-        entry = catalogo.get(codigo, {})
         if codigo == 'ER.11' or entry.get("clasificable") is False:
             if codigo != "ER.11":
                 problemas.append(f"{nombre}: asignada a una categoría calculada ({codigo})")

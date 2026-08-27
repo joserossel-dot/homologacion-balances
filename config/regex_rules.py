@@ -39,6 +39,8 @@ REGLAS_REGEX = [
     (r"\bimpuesto\s*(a\s*la\s*renta|primera\s*categoria)\b", "ER.10", 0.90),
     (r"\butilidad\s*neta|resultado\s*neto|net\s*income|ganancia\s*neta", "ER.11", 0.92),
     (r"\b(depreciaci[oó]n(?:es)?|amortizaci[oó]n(?:es)?|deterioro)\s+acumulad[ao]s?\b", "ANC.01.01", 0.90),
+    (r"\b(?:ganancia|p[eé]rdida|resultado).*atribuible\s+a\s+los\s+propietarios.*\bcontroladora\b", "ER.20", 0.97),
+    (r"\b(?:ganancia|p[eé]rdida|resultado).*atribuible\s+a\s+(?:las\s+)?participaciones\s+no\s+controladoras\b", "ER.21", 0.97),
 ]
 
 REGLAS_COMPILADAS = [(re.compile(p, re.IGNORECASE | re.UNICODE), c, conf) for p, c, conf in REGLAS_REGEX]

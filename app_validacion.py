@@ -41,7 +41,7 @@ from rapidfuzz import fuzz, process
 from dotenv import load_dotenv
 
 from clasificador_codigo_cuenta import ClasificadorCodigo
-from catalog_selection import opciones_clasificacion
+from catalog_selection import es_clasificable, opciones_clasificacion
 from gold_standard.builder import GoldBuilder
 from gold_standard.promotion import promote as promover_revisiones
 from gold_standard.runtime import RuntimeGoldStorage
@@ -703,6 +703,10 @@ def _alternativas_revision(
 
     def agregar(codigo: str | None, score: float, fuente: str, evidencia: str):
         if not codigo or codigo not in catalogo:
+            return
+        # Las cuentas calculadas pueden explicar una coincidencia, pero no
+        # deben ofrecer un botón que el selector no puede aceptar.
+        if not es_clasificable(catalogo[codigo]):
             return
         if not _codigo_compatible_con_origen(
             codigo, origen_columna, monto, nombre, catalogo,
@@ -3459,8 +3463,23 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                             prefijos = {'activo_corriente': 'AC.', 'activo_no_corriente': 'ANC.',
                                         'pasivo_corriente': 'PC.', 'pasivo_no_corriente': 'PNC.',
                                         'patrimonio': 'PAT.', 'resultado': 'ER.'}
-                            if candidato in catalogo or not candidato.startswith(prefijos[nuevo_cat]):
-                                st.error('Use un código nuevo con el prefijo de la categoría seleccionada. No se puede redefinir una categoría existente desde esta cuenta.')
+                            if candidato in catalogo:
+                                nombre_existente = catalogo[candidato].get(
+                                    'nombre_estandar', candidato,
+                                )
+                                st.error(
+                                    f'El código {candidato} ya existe como '
+                                    f'“{nombre_existente}”. Use un código libre. '
+                                    'No se puede redefinir una categoría '
+                                    'existente desde esta cuenta.'
+                                )
+                                st.stop()
+                            if not candidato.startswith(prefijos[nuevo_cat]):
+                                st.error(
+                                    'El código debe comenzar con el prefijo '
+                                    f'{prefijos[nuevo_cat]} correspondiente a '
+                                    f'{nuevo_cat}. La categoría no fue creada.'
+                                )
                                 st.stop()
                             if not _codigo_compatible_con_origen(candidato, row.get('origen_columna'), row.get('monto'), _nombre_mostrar(row), {**catalogo, candidato: nueva_entrada}):
                                 st.error('La nueva categoría contradice la naturaleza de esta cuenta. No fue creada.')

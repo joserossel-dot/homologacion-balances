@@ -29,6 +29,24 @@ def test_complete_catalog_includes_empty_categories_and_calculates_once():
     pd.testing.assert_frame_equal(original, grouped)
 
 
+def test_atribuciones_se_muestran_pero_no_entran_en_utilidad_calculada():
+    grouped = pd.DataFrame([
+        dict(codigo_clasificado="ER.01", monto_total=110193, num_cuentas=1),
+        dict(codigo_clasificado="ER.02", monto_total=-113655, num_cuentas=1),
+        dict(codigo_clasificado="ER.20", monto_total=-3488, num_cuentas=1),
+        dict(codigo_clasificado="ER.21", monto_total=26, num_cuentas=1),
+    ])
+
+    table, formulas = complete_catalog(grouped, catalogo_local(), True)
+    values = table.set_index("codigo_clasificado").monto_total
+
+    assert values["ER.11"] == -3462
+    assert values["ER.20"] == -3488
+    assert values["ER.21"] == 26
+    assert "ER.20" not in formulas["ER.11"]
+    assert "ER.21" not in formulas["ER.11"]
+
+
 def test_missing_income_is_not_reported_as_zero_profit():
     table, _ = complete_catalog(pd.DataFrame([
         dict(codigo_clasificado="AC.01", monto_total=100, num_cuentas=1),

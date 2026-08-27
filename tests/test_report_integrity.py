@@ -119,6 +119,23 @@ def test_resultado_calculado_no_oculta_error_aunque_ambos_controles_coincidan():
     assert any('ER.11' in p for p in result['problemas'])
 
 
+def test_atribuciones_controladora_y_no_controladores_no_duplican_resultado():
+    rows = [
+        cuenta('Ingresos', 110193, 'ganancia', 'ER.01'),
+        cuenta('Costos y gastos', 113655, 'perdida', 'ER.02'),
+        cuenta('Atribuible a propietarios de la controladora', 3488,
+               'perdida', 'ER.20'),
+        cuenta('Atribuible a participaciones no controladoras', 26,
+               'ganancia', 'ER.21'),
+    ]
+
+    result = conciliar_resultados(rows, catalogo_local())
+
+    assert result['cuadra']
+    assert result['resultado_origen'] == -3462
+    assert result['resultado_homologado'] == -3462
+
+
 def review_app(rows):
     import streamlit as st
     import pandas as pd

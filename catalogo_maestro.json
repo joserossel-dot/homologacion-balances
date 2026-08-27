@@ -867,6 +867,36 @@
     "clasificable": false,
     "grupo_presentacion": "Gastos"
   },
+  "ER.20": {
+    "codigo_estandar": "ER.20",
+    "nombre_estandar": "Resultado Atribuible a Propietarios de la Controladora",
+    "categoria": "resultado",
+    "tipo_estado": "resultados",
+    "naturaleza": "mixta",
+    "signo_normal": 1,
+    "es_deuda_financiera": false,
+    "es_activo_liquido": false,
+    "afecta_ebitda": false,
+    "descripcion": "Porción de la utilidad o pérdida consolidada atribuible a los propietarios de la sociedad controladora.",
+    "clasificable": true,
+    "aditivo_resultado": false,
+    "grupo_presentacion": "Otros ingresos"
+  },
+  "ER.21": {
+    "codigo_estandar": "ER.21",
+    "nombre_estandar": "Resultado Atribuible a Participaciones No Controladoras",
+    "categoria": "resultado",
+    "tipo_estado": "resultados",
+    "naturaleza": "mixta",
+    "signo_normal": 1,
+    "es_deuda_financiera": false,
+    "es_activo_liquido": false,
+    "afecta_ebitda": false,
+    "descripcion": "Porción de la utilidad o pérdida consolidada atribuible a participaciones no controladoras.",
+    "clasificable": true,
+    "aditivo_resultado": false,
+    "grupo_presentacion": "Otros ingresos"
+  },
   "AC.10": {
     "codigo_estandar": "AC.10",
     "nombre_estandar": "Deudores Varios",

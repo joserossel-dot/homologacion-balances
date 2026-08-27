@@ -73,6 +73,54 @@ class TestAlternativasRevision:
         assert [item['codigo'] for item in alternativas] == ['AC.03']
         assert alternativas[0]['score'] == 1.0
 
+    def test_no_ofrece_codigo_calculado_que_el_selector_no_admite(self):
+        catalogo = {
+            'ER.11': {
+                'nombre_estandar': 'Utilidad Neta',
+                'categoria': 'resultado', 'naturaleza': 'acreedora',
+                'clasificable': False,
+            },
+            'ER.20': {
+                'nombre_estandar': 'Resultado Atribuible a Propietarios',
+                'categoria': 'resultado', 'naturaleza': 'mixta',
+                'clasificable': True, 'aditivo_resultado': False,
+            },
+        }
+        motor = MotorHibridoLocal([{
+            'cuenta_original': 'Ganancia pérdida del ejercicio',
+            'codigo_estandar': 'ER.11',
+            'fuente': 'validacion_humana',
+        }])
+
+        alternativas = _alternativas_revision(
+            nombre='Ganancia pérdida atribuible a propietarios',
+            sugerido='ER.11', confianza=0.92,
+            origen_columna='perdida', monto=3462,
+            catalogo=catalogo, motor=motor,
+        )
+
+        assert all(item['codigo'] != 'ER.11' for item in alternativas)
+        assert [item['codigo'] for item in alternativas] == ['ER.20']
+
+    @pytest.mark.parametrize('codigo', ['ER.20', 'ER.21'])
+    @pytest.mark.parametrize('origen,monto', [
+        ('ganancia', 26), ('perdida', 3488),
+    ])
+    def test_atribuciones_admiten_resultado_positivo_o_negativo(
+        self, codigo, origen, monto,
+    ):
+        catalogo = {
+            codigo: {
+                'nombre_estandar': 'Resultado atribuible',
+                'categoria': 'resultado', 'naturaleza': 'mixta',
+                'clasificable': True, 'aditivo_resultado': False,
+            },
+        }
+
+        assert _codigo_compatible_con_origen(
+            codigo, origen, monto, 'Resultado atribuible', catalogo,
+        )
+
 
 class TestSeleccionLote:
     def test_reemplaza_agrega_y_quita_sin_mutar_el_original(self):

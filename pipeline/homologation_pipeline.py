@@ -60,12 +60,13 @@ class HomologationPipeline:
     # ------------------------------------------------------------------
     # Regex fallback — only audited rules with 100% precision (Sprint 28.5A)
     # Indices into REGLAS_REGEX: PC.05(16), PC.08(19), PAT.02(26),
-    #                             ER.04(31), ER.09(34), ER.10(35), ER.11(36)
+    #                             ER.04(31), ER.09(34), ER.10(35), ER.11(36),
+    #                             ER.20(38), ER.21(39)
     # ------------------------------------------------------------------
 
     _REGEX_FALLBACK: list[tuple[re.Pattern, str, float]] = [
         (re.compile(REGLAS_REGEX[i][0], re.IGNORECASE | re.UNICODE), REGLAS_REGEX[i][1], REGLAS_REGEX[i][2])
-        for i in (16, 19, 26, 31, 34, 35, 36)
+        for i in (16, 19, 26, 31, 34, 35, 36, 38, 39)
     ]
     _REGEX_CONTEXTUAL: list[tuple[re.Pattern, str, float]] = [
         (re.compile(pattern, re.IGNORECASE | re.UNICODE), code, confidence)
@@ -537,6 +538,18 @@ class HomologationPipeline:
             interp = BalanceInterpreter(ab)
 
             classification_amount = interp.classification_amount
+            # Los estados financieros auditados suelen traer sólo importes
+            # comparativos y no las ocho columnas del balance tributario. En
+            # ese formato ``BalanceInterpreter`` no puede inferir una columna
+            # física, pero el monto del período actual sigue siendo una cuenta
+            # clasificable. Los controles impresos permanecen fuera del flujo.
+            if (
+                classification_amount is None
+                and cr.monto is not None
+                and cr.montos_periodos
+                and not cr.es_total
+            ):
+                classification_amount = float(cr.monto)
 
             tipo_result = type_resolver.resolve(
                 origen_columna=cr.origen_columna,

@@ -218,6 +218,13 @@ def split_side_by_side(line: str) -> list[str]:
 
 
 def asociar_lineas_verticales(lineas: list[str]) -> list[str]:
+    """Une glosas partidas antes de interpretar sus importes.
+
+    En estados auditados una misma fila suele ocupar dos líneas: la primera
+    contiene el inicio de la glosa y la segunda su continuación, la nota y los
+    importes comparativos. La regla exige que la segunda línea comience con
+    una expresión de continuación para no unir encabezados ni cuentas vecinas.
+    """
     new_lines = []
     skip = False
 
@@ -240,6 +247,30 @@ def asociar_lineas_verticales(lineas: list[str]) -> list[str]:
             if cleaned_next == "" and l_next and re.search(r'\d', l_next):
                 merged = f"{l_curr} {l_next}"
                 new_lines.append(merged)
+                skip = True
+                continue
+
+            # La continuación también puede contener texto antes de la nota
+            # y los montos, por ejemplo ``de la participación (13) 689 900``.
+            # El inicio en minúscula o con un conector reduce el riesgo de
+            # fusionar dos filas contables independientes.
+            text_before_amount = re.split(
+                r"\s+(?=(?:\(?-?[\d.,]+\)?|[-—−])(?:\s|$))",
+                l_next,
+                maxsplit=1,
+            )[0].strip(" .-–—−")
+            continuation = bool(re.match(
+                r"^(?:de(?:l|\s+la|\s+los|\s+las)?|que|corriente|"
+                r"no\s+corriente|continuad[ao]s?|atribuible|por)\b",
+                _sin_acentos(text_before_amount),
+                re.IGNORECASE,
+            ))
+            if (
+                continuation
+                and re.search(r"\d", l_next)
+                and cleaned_next
+            ):
+                new_lines.append(f"{l_curr} {l_next}")
                 skip = True
                 continue
 
@@ -1788,7 +1819,9 @@ PATRON_TOTAL = re.compile(
     r'^(?:total(?:es)?|sub-?total(?:es)?|sumas?(?: iguales)?)\b|'
     r'^patrimonio\s+atribuible\s+a\b.*$|'
     r'^(?:resultado(?: del ejercicio| [\x22\x27]?(?:positivo|negativo))?|utilidad(?: neta| del ejercicio)?|'
-    r'perdida(?: o ganancia| neta| neto| del ejercicio)?)$',
+    r'perdida(?: o ganancia| neta| neto| del ejercicio)?)$|'
+    r'^ganancia(?:\s*\(p[eé]rdida\))?\s+(?:bruta|antes\s+de\s+impuestos|'
+    r'procedente\s+de\s+operaciones\s+(?:continuadas|discontinuadas)|del\s+ejercicio)$',
     re.IGNORECASE
 )
 
@@ -1831,6 +1864,12 @@ GARBAGE_PATTERNS: list[re.Pattern] = [
     re.compile(r'^\s*-\s*\d+\s*-\s*$'),
     # Fechas sueltas (dd de mes de aaaa o dd/mm/aaaa)
     re.compile(r'^\s*\d{1,2}\s*de\s+\w+\s+de\s+\d{4}\s*$', re.I),
+    # Cabeceras comparativas: ``31 de diciembre de 2018 2017``.
+    re.compile(
+        r'^\s*(?:al\s+)?\d{1,2}\s+de\s+\w+(?:\s+de)?\s+'
+        r'(?:19|20)\d{2}(?:\s+(?:19|20)\d{2})?\s*$',
+        re.I,
+    ),
     re.compile(r'^\s*\d{1,2}/\d{1,2}/\d{2,4}\s*$'),
 ]
 

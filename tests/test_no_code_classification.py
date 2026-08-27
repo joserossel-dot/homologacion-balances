@@ -1,6 +1,8 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import pytest
+
 from parser_universal import (
     CuentaRaw, FormatoCodigo, OrigenColumna, ResultadoParseo,
 )
@@ -102,6 +104,53 @@ def test_ganancias_acumuladas_negativas_clasifican_pat03(tmp_path):
     )
 
     assert result['standard_code'] == 'PAT.03'
+
+
+@pytest.mark.parametrize('nombre,codigo', [
+    ('Ganancia atribuible a los propietarios de la controladora', 'ER.20'),
+    ('Ganancia atribuible a participaciones no controladoras', 'ER.21'),
+])
+@pytest.mark.parametrize('origen', ['GANANCIA', 'PERDIDA'])
+def test_resultado_atribuible_clasifica_sin_depender_del_signo(
+    tmp_path, nombre, codigo, origen,
+):
+    pipeline = HomologationPipeline(db_path=tmp_path / 'gold.db')
+
+    result = pipeline._classify_by_regex(nombre, origen)
+
+    assert result['standard_code'] == codigo
+    assert result['method'] == 'regex_fallback'
+    assert result['confidence'] == 0.97
+
+
+def test_process_clasifica_monto_comparativo_sin_ocho_columnas(tmp_path):
+    pipeline = HomologationPipeline(db_path=tmp_path / 'gold.db')
+    cuenta = CuentaRaw(
+        linea=1, codigo=None,
+        nombre='Ganancia atribuible a participaciones no controladoras',
+        monto=26, origen_columna=OrigenColumna.DESCONOCIDO,
+        montos_periodos={'2018': 26, '2017': 269},
+    )
+    pipeline._parser.parsear = MagicMock(return_value=ResultadoParseo(
+        archivo='auditado.pdf', formato_codigo=FormatoCodigo.SIN_CODIGO,
+        separador_miles='.', requirio_ocr=False, rotacion_aplicada=0,
+        cuentas=[cuenta],
+    ))
+    pipeline._semantic_engine.interpret = MagicMock(
+        return_value=SimpleNamespace(to_dict=lambda: {
+            'semantic_type': 'unknown', 'confidence': 0.0,
+        })
+    )
+    pipeline._rule_processor.aplicar = MagicMock(return_value=SimpleNamespace(
+        aplica=False, codigo_final='ER.21', nota='', requiere_revision=False,
+    ))
+
+    result = pipeline.process(tmp_path / 'auditado.pdf')
+
+    assert result['accounts_classified'] == 1
+    assert not result['ignored']
+    assert result['classified'][0]['standard_code'] == 'ER.21'
+    assert result['classified'][0]['classification_amount'] == 26
 
 
 def test_process_aplica_reglas_a_la_cuenta_actual(tmp_path):

@@ -12,7 +12,7 @@ CATEGORY_LABELS = dict(zip(CATEGORY_ORDER, (
 ER_ORDER = (
     "ER.01", "ER.02", "ER.03", "ER.04", "ER.05", "ER.06", "ER.07",
     "ER.08", "ER.12", "ER.09", "ER.13", "ER.14", "ER.15", "ER.16",
-    "ER.17", "ER.18", "ER.19", "ER.10", "ER.11",
+    "ER.17", "ER.18", "ER.19", "ER.10", "ER.11", "ER.20", "ER.21",
 )
 CALCULATED = {"ER.03", "ER.06", "ER.08", "ER.19", "ER.11"}
 
@@ -36,7 +36,9 @@ def complete_catalog(grouped, catalog, has_income_detail, amount_columns=None):
         rows.append(row)
     by_code = {r["codigo_clasificado"]: r for r in rows}
     detail_codes = [k for k, r in by_code.items() if r["categoria"] == "resultado"
-                    and catalog.get(k, {}).get("clasificable") is not False and k not in CALCULATED]
+                    and catalog.get(k, {}).get("clasificable") is not False
+                    and catalog.get(k, {}).get("aditivo_resultado") is not False
+                    and k not in CALCULATED]
     formulas = {
         "ER.03": ["ER.01", "ER.02"],
         "ER.06": ["ER.01", "ER.02", "ER.04", "ER.05"],
