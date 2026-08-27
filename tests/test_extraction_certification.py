@@ -139,6 +139,29 @@ def test_balance_auditado_descarta_nota_parentetica_y_conserva_ambos_periodos():
     assert cuenta.montos_periodos["2017"] == 124879
 
 
+def test_balance_auditado_conserva_guion_cero_despues_de_nota_parentetica():
+    lines = [
+        "2018 2017",
+        "Nota M$ M$",
+        "Pasivos por Impuestos corriente (12) 5.265.398 -",
+    ]
+    years, currencies = parser.detectar_años_y_monedas(lines)
+    has_note_column = parser.detectar_columna_nota_comparativa(lines, years)
+    cuenta = parser.parsear_linea(
+        lines[-1], 2, parser.FormatoCodigo.SIN_CODIGO, ".",
+        periodo_comparativo=True,
+        years=years,
+        currencies=currencies,
+        leading_note_column=has_note_column,
+    )
+
+    assert cuenta is not None
+    assert cuenta.nombre == "Pasivos por Impuestos corriente"
+    assert cuenta.monto == 5265398
+    assert cuenta.montos_periodos["2018"] == 5265398
+    assert cuenta.montos_periodos["2017"] == 0
+
+
 def test_balance_auditado_une_glosas_partidas_con_nota_y_dos_periodos():
     lines = [
         "Inversiones contabilizadas utilizando el método",

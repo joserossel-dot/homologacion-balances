@@ -2127,6 +2127,7 @@ def parsear_linea(
     descartados_finales = 0
     while tokens and descartados_finales < 2 and \
             normalizar_token_ocr(tokens[-1]) != '0' and \
+            normalizar_token_ocr(tokens[-1]) != '-' and \
             not re.search(r'\d', tokens[-1]) and len(tokens[-1]) <= 2:
         tokens.pop()
         descartados_finales += 1
