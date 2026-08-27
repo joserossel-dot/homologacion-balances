@@ -33,7 +33,9 @@ from datetime import date, datetime
 from io import BytesIO
 from html import escape
 from document_scope import page_count, parse_pages, select_pdf, render_page
-from report_presentation import complete_catalog, add_report_sheets
+from report_presentation import (
+    complete_catalog, add_report_sheets, apply_depreciation_reclassification,
+)
 
 import pandas as pd
 import streamlit as st
@@ -74,6 +76,7 @@ from account_qualification import qualify_cuentas as _safe_qualify_cuentas, \
 from persistence.neon_store import NeonKnowledgeStore
 from reporting_integrity import (
     resultado_compatible, importe_resultado_homologado, conciliar_resultados,
+    validar_reclasificacion_depreciacion,
 )
 
 
@@ -1196,7 +1199,7 @@ def _confirmar_alcance_documentos(archivos) -> bool:
                     st.session_state.company_periodos_seleccionados = ()
                     for state_key in ("resultados", "metadata_files", "document_intel", "extraction_pending",
                                       "extraction_resolved", "extraction_certifications", "processed_at",
-                                      "quality_controls"):
+                                      "quality_controls", "depreciation_reclassifications"):
                         st.session_state.setdefault(state_key, {}).pop(name, None)
             st.session_state.document_pages = selections
             st.session_state.document_scope_confirmed = signature
@@ -1232,6 +1235,8 @@ def main():
         st.session_state.extraction_resolved = {}
     if 'extraction_certifications' not in st.session_state:
         st.session_state.extraction_certifications = {}
+    if 'depreciation_reclassifications' not in st.session_state:
+        st.session_state.depreciation_reclassifications = {}
     if 'correcciones' not in st.session_state:
         st.session_state.correcciones = []
 
@@ -1280,6 +1285,7 @@ def main():
         st.session_state.extraction_pending = {}
         st.session_state.extraction_resolved = {}
         st.session_state.extraction_certifications = {}
+        st.session_state.depreciation_reclassifications = {}
         st.session_state.metadata_confirmada = False
         st.session_state.document_scope_confirmed = None
         st.session_state.document_scope_editing = False
@@ -3824,6 +3830,150 @@ def _valor_fila_periodo(row: pd.Series, periodo: str, posicion: int):
     return None
 
 
+def _saldo_codigo_agrupado(agrupado: pd.DataFrame, codigo: str) -> float:
+    valores = pd.to_numeric(
+        agrupado.loc[agrupado["codigo_clasificado"] == codigo, "monto_total"],
+        errors="coerce",
+    ).fillna(0)
+    return float(valores.sum())
+
+
+def _gestionar_reclasificacion_depreciacion(
+        reportes_periodo: list[dict], archivo_nombre: str) -> tuple[dict, list[str]]:
+    """Solicita la apertura desde notas cuando ER.07 no fue extraída."""
+    ajustes_documento = st.session_state.setdefault(
+        "depreciation_reclassifications", {},
+    ).setdefault(archivo_nombre, {})
+    ajustes_aplicables = {}
+    pendientes = []
+    periodos_sin_depreciacion = []
+    for reporte in reportes_periodo:
+        agrupado = reporte["agrupado"]
+        tiene_resultados = any(
+            str(codigo).startswith("ER.")
+            for codigo in agrupado.get("codigo_clasificado", pd.Series(dtype=str))
+        )
+        depreciacion = abs(_saldo_codigo_agrupado(agrupado, "ER.07"))
+        if tiene_resultados and depreciacion <= 0.01:
+            periodos_sin_depreciacion.append(reporte)
+    if not periodos_sin_depreciacion:
+        return ajustes_aplicables, pendientes
+
+    st.subheader("Depreciación del ejercicio informada en notas")
+    st.info(
+        "No se detectó una cuenta separada de Depreciación y Amortización en uno o "
+        "más períodos. Confirme que no corresponde o informe su distribución. El "
+        "ajuste sólo abre el gasto: no cambia la utilidad del período."
+    )
+    opciones = {
+        "pending": "Pendiente de revisar en las notas",
+        "none": "No existe depreciación por separar en este período",
+        "notes": "Ingresar depreciación incluida en otras cuentas",
+    }
+    for reporte in periodos_sin_depreciacion:
+        periodo = str(reporte["periodo"])
+        guardado = ajustes_documento.get(periodo, {})
+        identificador = hashlib.sha256(
+            f"{archivo_nombre}:{periodo}:depreciacion".encode()
+        ).hexdigest()[:14]
+        with st.container(border=True):
+            st.markdown(f"#### Período {periodo}")
+            modo_guardado = guardado.get("mode", "pending")
+            modo = st.selectbox(
+                "Tratamiento",
+                list(opciones),
+                index=list(opciones).index(modo_guardado)
+                if modo_guardado in opciones else 0,
+                format_func=opciones.get,
+                key=f"depreciation_mode_{identificador}",
+            )
+            total = costo = administracion = 0.0
+            if modo == "notes":
+                c1, c2, c3 = st.columns(3)
+                total = c1.number_input(
+                    "Depreciación total del período",
+                    min_value=0.0, value=float(guardado.get("total", 0)),
+                    step=1.0, format="%.2f",
+                    key=f"depreciation_total_{identificador}",
+                )
+                costo = c2.number_input(
+                    "Incluida en Costo de Ventas",
+                    min_value=0.0, value=float(guardado.get("cost_of_sales", 0)),
+                    step=1.0, format="%.2f",
+                    key=f"depreciation_cost_{identificador}",
+                )
+                administracion = c3.number_input(
+                    "Incluida en Gastos de Administración",
+                    min_value=0.0, value=float(guardado.get("administration", 0)),
+                    step=1.0, format="%.2f",
+                    key=f"depreciation_admin_{identificador}",
+                )
+                st.caption(
+                    "La suma de las dos porciones debe coincidir con la depreciación "
+                    "total y no puede superar el saldo de la cuenta de origen."
+                )
+            guardar = st.button(
+                "Guardar tratamiento", key=f"save_depreciation_{identificador}",
+            )
+            if guardar:
+                errores = []
+                if modo == "pending":
+                    ajustes_documento.pop(periodo, None)
+                elif modo == "none":
+                    ajustes_documento[periodo] = {"mode": "none"}
+                else:
+                    errores = validar_reclasificacion_depreciacion(
+                        total, costo, administracion,
+                        costo_ventas_disponible=_saldo_codigo_agrupado(
+                            reporte["agrupado"], "ER.02",
+                        ),
+                        gastos_administracion_disponible=_saldo_codigo_agrupado(
+                            reporte["agrupado"], "ER.04",
+                        ),
+                    )
+                    if not errores:
+                        ajustes_documento[periodo] = {
+                            "mode": "notes", "total": float(total),
+                            "cost_of_sales": float(costo),
+                            "administration": float(administracion),
+                            "source": "manual_notes",
+                        }
+                if errores:
+                    for error in errores:
+                        st.error(error)
+                else:
+                    st.rerun()
+
+        guardado = ajustes_documento.get(periodo)
+        if not guardado:
+            pendientes.append(
+                f"Período {periodo}: falta confirmar la depreciación del ejercicio"
+            )
+        elif guardado.get("mode") == "notes":
+            errores = validar_reclasificacion_depreciacion(
+                guardado.get("total"), guardado.get("cost_of_sales"),
+                guardado.get("administration"),
+                costo_ventas_disponible=_saldo_codigo_agrupado(
+                    reporte["agrupado"], "ER.02",
+                ),
+                gastos_administracion_disponible=_saldo_codigo_agrupado(
+                    reporte["agrupado"], "ER.04",
+                ),
+            )
+            if errores:
+                pendientes.extend(f"Período {periodo}: {error}" for error in errores)
+            else:
+                ajustes_aplicables[periodo] = guardado
+                st.success(
+                    f"Período {periodo}: se separarán {guardado['total']:,.2f}; "
+                    f"{guardado['cost_of_sales']:,.2f} desde Costo de Ventas y "
+                    f"{guardado['administration']:,.2f} desde Gastos de Administración."
+                )
+        else:
+            st.caption(f"Período {periodo}: confirmado sin depreciación por separar.")
+    return ajustes_aplicables, pendientes
+
+
 def _preparar_periodo_reporte(
         df: pd.DataFrame, catalogo: dict, periodo: str, posicion: int) -> dict:
     """Genera clasificación, conciliación y cuadratura independientes por período."""
@@ -3893,6 +4043,23 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
         _preparar_periodo_reporte(df, catalogo, periodo, posicion)
         for posicion, periodo in enumerate(periodos)
     ]
+    ajustes_depreciacion, pendientes_depreciacion = (
+        _gestionar_reclasificacion_depreciacion(reportes_periodo, archivo_nombre)
+    )
+    for reporte in reportes_periodo:
+        ajuste = ajustes_depreciacion.get(str(reporte["periodo"]))
+        reporte["agrupado"] = apply_depreciation_reclassification(
+            reporte["agrupado"], ajuste,
+        )
+        reporte["agrupado"]["nombre_estandar"] = reporte["agrupado"][
+            "codigo_clasificado"
+        ].map(lambda code: catalogo.get(code, {}).get("nombre_estandar", code))
+        reporte["agrupado"]["categoria"] = reporte["agrupado"][
+            "codigo_clasificado"
+        ].map(lambda code: catalogo.get(code, {}).get("categoria", ""))
+        reporte["agrupado"]["num_cuentas"] = pd.to_numeric(
+            reporte["agrupado"].get("num_cuentas", 0), errors="coerce",
+        ).fillna(0)
     principal = reportes_periodo[0]
     clasificadas = principal["clasificadas"]
     if clasificadas.empty:
@@ -3957,6 +4124,9 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
     _mostrar_control_calidad_operativo(quality_control)
 
     emision = _control_emision(df, catalogo, diagnostico, quality_control)
+    if pendientes_depreciacion:
+        emision["definitivo"] = False
+        emision["motivos"].extend(pendientes_depreciacion)
     for reporte in reportes_periodo[1:]:
         if not reporte["diagnostico"]["cuadra"]:
             emision["definitivo"] = False
@@ -4092,7 +4262,19 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
             {'Control': 'Resultado según categorías homologadas', 'Valor': conciliacion['resultado_homologado']},
             {'Control': 'Diferencia de resultado', 'Valor': conciliacion['diferencia']},
             {'Control': 'Diferencia Activo menos Pasivo y Patrimonio', 'Valor': diagnostico['diferencia']},
-        ] + [{'Control': 'Pendiente de resolver', 'Valor': m} for m in emision['motivos']]
+        ]
+        for periodo, ajuste in ajustes_depreciacion.items():
+            control_filas.extend([
+                {'Control': f'Depreciación informada desde notas ({periodo})',
+                 'Valor': ajuste['total']},
+                {'Control': f'Rebaja de Costo de Ventas ({periodo})',
+                 'Valor': ajuste['cost_of_sales']},
+                {'Control': f'Rebaja de Gastos de Administración ({periodo})',
+                 'Valor': ajuste['administration']},
+            ])
+        control_filas += [
+            {'Control': 'Pendiente de resolver', 'Valor': m} for m in emision['motivos']
+        ]
         pd.DataFrame(control_filas).to_excel(writer, sheet_name='Control de emisión', index=False)
         if not emision['incidencias'].empty:
             emision['incidencias'].to_excel(writer, sheet_name='Cuentas a corregir', index=False)
@@ -4187,6 +4369,46 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
             *nombres_detalle_periodo,
             'Método Clasificación', 'Confianza'
         ]
+        if ajustes_depreciacion:
+            filas_ajuste = []
+            conceptos = (
+                ("ER.02", "Ajuste: depreciación separada desde Costo de Ventas",
+                 "cost_of_sales", 1.0),
+                ("ER.04", "Ajuste: depreciación separada desde Gastos de Administración",
+                 "administration", 1.0),
+                ("ER.07", "Depreciación del ejercicio informada desde notas",
+                 "total", -1.0),
+            )
+            for codigo, nombre, campo, signo in conceptos:
+                fila = {
+                    'Código Estándar': codigo,
+                    'Nombre Estándar': catalogo.get(codigo, {}).get(
+                        'nombre_estandar', codigo,
+                    ),
+                    'Cód. Original': '', 'Nombre': nombre,
+                    'Columna Extraída': 'NOTAS',
+                    'Naturaleza Efectiva': 'PÉRDIDA',
+                    'Método Clasificación': 'reclasificación manual desde notas',
+                    'Confianza': 1.0,
+                }
+                tiene_importe = False
+                for periodo in periodos:
+                    ajuste = ajustes_depreciacion.get(str(periodo))
+                    valor = float(ajuste.get(campo, 0)) if ajuste else 0.0
+                    tiene_importe = tiene_importe or abs(valor) > 0.01
+                    if len(periodos) == 1:
+                        fila['Monto Extraído'] = None
+                        fila['Monto Normalizado'] = signo * valor
+                    else:
+                        fila[f'Monto Extraído {periodo}'] = None
+                        fila[f'Monto Normalizado {periodo}'] = signo * valor
+                if tiene_importe:
+                    filas_ajuste.append(fila)
+            if filas_ajuste:
+                detalle_completo = pd.concat(
+                    [detalle_completo, pd.DataFrame(filas_ajuste)],
+                    ignore_index=True,
+                )
         detalle_completo['Confianza'] = detalle_completo['Confianza'].apply(
             lambda x: f"{x:.0%}" if pd.notna(x) else ""
         )

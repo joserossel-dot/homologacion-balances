@@ -119,3 +119,59 @@ def conciliar_resultados(filas, catalogo, tolerancia=0.01):
         "problemas": problemas,
         "cuadra": not problemas,
     }
+
+
+def validar_reclasificacion_depreciacion(
+    total, desde_costo_ventas, desde_gastos_administracion, *,
+    costo_ventas_disponible=None, gastos_administracion_disponible=None,
+    tolerancia=0.01,
+):
+    """Valida una apertura manual de depreciación incluida en otros gastos.
+
+    La operación es una reclasificación de resultado: el total informado debe
+    coincidir con las porciones retiradas de costo de ventas y administración.
+    """
+    valores = {
+        "Depreciación total": total,
+        "Porción incluida en Costo de Ventas": desde_costo_ventas,
+        "Porción incluida en Gastos de Administración": desde_gastos_administracion,
+    }
+    normalizados = {}
+    errores = []
+    for etiqueta, valor in valores.items():
+        try:
+            numero = float(valor)
+        except (TypeError, ValueError):
+            errores.append(f"{etiqueta}: importe no válido")
+            continue
+        if not math.isfinite(numero):
+            errores.append(f"{etiqueta}: importe no finito")
+        elif numero < 0:
+            errores.append(f"{etiqueta}: use un importe positivo")
+        normalizados[etiqueta] = numero
+    if errores:
+        return errores
+
+    total_num = normalizados["Depreciación total"]
+    costo_num = normalizados["Porción incluida en Costo de Ventas"]
+    admin_num = normalizados["Porción incluida en Gastos de Administración"]
+    if total_num <= tolerancia:
+        errores.append("La depreciación total debe ser mayor que cero")
+    if abs(total_num - costo_num - admin_num) > tolerancia:
+        errores.append(
+            "La depreciación total debe ser igual a la suma descontada de "
+            "Costo de Ventas y Gastos de Administración"
+        )
+    for etiqueta, porcion, disponible in (
+        ("Costo de Ventas", costo_num, costo_ventas_disponible),
+        ("Gastos de Administración", admin_num, gastos_administracion_disponible),
+    ):
+        if disponible is None:
+            if porcion > tolerancia:
+                errores.append(f"No existe un saldo de {etiqueta} del cual descontar")
+            continue
+        if porcion - abs(float(disponible)) > tolerancia:
+            errores.append(
+                f"La porción de {etiqueta} supera su saldo homologado disponible"
+            )
+    return errores

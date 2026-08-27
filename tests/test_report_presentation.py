@@ -2,8 +2,13 @@ from io import BytesIO
 import pandas as pd
 from openpyxl import Workbook, load_workbook
 from streamlit.testing.v1 import AppTest
-from reporting_integrity import catalogo_local
-from report_presentation import add_report_sheets, complete_catalog, ER_ORDER
+from reporting_integrity import (
+    catalogo_local, validar_reclasificacion_depreciacion,
+)
+from report_presentation import (
+    add_report_sheets, apply_depreciation_reclassification, complete_catalog,
+    ER_ORDER,
+)
 from test_report_integrity import report_app, afuminsal
 
 
@@ -27,6 +32,49 @@ def test_complete_catalog_includes_empty_categories_and_calculates_once():
     assert not set(formulas["ER.11"]).intersection({"ER.03", "ER.06", "ER.08", "ER.19", "ER.11"})
     assert table[table.categoria == "resultado"].codigo_clasificado.tolist() == list(ER_ORDER)
     pd.testing.assert_frame_equal(original, grouped)
+
+
+def test_depreciation_from_notes_is_reclassified_without_changing_net_income():
+    grouped = pd.DataFrame([
+        dict(codigo_clasificado="ER.01", monto_total=12_000, num_cuentas=1),
+        dict(codigo_clasificado="ER.02", monto_total=-8_000, num_cuentas=1),
+        dict(codigo_clasificado="ER.04", monto_total=-2_000, num_cuentas=1),
+    ])
+    before = grouped.monto_total.sum()
+
+    adjusted = apply_depreciation_reclassification(grouped, {
+        "mode": "notes", "total": 500,
+        "cost_of_sales": 350, "administration": 150,
+    })
+    values = adjusted.set_index("codigo_clasificado").monto_total
+
+    assert values["ER.02"] == -7_650
+    assert values["ER.04"] == -1_850
+    assert values["ER.07"] == -500
+    assert adjusted.monto_total.sum() == before
+    assert grouped.set_index("codigo_clasificado").loc["ER.02", "monto_total"] == -8_000
+
+
+def test_depreciation_notes_validation_requires_exact_and_available_allocation():
+    assert validar_reclasificacion_depreciacion(
+        500, 350, 150,
+        costo_ventas_disponible=-8_000,
+        gastos_administracion_disponible=-2_000,
+    ) == []
+    assert any("igual a la suma" in error for error in
+               validar_reclasificacion_depreciacion(500, 350, 100))
+    assert any("supera su saldo" in error for error in
+               validar_reclasificacion_depreciacion(
+                   500, 350, 150,
+                   costo_ventas_disponible=-300,
+                   gastos_administracion_disponible=-2_000,
+               ))
+    assert any("No existe un saldo" in error for error in
+               validar_reclasificacion_depreciacion(
+                   500, 0, 500,
+                   costo_ventas_disponible=-8_000,
+                   gastos_administracion_disponible=None,
+               ))
 
 
 def test_atribuciones_se_muestran_pero_no_entran_en_utilidad_calculada():

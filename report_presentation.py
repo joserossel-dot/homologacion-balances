@@ -17,6 +17,34 @@ ER_ORDER = (
 CALCULATED = {"ER.03", "ER.06", "ER.08", "ER.19", "ER.11"}
 
 
+def apply_depreciation_reclassification(grouped, adjustment, *, amount_column="monto_total"):
+    """Separa ER.07 desde ER.02/ER.04 sin alterar el resultado neto."""
+    if not adjustment or adjustment.get("mode") != "notes":
+        return grouped.copy(deep=True)
+    result = grouped.copy(deep=True)
+    values = {
+        "ER.02": float(adjustment.get("cost_of_sales", 0)),
+        "ER.04": float(adjustment.get("administration", 0)),
+        "ER.07": -float(adjustment.get("total", 0)),
+    }
+    for code, delta in values.items():
+        mask = result["codigo_clasificado"].eq(code)
+        if mask.any():
+            result.loc[mask, amount_column] = (
+                pd.to_numeric(result.loc[mask, amount_column], errors="coerce").fillna(0)
+                + delta
+            )
+            continue
+        if abs(delta) <= 0.01:
+            continue
+        result = pd.concat([result, pd.DataFrame([{
+            "codigo_clasificado": code,
+            amount_column: delta,
+            "num_cuentas": 1 if code == "ER.07" else 0,
+        }])], ignore_index=True)
+    return result
+
+
 def complete_catalog(grouped, catalog, has_income_detail, amount_columns=None):
     amount_columns = list(amount_columns or ["monto_total"])
     existing = {r["codigo_clasificado"]: r for r in grouped.to_dict("records")}

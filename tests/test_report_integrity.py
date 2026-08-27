@@ -238,13 +238,22 @@ def test_ui_busqueda_vacia_no_oculta_acceso_a_confirmadas():
     assert any(s.label == 'Clasificación correcta' for s in at.selectbox)
 
 
-def report_app(rows):
+def report_app(rows, depreciation="__resolved_without_adjustment__"):
     import streamlit as st
     import pandas as pd
     import app_validacion as app
     from extractor_metadata import MetadataEmpresa
     from reporting_integrity import catalogo_local
     st.session_state.setdefault('metadata_files', {'caso.pdf': MetadataEmpresa(moneda='$')})
+    st.session_state.setdefault('company_periodos_seleccionados', ('2024',))
+    # Estas pruebas históricas certifican el informe una vez resuelto el nuevo
+    # control de depreciación desde notas.
+    if depreciation == "__resolved_without_adjustment__":
+        depreciation = {'mode': 'none'}
+    depreciation_state = (
+        {'caso.pdf': {'2024': depreciation}} if depreciation is not None else {}
+    )
+    st.session_state.setdefault('depreciation_reclassifications', depreciation_state)
     previous = app.st.download_button
     def capture(label, **kwargs):
         st.session_state['export_label'] = label
@@ -254,6 +263,54 @@ def report_app(rows):
         app._tab_balance(pd.DataFrame(rows), catalogo_local(), 'caso.pdf')
     finally:
         app.st.download_button = previous
+
+
+def test_reporte_integra_depreciacion_de_notas_y_deja_trazabilidad():
+    at = AppTest.from_function(
+        report_app,
+        args=(afuminsal(False), {
+            'mode': 'notes', 'total': 500,
+            'cost_of_sales': 0, 'administration': 500,
+            'source': 'manual_notes',
+        }),
+    ).run(timeout=20)
+    assert not at.exception
+    assert 'BORRADOR' not in at.session_state.export_kwargs['file_name']
+    wb = load_workbook(BytesIO(at.session_state.export_kwargs['data']), data_only=True)
+    balance_rows = list(wb['Balance Normalizado'].iter_rows(values_only=True))
+    administracion = next(row for row in balance_rows if row[0] == 'ER.04')
+    depreciacion = next(row for row in balance_rows if row[0] == 'ER.07')
+    assert administracion[2] == -16_375_928
+    assert depreciacion[2] == -500
+    summary_rows = list(wb['Resumen'].iter_rows(min_row=27, values_only=True))
+    adjustment = next(
+        row for row in summary_rows
+        if row[3] == 'Depreciación del ejercicio informada desde notas'
+    )
+    assert adjustment[0] == 'ER.07'
+    assert adjustment[4] is None
+    assert adjustment[5] == -500
+    controls = {row[0]: row[1] for row in wb['Control de emisión'].iter_rows(
+        min_row=2, values_only=True,
+    ) if row[0]}
+    assert controls['Depreciación informada desde notas (2024)'] == 500
+    assert controls['Rebaja de Gastos de Administración (2024)'] == 500
+
+
+def test_reporte_pide_depreciacion_y_muestra_montos_sin_envio_intermedio():
+    at = AppTest.from_function(
+        report_app, args=(afuminsal(False), None),
+    ).run(timeout=20)
+    assert not at.exception
+    tratamiento = next(s for s in at.selectbox if s.label == 'Tratamiento')
+    tratamiento.select('notes').run(timeout=20)
+    assert not at.exception
+    assert {n.label for n in at.number_input} >= {
+        'Depreciación total del período',
+        'Incluida en Costo de Ventas',
+        'Incluida en Gastos de Administración',
+    }
+    assert 'BORRADOR' in at.session_state.export_kwargs['file_name']
 
 
 @pytest.mark.parametrize('mal', [True, False])
