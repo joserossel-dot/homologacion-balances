@@ -569,6 +569,52 @@ def test_parsear_linea_ocr_reconstruye_saldo_desde_movimiento_y_clasificacion():
     assert cuenta.columnas_derivadas == ["saldo_deudor"]
 
 
+def test_parsear_linea_ocr_reconstruye_debito_omitido_con_tres_evidencias():
+    cuenta = parser.parsear_linea(
+        "CAJA 0 6.006.281 2.309.117 0 2.309.117 0 0 0",
+        1, parser.FormatoCodigo.SIN_CODIGO, ".", confianza_base=0.75,
+    )
+
+    assert cuenta is not None
+    assert cuenta.montos_columnas["debitos"] == 8_315_398
+    assert cuenta.columnas_derivadas == ["debitos"]
+
+
+def test_parsear_linea_ocr_corrige_saldo_con_clasificacion_casi_igual():
+    cuenta = parser.parsear_linea(
+        "SENADO 0 15.355.846 0 15.855.846 0 15.355.848 0 0",
+        1, parser.FormatoCodigo.SIN_CODIGO, ".", confianza_base=0.75,
+    )
+
+    assert cuenta is not None
+    assert cuenta.montos_columnas["saldo_acreedor"] == 15_355_846
+    assert cuenta.montos_columnas["pasivo"] == 15_355_848
+    assert cuenta.columnas_derivadas == ["saldo_acreedor"]
+
+
+def test_parsear_linea_ocr_corrige_clasificacion_desde_movimiento_y_saldo():
+    cuenta = parser.parsear_linea(
+        "HONORARIOS 103.368.518 0 103.368.518 0 0 0 103.369.518 0",
+        1, parser.FormatoCodigo.SIN_CODIGO, ".", confianza_base=0.75,
+    )
+
+    assert cuenta is not None
+    assert cuenta.montos_columnas["perdida"] == 103_368_518
+    assert cuenta.columnas_derivadas == ["perdida"]
+
+
+def test_parsear_linea_ocr_elimina_signo_falso_en_total_debitos():
+    cuenta = parser.parsear_linea(
+        "TOTALES -3.230.428.831 3.230.428.831 100 100 50 50 25 25",
+        1, parser.FormatoCodigo.SIN_CODIGO, ".", confianza_base=0.75,
+    )
+
+    assert cuenta is not None
+    assert cuenta.es_total
+    assert cuenta.montos_columnas["debitos"] == 3_230_428_831
+    assert cuenta.columnas_derivadas == ["debitos"]
+
+
 def test_parsear_linea_ocr_elimina_prefijo_pegado_si_saldo_cero_exige_igualdad():
     cuenta = parser.parsear_linea(
         "2.01.01.10 Préstamo 121.866.316 1.866.316 0 0 0 0 0 0",
@@ -936,6 +982,39 @@ def test_certificacion_falla_si_una_columna_no_reproduce_el_subtotal():
     assert certification.razones
 
 
+def test_certificacion_ocr_reconcilia_control_con_dos_copias_concordantes():
+    rows = [
+        parser.parsear_linea(
+            "110101 CAJA 100 0 100 0 100 0 0 0",
+            1, parser.FormatoCodigo.COMPACTO, ".",
+        ),
+        parser.parsear_linea(
+            "210101 PROVEEDORES 0 100 0 100 0 100 0 0",
+            2, parser.FormatoCodigo.COMPACTO, ".",
+        ),
+        parser.parsear_linea(
+            "SUBTOTAL 80 100 100 100 100 100 0 0",
+            3, parser.FormatoCodigo.SIN_CODIGO, ".",
+        ),
+        parser.parsear_linea(
+            "TOTALES 100 100 999 100 100 100 0 0",
+            4, parser.FormatoCodigo.SIN_CODIGO, ".",
+        ),
+    ]
+
+    certification = parser.certificar_extraccion_columnas(
+        [row for row in rows if row is not None], metodo="ocr_coordinates_8_amounts",
+    )
+
+    assert certification.estado == "parcial"
+    assert certification.totales_finales_validos is True
+    assert certification.diferencias == {
+        column: 0.0 for column in parser.RAW_MONETARY_COLUMNS
+    }
+    assert rows[2].montos_columnas["debitos"] == 100
+    assert rows[3].montos_columnas["saldo_deudor"] == 100
+
+
 def test_sin_subtotal_no_bloquea_formatos_legacy():
     detail = parser.CuentaRaw(
         linea=1, codigo=None, nombre="Caja", monto=100,
@@ -1080,6 +1159,44 @@ def test_certificacion_reconoce_resultado_puente_hasta_sumas_iguales():
     assert certification.totales_finales_validos is True
     assert certification.resultado_ejercicio == 40
     assert certification.tipo_resultado == "utilidad"
+
+
+def test_certificacion_reconoce_perdida_del_ejercicio_como_puente():
+    details = [
+        parser.parsear_linea(
+            "110101 ACTIVO 60 0 60 0 60 0 0 0",
+            1, parser.FormatoCodigo.COMPACTO, ".",
+        ),
+        parser.parsear_linea(
+            "210101 PASIVO 0 100 0 100 0 100 0 0",
+            2, parser.FormatoCodigo.COMPACTO, ".",
+        ),
+        parser.parsear_linea(
+            "310101 PERDIDA 40 0 40 0 0 0 40 0",
+            3, parser.FormatoCodigo.COMPACTO, ".",
+        ),
+    ]
+    subtotal = parser.parsear_linea(
+        "SUMAS 100 100 100 100 60 100 40 0",
+        4, parser.FormatoCodigo.COMPACTO, ".",
+    )
+    bridge = parser.parsear_linea(
+        "PERDIDA DEL EJERCICIO 0 0 0 0 40 0 0 40",
+        5, parser.FormatoCodigo.SIN_CODIGO, ".",
+    )
+    final = parser.parsear_linea(
+        "SUMAS IGUALES 100 100 100 100 100 100 40 40",
+        6, parser.FormatoCodigo.COMPACTO, ".",
+    )
+
+    certification = parser.certificar_extraccion_columnas(
+        [*details, subtotal, bridge, final], metodo="coordinates_10_columns",
+    )
+
+    assert certification.estado == "certificada"
+    assert certification.totales_finales_validos is True
+    assert certification.resultado_ejercicio == -40
+    assert certification.tipo_resultado == "perdida"
 
 
 def test_certificacion_reconstruye_digito_final_truncado_en_controles_pdf():

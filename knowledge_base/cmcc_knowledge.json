@@ -1249,7 +1249,7 @@
     },
     "PAT.03": {
       "codigo": "PAT.03",
-      "nombre": "Utilidades Acumuladas",
+      "nombre": "Resultados Acumulados",
       "frecuencia": 4,
       "variantes": [
         {
@@ -1284,7 +1284,7 @@
       "naturaleza": "liability",
       "usage_count": 6,
       "confianza": 0.375,
-      "variante_canonica": "Utilidades Acumuladas"
+      "variante_canonica": "Resultados Acumulados"
     },
     "PAT.04": {
       "codigo": "PAT.04",

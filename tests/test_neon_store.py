@@ -54,6 +54,24 @@ def test_validacion_y_diccionario_se_guardan_en_una_transaccion():
     assert log_params[6] is True
 
 
+def test_validacion_neon_normaliza_codigo_patrimonial_historico():
+    connection = FakeConnection()
+    store = NeonKnowledgeStore("postgresql://test", connect=lambda _: connection)
+
+    store.save_validation(
+        account_name="Utilidades de ejercicios anteriores",
+        validated_code="PAT.09",
+        suggested_code="PAT.09",
+        source="validacion_humana",
+    )
+
+    upsert_params = connection.cursor_instance.calls[1][1]
+    log_params = connection.cursor_instance.calls[3][1]
+    assert upsert_params[2] == "PAT.03"
+    assert log_params[2] == "PAT.03"
+    assert log_params[3] == "PAT.03"
+
+
 def test_lote_de_validaciones_reutiliza_una_sola_conexion():
     connection = FakeConnection()
     connections = []
@@ -80,6 +98,20 @@ def test_lote_de_validaciones_reutiliza_una_sola_conexion():
     assert len(connection.cursor_instance.calls) == 8
     assert connection.cursor_instance.calls[1][1][0] == "Caja"
     assert connection.cursor_instance.calls[5][1][0] == "Banco"
+
+
+def test_lote_normaliza_codigo_patrimonial_historico():
+    connection = FakeConnection()
+    store = NeonKnowledgeStore("postgresql://test", connect=lambda _: connection)
+
+    store.save_validations([{
+        "account_name": "Resultados anteriores",
+        "validated_code": "PAT.09",
+        "source": "validacion_humana_lote",
+        "add_to_dictionary": True,
+    }])
+
+    assert connection.cursor_instance.calls[1][1][2] == "PAT.03"
 
 
 def test_lote_vacio_no_abre_conexion():

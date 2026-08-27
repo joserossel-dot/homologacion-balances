@@ -1274,7 +1274,7 @@ def certificar_extraccion_columnas(
         cuenta for cuenta in cuentas
         if cuenta.es_total and cuenta.montos_columnas
         and re.match(
-            r"^(?:perdida o ganancia|resultado|utilidad|perdida net[ao])\b",
+            r"^(?:perdida o ganancia|resultado|utilidad|perdida(?: net[ao]| del ejercicio)?)\b",
             normalized_name(cuenta),
         )
     ]
@@ -1293,6 +1293,58 @@ def certificar_extraccion_columnas(
             filas_inconsistentes=filas_inconsistentes,
             totales_finales_validos=totales_finales_validos,
         )
+
+    # Un balance de ocho columnas contiene tres copias independientes del
+    # control: suma del detalle, subtotal y total final (ajustado por el puente
+    # de resultado). En OCR se puede reparar una sola copia cuando las otras
+    # dos coinciden. Si no hay dos evidencias concordantes, el valor se deja
+    # intacto para revisión humana.
+    if "ocr" in metodo.lower() and finales:
+        final_row = finales[-1]
+        final_values = final_row.montos_columnas
+        bridge_values = (
+            puentes_resultado[-1].montos_columnas
+            if puentes_resultado else {column: 0.0 for column in RAW_MONETARY_COLUMNS}
+        )
+        for column in RAW_MONETARY_COLUMNS:
+            calculated = float(calculados.get(column, 0.0) or 0.0)
+            printed = float(total_impreso.get(column, 0.0) or 0.0)
+            bridge = float(bridge_values.get(column, 0.0) or 0.0)
+            final = float(final_values.get(column, 0.0) or 0.0)
+            expected_final = printed + bridge
+            expected_subtotal = final - bridge
+            if (
+                abs(calculated - printed) <= tolerancia_absoluta
+                and abs(final - expected_final) > tolerancia_absoluta
+            ):
+                final_values[column] = expected_final
+                if column not in final_row.columnas_derivadas:
+                    final_row.columnas_derivadas.append(column)
+            elif (
+                abs(calculated - expected_subtotal) <= tolerancia_absoluta
+                and abs(printed - expected_subtotal) > tolerancia_absoluta
+            ):
+                total_impreso[column] = expected_subtotal
+                subtotal_referencia.montos_columnas[column] = expected_subtotal
+                if column not in subtotal_referencia.columnas_derivadas:
+                    subtotal_referencia.columnas_derivadas.append(column)
+
+        pairs = (
+            ("debitos", "creditos"),
+            ("saldo_deudor", "saldo_acreedor"),
+            ("activo", "pasivo"),
+            ("perdida", "ganancia"),
+        )
+        fila_final_incompleta = any(
+            (final_values[left] == 0) != (final_values[right] == 0)
+            for left, right in pairs
+        )
+        if not fila_final_incompleta:
+            totales_finales_validos = all(
+                abs(final_values[left] - final_values[right]) <= tolerancia_absoluta
+                for left, right in pairs
+            )
+
     columnas_total_reconstruidas: list[str] = []
     for column in ("debitos", "creditos"):
         calculated = float(calculados.get(column, 0.0) or 0.0)
@@ -2429,7 +2481,7 @@ def parsear_linea(
                 montos_columnas["creditos"] == 0
                 and montos_columnas["saldo_acreedor"] == 0
                 and montos_columnas["debitos"] > 0
-                and montos_columnas["debitos"] == classification_total
+                and abs(montos_columnas["debitos"] - classification_total) <= 10
                 and montos_columnas["saldo_deudor"] != montos_columnas["debitos"]
             ):
                 montos_columnas["saldo_deudor"] = montos_columnas["debitos"]
@@ -2438,7 +2490,7 @@ def parsear_linea(
                 montos_columnas["debitos"] == 0
                 and montos_columnas["saldo_deudor"] == 0
                 and montos_columnas["creditos"] > 0
-                and montos_columnas["creditos"] == classification_total
+                and abs(montos_columnas["creditos"] - classification_total) <= 10
                 and montos_columnas["saldo_acreedor"] != montos_columnas["creditos"]
             ):
                 montos_columnas["saldo_acreedor"] = montos_columnas["creditos"]
@@ -2479,6 +2531,26 @@ def parsear_linea(
             + montos_columnas["perdida"] + montos_columnas["ganancia"]
         )
         balance = debtor - creditor
+
+        # Si movimiento y saldo coinciden exactamente y sólo existe una
+        # columna final, esas dos copias independientes permiten corregir un
+        # dígito OCR agregado a la clasificación. No se aplica a extracción
+        # nativa ni cuando hay más de una naturaleza informada.
+        nonzero_classifications = [
+            column for column in ("activo", "pasivo", "perdida", "ganancia")
+            if montos_columnas[column] != 0
+        ]
+        if (
+            confianza_base < 1.0
+            and abs(debit - credit - balance) <= 10
+            and len(nonzero_classifications) == 1
+            and abs(classified - (debtor + creditor)) > 10
+        ):
+            target = nonzero_classifications[0]
+            montos_columnas[target] = debtor + creditor
+            columnas_derivadas.append(target)
+            classified = debtor + creditor
+
         classification_consistent = abs(debtor + creditor - classified) <= 10
         movement_consistent = abs(debit - credit - balance) <= 10
         movement_is_implausible = abs(debit - credit) > max(
@@ -2500,6 +2572,25 @@ def parsear_linea(
                 and creditor > 0 and credit != creditor
             ):
                 montos_columnas["creditos"] = creditor
+                columnas_derivadas.append("creditos")
+            elif (
+                confianza_base < 1.0 and debit == 0 and creditor == 0
+                and credit > 0 and debtor > 0
+                and abs(credit - debtor) > 10
+                and abs(credit - debtor * 10) > 10
+            ):
+                # Saldo deudor y clasificación coinciden. Si OCR perdió el
+                # Débito pero conservó el Crédito, la identidad contable
+                # determina de forma única Debe = Haber + saldo deudor.
+                montos_columnas["debitos"] = credit + debtor
+                columnas_derivadas.append("debitos")
+            elif (
+                confianza_base < 1.0 and credit == 0 and debtor == 0
+                and debit > 0 and creditor > 0
+                and abs(debit - creditor) > 10
+                and abs(debit - creditor * 10) > 10
+            ):
+                montos_columnas["creditos"] = debit + creditor
                 columnas_derivadas.append("creditos")
             elif (
                 confianza_base < 1.0 and balance == 0
@@ -2598,6 +2689,22 @@ def parsear_linea(
             elif creditor == 0 and debtor != 0:
                 montos_columnas["saldo_acreedor"] = debtor
                 columnas_derivadas.append("saldo_acreedor")
+        if (
+            es_total
+            and confianza_base < 1.0
+            and montos_columnas["debitos"] < 0
+            and montos_columnas["creditos"] > 0
+            and abs(
+                abs(montos_columnas["debitos"])
+                - montos_columnas["creditos"]
+            ) <= 10
+        ):
+            # En una fila de control, Debe y Haber son sumas positivas. Una
+            # línea horizontal pegada al primer total puede ser interpretada
+            # por OCR como signo menos; la copia positiva en Haber permite
+            # normalizarla sin inferir ningún dígito.
+            montos_columnas["debitos"] = abs(montos_columnas["debitos"])
+            columnas_derivadas.append("debitos")
         # Las ocho columnas son evidencia más fuerte que años o monedas
         # detectados en la cabecera. Si exactamente una columna de
         # clasificación contiene saldo, esa columna define tanto el importe

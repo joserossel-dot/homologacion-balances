@@ -435,7 +435,7 @@
   },
   "PAT.03": {
     "codigo_estandar": "PAT.03",
-    "nombre_estandar": "Utilidades Retenidas",
+    "nombre_estandar": "Resultados Acumulados",
     "categoria": "patrimonio",
     "tipo_estado": "balance",
     "naturaleza": "acreedora",
@@ -443,7 +443,7 @@
     "es_deuda_financiera": false,
     "es_activo_liquido": false,
     "afecta_ebitda": false,
-    "descripcion": "Utilidades de ejercicios anteriores no distribuidas, incluyendo pérdidas acumuladas de años anteriores.",
+    "descripcion": "Resultados de ejercicios anteriores aún incorporados al patrimonio, sean utilidades no distribuidas o pérdidas acumuladas.",
     "clasificable": true,
     "grupo_presentacion": "Patrimonio"
   },
@@ -785,7 +785,7 @@
   },
   "PAT.09": {
     "codigo_estandar": "PAT.09",
-    "nombre_estandar": "Utilidades Ejercicios Anteriores",
+    "nombre_estandar": "Resultados Acumulados (código histórico)",
     "categoria": "patrimonio",
     "tipo_estado": "balance",
     "naturaleza": "acreedora",
@@ -793,8 +793,9 @@
     "es_deuda_financiera": false,
     "es_activo_liquido": false,
     "afecta_ebitda": false,
-    "descripcion": "Resultados acumulados de ejercicios anteriores no distribuidos ni capitalizados.",
-    "clasificable": true,
+    "descripcion": "Alias histórico de PAT.03. Se conserva para trazabilidad y no admite nuevas clasificaciones.",
+    "clasificable": false,
+    "codigo_canonico": "PAT.03",
     "grupo_presentacion": "Patrimonio"
   },
   "PAT.10": {

@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 from types import SimpleNamespace
+import pandas as pd
 import pytest
 import parser_universal as p
 
@@ -79,3 +80,36 @@ def test_documento_real_opcional(filename, pages, finals_valid, tmp_path):
         assert cert.estado == "fallida"
         assert cert.filas_inconsistentes
     assert source.read_bytes() == content
+
+
+def test_fundacion_recupera_cuadratura_tras_correccion_humana_sin_reprocesar():
+    """La única cifra ambigua se corrige sobre las cuentas ya extraídas."""
+    folder = os.environ.get("BALANCE_REAL_TEST_DIR")
+    if not folder:
+        pytest.skip("Defina BALANCE_REAL_TEST_DIR para la matriz privada")
+    from app_validacion import _aplicar_correcciones_extraccion
+
+    source = Path(folder) / "fundacion_arte_solidaridad_2024.pdf"
+    result = p.ParserPDF().parsear(source)
+    rows = [
+        {
+            "linea": account.linea,
+            "excluir": False,
+            "total": account.es_total,
+            **account.montos_columnas,
+        }
+        for account in result.cuentas
+        if account.montos_columnas
+    ]
+    edited = pd.DataFrame(rows)
+    edited.loc[edited["linea"] == 19, "creditos"] = 2_612_666
+
+    _, certification = _aplicar_correcciones_extraccion(
+        result.cuentas, edited,
+    )
+
+    assert certification.estado == "parcial"
+    assert certification.filas_inconsistentes == []
+    assert certification.totales_finales_validos is True
+    assert certification.resultado_ejercicio == -761_882_347
+    assert max(abs(value) for value in certification.diferencias.values()) <= 3

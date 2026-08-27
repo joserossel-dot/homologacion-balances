@@ -78,6 +78,21 @@ def test_diccionario_migra_depreciacion_acumulada_al_subcodigo(tmp_path):
     assert result['standard_code'] == 'ANC.01.01'
 
 
+def test_diccionario_migra_pat09_a_resultados_acumulados_pat03(tmp_path):
+    pipeline = HomologationPipeline(db_path=tmp_path / 'gold.db')
+    pipeline._dictionary = [{
+        'cuenta_original': 'Utilidades de ejercicios anteriores',
+        'codigo_estandar': 'PAT.09',
+    }]
+
+    result = pipeline._classify_account(
+        '', 'Utilidades de ejercicios anteriores', 'PATRIMONIO',
+    )
+
+    assert result['standard_code'] == 'PAT.03'
+    assert 'PAT.09' in result['reason']
+
+
 def test_reserva_patrimonial_clasifica_pat02_con_signo_indistinto(tmp_path):
     pipeline = HomologationPipeline(db_path=tmp_path / 'gold.db')
 

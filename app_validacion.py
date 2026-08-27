@@ -42,6 +42,9 @@ from dotenv import load_dotenv
 
 from clasificador_codigo_cuenta import ClasificadorCodigo
 from catalog_selection import es_clasificable, opciones_clasificacion
+from catalog_aliases import (
+    canonical_catalog_code, canonicalize_catalog, canonicalize_dictionary,
+)
 from gold_standard.builder import GoldBuilder
 from gold_standard.promotion import promote as promover_revisiones
 from gold_standard.runtime import RuntimeGoldStorage
@@ -247,16 +250,16 @@ def cargar_catalogo() -> dict:
         try:
             catalogo_neon = store.load_catalog()
             if catalogo_neon:
-                return {
+                return canonicalize_catalog({
                     codigo: {**entrada, **catalogo_neon.get(codigo, {})}
                     for codigo, entrada in catalogo_local.items()
                 } | {
                     codigo: entrada for codigo, entrada in catalogo_neon.items()
                     if codigo not in catalogo_local
-                }
+                })
         except Exception:
             pass
-    return catalogo_local
+    return canonicalize_catalog(catalogo_local)
 
 
 @st.cache_data
@@ -266,11 +269,11 @@ def cargar_diccionario_base() -> list[dict]:
         try:
             diccionario = store.load_dictionary()
             if diccionario:
-                return diccionario
+                return canonicalize_dictionary(diccionario)
         except Exception:
             pass
     with open(BASE_DIR / 'diccionario.json', encoding='utf-8') as f:
-        return json.load(f)
+        return canonicalize_dictionary(json.load(f))
 
 
 def _persistir_validacion(
@@ -279,6 +282,8 @@ def _persistir_validacion(
     confianza: float | None = None, archivo: str = '',
 ) -> bool:
     """Persiste en Neon; retorna False para que el caller use fallback JSON."""
+    codigo = canonical_catalog_code(codigo)
+    sugerido = canonical_catalog_code(sugerido) if sugerido else sugerido
     store = NeonKnowledgeStore()
     if not store.enabled:
         return False
@@ -1009,6 +1014,7 @@ class MotorHibridoLocal:
     def __init__(self, diccionario: list[dict]):
         self.clasificador_codigo = ClasificadorCodigo()
         self.reglas_especiales = ProcesadorReglasEspeciales()
+        diccionario = canonicalize_dictionary(diccionario)
         self.dic_exacto = {normalizar_nombre(d['cuenta_original']): d for d in diccionario}
         self.dic_lista = list(self.dic_exacto.keys())
 
@@ -1055,6 +1061,9 @@ class MotorHibridoLocal:
                     else:
                         resultado = {'codigo_estandar': None, 'metodo': 'sin_clasificar', 'confianza': 0.0}
 
+        resultado['codigo_estandar'] = canonical_catalog_code(
+            resultado.get('codigo_estandar')
+        ) or None
         codigo_actual = resultado.get('codigo_estandar')
         origen = cuenta.origen_columna
         if origen != OrigenColumna.DESCONOCIDO and codigo_actual:

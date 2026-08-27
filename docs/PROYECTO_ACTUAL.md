@@ -231,6 +231,7 @@ Un monto negativo se interpreta como contra-cuenta. La naturaleza efectiva puede
 - Depreciación acumulada: código definitivo `ANC.01.01`. Puede originarse como activo negativo o pasivo positivo y debe restar al activo fijo.
 - Pérdidas acumuladas: permanecen en patrimonio aunque aparezcan en la columna activo o con signo contrario.
 - Ganancias acumuladas negativas: se ofrecen categorías patrimoniales, no categorías de activo corriente.
+- Resultados acumulados: `PAT.03` es el único código seleccionable para utilidades retenidas, utilidades acumuladas, pérdidas acumuladas y resultados de ejercicios anteriores. `PAT.09` queda como alias histórico y se normaliza a `PAT.03` al leer o guardar decisiones.
 - Reservas: se consideran patrimoniales con signo positivo o negativo.
 - Cuentas corrientes de socios en activo: requieren consulta humana o tratamiento patrimonial contrario según el caso.
 - Pasivo físico: puede ofrecer pasivo corriente, pasivo no corriente y patrimonio cuando el contexto lo justifica.
@@ -469,7 +470,7 @@ La suite ubicada en `tests/` contiene pruebas de:
 - informes y cuadratura;
 - regresiones de documentos reportados.
 
-En la verificación de este corte, `poetry run pytest tests -q` completó 892 pruebas aprobadas, 16 omitidas y 3 advertencias.
+En la verificación más reciente, `pytest tests -q` completó 911 pruebas aprobadas, 17 omitidas y 3 advertencias. La prueba privada adicional se omite cuando no está definido `BALANCE_REAL_TEST_DIR`.
 
 ### 17.2 Saneamiento del simulador histórico
 
@@ -487,13 +488,30 @@ El repositorio incluye cinco fixtures reales o representativos en `tests/fixture
 - EEFF 2017 Los Maitenes;
 - Pre-Balance Inagal 2020.
 
-La matriz privada añade casos como Parque Cultural, London38, Afuminsal y Fundación Arte y Solidaridad cuando existe `BALANCE_REAL_TEST_DIR`. Sin esa variable, esas pruebas se omiten.
+La matriz privada añade Parque Cultural, London38, Afuminsal y Fundación Arte y Solidaridad. `tests/fixtures/private_release_matrix.json` declara el archivo, las páginas que forman el estado contable y los resultados esperados sin incorporar los PDF privados a Git. `scripts/certify_local_corpus.py --manifest` aplica ese alcance, registra cada comprobación en JSON y devuelve error si un caso obligatorio no satisface sus expectativas.
+
+La ejecución verificada sobre el corpus privado obtuvo:
+
+- Parque Cultural: cumple;
+- London38, limitado a la página contable declarada: cumple;
+- Afuminsal: cumple la cuadratura final, el resultado esperado y la extracción de capital social;
+- Fundación Arte y Solidaridad: recupera los controles finales y aísla una única fila ambigua, `IMPTOS. POR PAGAR`, para revisión humana. La matriz comprueba expresamente que no aparezcan otras filas inconsistentes.
+
+Una regresión privada adicional modifica únicamente el crédito ambiguo sobre las cuentas ya extraídas y verifica que la recertificación queda sin filas inconsistentes, con controles finales válidos y sin volver a ejecutar el parser.
+
+Las pruebas privadas de pytest siguen requiriendo `BALANCE_REAL_TEST_DIR`. Sin esa variable se omiten; el manifiesto puede ejecutarse explícitamente con:
+
+```bash
+python3 scripts/certify_local_corpus.py "$BALANCE_REAL_TEST_DIR" \
+  --manifest tests/fixtures/private_release_matrix.json \
+  --output /tmp/homologacion-release-matrix.json
+```
 
 ## 18. Riesgos pendientes antes de producción
 
 ### Prioridad crítica
 
-1. Certificar una matriz representativa de documentos reales con resultados esperados, no sólo que el parser no falle.
+1. Verificar en la interfaz que la corrección humana de `IMPTOS. POR PAGAR` recertifique Fundación Arte y Solidaridad sin volver a procesar el documento.
 2. Verificar en cada documento que se extrajeron todas las cuentas y que cada monto pertenece al año correcto.
 3. Convertir el release gate en un control que impida desplegar un commit distinto del certificado.
 4. Definir autenticación, analista responsable y segregación de acceso antes de manejar información contable sensible de terceros.

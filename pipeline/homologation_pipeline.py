@@ -10,6 +10,7 @@ from typing import Any
 from rapidfuzz import fuzz
 
 from adapters.account_adapter import AccountAdapter
+from catalog_aliases import canonical_catalog_code, canonicalize_dictionary
 from clasificador_codigo_cuenta import ClasificadorCodigo
 from config.regex_rules import REGLAS_REGEX
 from parser_universal import parsear_excel
@@ -85,13 +86,17 @@ class HomologationPipeline:
                 data = store.load_dictionary()
                 if data:
                     logger.info("Diccionario cargado desde Neon: %d entradas", len(data))
-                    return [e for e in data if e.get("codigo_estandar") != "__EXCLUIR__"]
+                    return canonicalize_dictionary(
+                        e for e in data if e.get("codigo_estandar") != "__EXCLUIR__"
+                    )
             except Exception as exc:
                 logger.warning("Neon no disponible; usando diccionario JSON: %s", exc)
         path = Path(__file__).resolve().parent.parent / "diccionario.json"
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        return [e for e in data if e.get("codigo_estandar") != "__EXCLUIR__"]
+        return canonicalize_dictionary(
+            e for e in data if e.get("codigo_estandar") != "__EXCLUIR__"
+        )
 
     @staticmethod
     def _normalize_name(name: str) -> str:
@@ -185,6 +190,14 @@ class HomologationPipeline:
         result: dict[str, Any], account_name: str,
     ) -> dict[str, Any]:
         """Migra decisiones antiguas al código específico vigente."""
+        previous_code = result.get("standard_code")
+        canonical_code = canonical_catalog_code(previous_code)
+        if canonical_code and canonical_code != previous_code:
+            result = {**result, "standard_code": canonical_code}
+            result["reason"] = (
+                f"{result.get('reason', 'Clasificación previa')}; "
+                f"código histórico {previous_code} normalizado a {canonical_code}"
+            )
         if (is_contra_asset_name(account_name)
                 and result.get("standard_code") == "ANC.01"):
             result = {**result, "standard_code": "ANC.01.01"}
@@ -279,7 +292,7 @@ class HomologationPipeline:
     ) -> dict[str, Any]:
         learning_result = self._learning_engine.best_match(account_name)
         if learning_result["source"] != "none":
-            return {
+            return self._canonicalize_special_code({
                 "standard_code": learning_result["code"],
                 "confidence": learning_result["confidence"],
                 "method": f"learning_{learning_result['source']}",
@@ -288,7 +301,7 @@ class HomologationPipeline:
                     f"{learning_result['code']} "
                     f"(matched: {learning_result['matched_name']})"
                 ),
-            }
+            }, account_name)
 
         cmcc_raw: dict[str, Any] | None = None
         cmcc_score = -1.0

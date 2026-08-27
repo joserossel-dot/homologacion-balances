@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "description": "Matriz privada de documentos reales. Los PDF permanecen fuera de Git.",
+  "cases": [
+    {
+      "file": "parque_cultural_valparaiso_2024.pdf",
+      "expect": {
+        "final_totals_valid": true
+      }
+    },
+    {
+      "file": "london38_balance.pdf",
+      "pages": [1],
+      "expect": {
+        "certification_state": "certificada",
+        "final_totals_valid": true
+      }
+    },
+    {
+      "file": "afuminsal_2016.pdf",
+      "expect": {
+        "final_totals_valid": true,
+        "result": 9910945,
+        "accounts": [
+          {
+            "account_code": "2301001",
+            "amount": 15201792
+          }
+        ]
+      }
+    },
+    {
+      "file": "fundacion_arte_solidaridad_2024.pdf",
+      "expect": {
+        "final_totals_valid": true,
+        "max_inconsistent_rows": 1,
+        "inconsistent_account_names": ["IMPTOS POR PAGAR"]
+      }
+    }
+  ]
+}

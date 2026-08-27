@@ -8,6 +8,10 @@ import unicodedata
 from pathlib import Path
 from typing import Any, Callable
 
+from catalog_aliases import (
+    canonical_catalog_code, canonicalize_catalog, canonicalize_dictionary,
+)
+
 
 def normalize_account_name(value: str) -> str:
     text = unicodedata.normalize("NFD", str(value or "").strip().lower())
@@ -80,7 +84,7 @@ class NeonKnowledgeStore:
                 cursor.execute(query)
                 columns = [item[0] for item in cursor.description]
                 rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
-        return {row["codigo_estandar"]: row for row in rows}
+        return canonicalize_catalog({row["codigo_estandar"]: row for row in rows})
 
     def load_dictionary(self) -> list[dict[str, Any]]:
         with self._connect() as conn:
@@ -89,10 +93,10 @@ class NeonKnowledgeStore:
                     "SELECT cuenta_original, codigo_estandar, fuente "
                     "FROM diccionario_homologacion WHERE activo ORDER BY cuenta_original"
                 )
-                return [
+                return canonicalize_dictionary([
                     {"cuenta_original": row[0], "codigo_estandar": row[1], "fuente": row[2]}
                     for row in cursor.fetchall()
-                ]
+                ])
 
     def seed(
         self,
@@ -113,7 +117,7 @@ class NeonKnowledgeStore:
         dictionary_rows = [
             (
                 row["cuenta_original"], normalize_account_name(row["cuenta_original"]),
-                row["codigo_estandar"], row.get("fuente", "seed_json"),
+                canonical_catalog_code(row["codigo_estandar"]), row.get("fuente", "seed_json"),
             )
             for row in dictionary
             if row.get("codigo_estandar") in valid_codes
@@ -160,6 +164,10 @@ class NeonKnowledgeStore:
         source_file: str = "",
         add_to_dictionary: bool = True,
     ) -> None:
+        validated_code = canonical_catalog_code(validated_code)
+        suggested_code = (
+            canonical_catalog_code(suggested_code) if suggested_code else suggested_code
+        )
         with self._connect() as conn:
             with conn.cursor() as cursor:
                 self._save_validation_cursor(cursor, {
@@ -183,9 +191,12 @@ class NeonKnowledgeStore:
     @staticmethod
     def _save_validation_cursor(cursor, validation: dict[str, Any]) -> None:
         account_name = validation["account_name"]
-        validated_code = validation["validated_code"]
+        validated_code = canonical_catalog_code(validation["validated_code"])
         source = validation["source"]
         suggested_code = validation.get("suggested_code")
+        suggested_code = (
+            canonical_catalog_code(suggested_code) if suggested_code else suggested_code
+        )
         suggested_method = validation.get("suggested_method")
         suggested_confidence = validation.get("suggested_confidence")
         reviewer = validation.get("reviewer", "analista")

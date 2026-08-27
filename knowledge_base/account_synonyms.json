@@ -1075,7 +1075,7 @@
     },
     "PAT.03": {
       "codigo": "PAT.03",
-      "nombre_oficial": "Utilidades Retenidas",
+      "nombre_oficial": "Resultados Acumulados",
       "categoria": "patrimonio",
       "grupo_presentacion": "Patrimonio",
       "clasificable": true,
@@ -1904,10 +1904,11 @@
     },
     "PAT.09": {
       "codigo": "PAT.09",
-      "nombre_oficial": "Utilidades Ejercicios Anteriores",
+      "nombre_oficial": "Resultados Acumulados (código histórico)",
       "categoria": "patrimonio",
       "grupo_presentacion": "Patrimonio",
-      "clasificable": true,
+      "clasificable": false,
+      "codigo_canonico": "PAT.03",
       "sinonimos": [
         "utilidades acumuladas de ejercicios anteriores",
         "resultados acumulados anteriores",

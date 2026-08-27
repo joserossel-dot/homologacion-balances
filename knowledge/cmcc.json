@@ -4238,7 +4238,7 @@
   {
     "id": "PAT.03",
     "codigo": "PAT.03",
-    "nombre": "Utilidades Retenidas",
+    "nombre": "Resultados Acumulados",
     "categoria": "patrimonio",
     "tipo_estado_financiero": "balance",
     "sinonimos": [],
@@ -4280,7 +4280,7 @@
     "ultima_revision": "2026-07-08",
     "metadata": {
       "naturaleza": "acreedora",
-      "descripcion": "Utilidades de ejercicios anteriores no distribuidas, incluyendo pérdidas acumuladas de años anteriores.",
+      "descripcion": "Resultados de ejercicios anteriores aún incorporados al patrimonio, sean utilidades no distribuidas o pérdidas acumuladas.",
       "fuente": "catalogo_maestro"
     }
   },
