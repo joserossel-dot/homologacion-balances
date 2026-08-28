@@ -447,9 +447,18 @@ Render construye un contenedor Python 3.12 con:
 - Streamlit en el puerto asignado por Render;
 - health check `/_stcore/health`;
 - `DATABASE_URL` como secreto;
+- contexto de build sin `.env`, historial Git, pruebas, reportes ni documentos contables locales;
 - despliegue automático desactivado.
 
-`render.yaml`, `APP_RELEASE_BRANCH` y el workflow de certificación apuntan a `codex/mejoras-pendientes-20260826`. El hash desplegado mostrado por `RENDER_GIT_COMMIT` sigue siendo la evidencia definitiva de la versión activa; `APP_RELEASE_BRANCH` identifica la línea de release configurada. El despliegue automático permanece desactivado.
+`render.yaml`, `APP_RELEASE_BRANCH` y el workflow de certificación apuntan a `codex/mejoras-pendientes-20260826`. El despliegue automático de Render permanece desactivado. Después de aprobar pruebas y el preflight de Neon, el workflow verifica que el hash certificado siga siendo la punta de la rama y solicita a Render ese commit exacto. La ejecución espera el estado `live` y falla si Render informa otro hash o un estado de error.
+
+El repositorio no contiene credenciales. GitHub Actions requiere estos secretos:
+
+- `NEON_DATABASE_URL`;
+- `RENDER_API_KEY`;
+- `RENDER_SERVICE_ID`.
+
+`RENDER_GIT_COMMIT`, mostrado por la interfaz, sigue siendo la evidencia de la versión activa. `APP_RELEASE_BRANCH` identifica la línea de release configurada.
 
 ## 17. Pruebas y evidencia del corte
 
@@ -513,7 +522,7 @@ python3 scripts/certify_local_corpus.py "$BALANCE_REAL_TEST_DIR" \
 
 1. Verificar en la interfaz que la corrección humana de `IMPTOS. POR PAGAR` recertifique Fundación Arte y Solidaridad sin volver a procesar el documento.
 2. Verificar en cada documento que se extrajeron todas las cuentas y que cada monto pertenece al año correcto.
-3. Convertir el release gate en un control que impida desplegar un commit distinto del certificado.
+3. Configurar `RENDER_API_KEY` y `RENDER_SERVICE_ID` en GitHub y validar una ejecución real del release gate hasta estado `live` con el mismo hash certificado.
 4. Definir autenticación, analista responsable y segregación de acceso antes de manejar información contable sensible de terceros.
 
 ### Prioridad alta
@@ -528,10 +537,9 @@ python3 scripts/certify_local_corpus.py "$BALANCE_REAL_TEST_DIR" \
 ### Prioridad media
 
 1. Actualizar `README.md` y metadatos de Poetry.
-2. Fijar la versión de Poetry en el contenedor.
-3. Agregar `.dockerignore` para no enviar artefactos innecesarios al build.
-4. Ejecutar el contenedor con un usuario no root.
-5. Añadir observabilidad de tiempos por página, OCR, clasificación y descarga.
+2. Eliminar los respaldos que escriben JSON y SQLite dentro del código desplegado, o moverlos a almacenamiento durable, antes de ejecutar el contenedor con un usuario no root.
+3. Ejecutar el contenedor con un usuario no root una vez resueltas esas escrituras.
+4. Añadir observabilidad de tiempos por página, OCR, clasificación y descarga.
 
 ## 19. Criterio propuesto para lanzamiento
 

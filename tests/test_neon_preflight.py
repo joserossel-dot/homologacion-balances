@@ -54,10 +54,26 @@ def test_docker_genera_fecha_de_build_para_trazabilidad():
     assert "date -u +%Y-%m-%dT%H:%M:%SZ > /app/.build_date" in source
 
 
-def test_release_gate_exige_neon_y_registra_commit():
+def test_dockerignore_excluye_secretos_y_artefactos_no_operativos():
+    source = (ROOT / ".dockerignore").read_text().splitlines()
+
+    assert ".env" in source
+    assert ".git" in source
+    assert "tests" in source
+    assert "reports" in source
+    assert "tmp" in source
+    assert "*.pdf" in source
+    assert "*.xlsx" in source
+
+
+def test_release_gate_exige_neon_y_despliega_el_commit_certificado():
     source = (
         Path(__file__).parents[1] / ".github" / "workflows" / "release-gate.yml"
     ).read_text()
     assert "secrets.NEON_DATABASE_URL" in source
     assert "poetry run python scripts/neon_preflight.py" in source
     assert "CERTIFIED_COMMIT=$GITHUB_SHA" in source
+    assert "secrets.RENDER_API_KEY" in source
+    assert "secrets.RENDER_SERVICE_ID" in source
+    assert "poetry run python scripts/deploy_certified_render.py" in source
+    assert "DEPLOYED_COMMIT=$GITHUB_SHA" in source

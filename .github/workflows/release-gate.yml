@@ -6,6 +6,10 @@ on:
     branches:
       - codex/mejoras-pendientes-20260826
 
+concurrency:
+  group: release-gate-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   certify:
     runs-on: ubuntu-latest
@@ -56,5 +60,23 @@ jobs:
         run: test -n "$DATABASE_URL"
       - name: Verify Neon and pipeline knowledge
         run: poetry run python scripts/neon_preflight.py
+      - name: Require Render deployment secrets
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
+        run: |
+          test -n "$RENDER_API_KEY"
+          test -n "$RENDER_SERVICE_ID"
+      - name: Ensure certified commit is current branch head
+        run: |
+          git fetch origin "$GITHUB_REF_NAME:refs/remotes/origin/$GITHUB_REF_NAME"
+          test "$(git rev-parse "origin/$GITHUB_REF_NAME")" = "$GITHUB_SHA"
       - name: Record certified commit
         run: echo "CERTIFIED_COMMIT=$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+      - name: Deploy exact certified commit to Render
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
+        run: poetry run python scripts/deploy_certified_render.py
+      - name: Record verified deployment
+        run: echo "DEPLOYED_COMMIT=$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
