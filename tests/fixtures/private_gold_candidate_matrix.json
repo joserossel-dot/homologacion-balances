@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "description": "Casos privados con Gold revisado fila por fila y promovidos al release gate. La recertificación debe permanecer roja mientras exista una fila faltante, adicional o distinta.",
+  "cases": [
+    {
+      "file": "230531 Informe Estado de Situación Financiera ABS 2022 - 2021 Def.pdf",
+      "pages": [8, 9, 10],
+      "gold_file": "230531_ABS_2022_2021.reviewed.xlsx",
+      "required_for_release": true,
+      "expect": {
+        "sha256": "2c51270ea91ba1e805f99a745c217356312bf8b17d2582f40df5d6e337f30711",
+        "exact_raw_accounts": 37,
+        "exact_qualified_accounts": 37,
+        "periods": ["2021", "2022"],
+        "currencies": ["CLP"],
+        "max_unclassified": 0
+      }
+    },
+    {
+      "file": "Balance Auditado Cosemar 2015-2016 IFRS.pdf",
+      "pages": [4, 5, 6],
+      "gold_file": "Balance_Auditado_Cosemar_2015-2016_IFRS.reviewed.xlsx",
+      "required_for_release": true,
+      "expect": {
+        "sha256": "8109c6eacad8528bde3611c7bb3964a877c02063fe258ff897e54acfc546d864",
+        "exact_raw_accounts": 42,
+        "exact_qualified_accounts": 42,
+        "periods": ["2015", "2016"],
+        "currencies": ["CLP"],
+        "max_unclassified": 0
+      }
+    },
+    {
+      "file": "EEFF 2018 Purefruit S A.pdf",
+      "pages": [5, 6],
+      "gold_file": "EEFF_2018_Purefruit_S_A.reviewed.xlsx",
+      "required_for_release": true,
+      "expect": {
+        "sha256": "5589a90da639ef9a0f4041e17c1216f9ef7cc50652fefeceb2d8471bf11e4b4a",
+        "exact_raw_accounts": 41,
+        "exact_qualified_accounts": 41,
+        "periods": ["2017", "2018"],
+        "currencies": ["USD"],
+        "max_unclassified": 0
+      }
+    }
+  ]
+}

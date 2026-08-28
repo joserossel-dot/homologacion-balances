@@ -24,6 +24,7 @@ from persistence.neon_store import NeonKnowledgeStore
 from parsers.account_type_resolver import (
     is_accumulated_result_name,
     is_contra_asset_name,
+    is_equity_account_name,
     is_patrimonial_reserve_name,
 )
 from reglas_especiales import ProcesadorReglasEspeciales
@@ -72,6 +73,52 @@ class HomologationPipeline:
     _REGEX_CONTEXTUAL: list[tuple[re.Pattern, str, float]] = [
         (re.compile(pattern, re.IGNORECASE | re.UNICODE), code, confidence)
         for pattern, code, confidence in REGLAS_REGEX
+    ]
+
+    # Etiquetas canónicas de estados financieros auditados. Son nombres
+    # completos, no coincidencias parciales, y por eso pueden resolverse sin
+    # un código de cuenta. Las partidas de balance además exigen que la
+    # columna/tipo observado sea compatible; las de resultados no dependen
+    # del signo ni de que el PDF haya impreso una columna explícita.
+    _AUDITED_STATEMENT_LABELS: list[tuple[re.Pattern, str, set[str] | None]] = [
+        (re.compile(r"efectivo y (?:efectivo )?equivalente(?:s)?(?: al efectivo)?", re.I), "AC.01", {"ACTIVO"}),
+        (re.compile(r"otros activos financieros(?: corrientes)?", re.I), "AC.02", {"ACTIVO"}),
+        (re.compile(r"deudores comerciales y otras cuentas por cobrar(?: corrientes)?", re.I), "AC.03", {"ACTIVO"}),
+        (re.compile(r"cuentas por cobrar a entidades relacionadas corrientes", re.I), "AC.06", {"ACTIVO"}),
+        (re.compile(r"inventarios(?: corrientes)?", re.I), "AC.05", {"ACTIVO"}),
+        (re.compile(r"activos por impuestos(?: corrientes)?", re.I), "AC.08", {"ACTIVO"}),
+        (re.compile(r"otros activos no financieros corrientes", re.I), "AC.08", {"ACTIVO"}),
+        (re.compile(r"propiedades planta y equipo", re.I), "ANC.01", {"ACTIVO"}),
+        (re.compile(r"activos intangibles distintos de la plusval[ií]a", re.I), "ANC.03", {"ACTIVO"}),
+        (re.compile(r"inversiones contabilizadas utilizando el m[eé]todo de la participaci[oó]n", re.I), "ANC.04", {"ACTIVO"}),
+        (re.compile(r"cuentas por cobrar a entidades relacionadas no corrientes", re.I), "ANC.05", {"ACTIVO"}),
+        (re.compile(r"(?:activos por impuestos diferidos|otros activos no financieros)(?: no corrientes)?", re.I), "ANC.06", {"ACTIVO"}),
+        (re.compile(r"cuentas comerciales y otras cuentas por pagar(?: corrientes)?", re.I), "PC.01", {"PASIVO"}),
+        (re.compile(r"(?:otros )?pasivos financieros(?: corrientes)?", re.I), "PC.02", {"PASIVO"}),
+        (re.compile(r"pasivos por impuestos(?: corrientes)?", re.I), "PC.05", {"PASIVO"}),
+        (re.compile(r"(?:provisi[oó]n |provisiones por )?beneficios a los empleados(?: corrientes)?", re.I), "PC.06", {"PASIVO"}),
+        (re.compile(r"cuentas por pagar a entidades relacionadas corrientes", re.I), "PC.07", {"PASIVO"}),
+        (re.compile(r"(?:otras provisiones|otros pasivos no financieros)", re.I), "PC.08", {"PASIVO"}),
+        (re.compile(r"(?:otros )?pasivos financieros no corrientes", re.I), "PNC.01", {"PASIVO"}),
+        (re.compile(r"cuentas por pagar a entidades relacionadas no corrientes", re.I), "PNC.04", {"PASIVO"}),
+        (re.compile(r"pasivo por impuestos diferidos", re.I), "PNC.05", {"PASIVO"}),
+        (re.compile(r"capital emitido", re.I), "PAT.01", {"PATRIMONIO"}),
+        (re.compile(r"(?:otras )?reservas", re.I), "PAT.02", {"PATRIMONIO"}),
+        (re.compile(r"ganancias? p[eé]rdidas? acumuladas", re.I), "PAT.03", {"PATRIMONIO"}),
+        (re.compile(r"ingresos de (?:actividades ordinarias|explotaci[oó]n)", re.I), "ER.01", None),
+        (re.compile(r"costo de (?:ventas|explotaci[oó]n)", re.I), "ER.02", None),
+        (re.compile(r"gastos? de administraci[oó]n", re.I), "ER.04", None),
+        (re.compile(r"costos? de distribuci[oó]n", re.I), "ER.05", None),
+        (re.compile(r"costos? financieros", re.I), "ER.09", None),
+        (re.compile(r"gasto o utilidad por impuestos a las ganancias", re.I), "ER.10", None),
+        (re.compile(r"gasto por impuestos a las ganancias", re.I), "ER.10", None),
+        (re.compile(r"ingresos financieros", re.I), "ER.12", None),
+        (re.compile(r"otras ganancias p[eé]rdidas(?: por funci[oó]n)?", re.I), "ER.13", None),
+        (re.compile(r"resultados por unidades de reajuste", re.I), "ER.14", None),
+        (re.compile(r"diferencias de cambio", re.I), "ER.15", None),
+        (re.compile(r"participaci[oó]n en las ganancias p[eé]rdidas de asociadas y negocios", re.I), "ER.16", None),
+        (re.compile(r"otros ingresos por funci[oó]n", re.I), "ER.17", None),
+        (re.compile(r"otros gastos por funci[oó]n", re.I), "ER.18", None),
     ]
 
     # ------------------------------------------------------------------
@@ -156,6 +203,37 @@ class HomologationPipeline:
                     "method": "dictionary_exact",
                     "reason": f"Coincidencia exacta con diccionario → {code}",
                 }
+        return None
+
+    def _classify_audited_statement_label(
+        self, account_name: str, account_tipo: str | None,
+        account_section: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Resuelve nombres completos estandarizados de estados auditados."""
+        normalized = self._normalize_name(account_name)
+        normalized_section = self._normalize_name(account_section or "")
+        if (
+            re.fullmatch(r"(?:otros )?pasivos financieros", normalized)
+            and "no corrient" in normalized_section
+            and account_tipo == "PASIVO"
+        ):
+            return {
+                "standard_code": "PNC.01",
+                "confidence": 0.96,
+                "method": "audited_statement_label",
+                "reason": "Etiqueta exacta en sección de pasivos no corrientes → PNC.01",
+            }
+        for pattern, code, allowed_types in self._AUDITED_STATEMENT_LABELS:
+            if not pattern.fullmatch(normalized):
+                continue
+            if allowed_types is not None and account_tipo not in allowed_types:
+                continue
+            return {
+                "standard_code": code,
+                "confidence": 0.96,
+                "method": "audited_statement_label",
+                "reason": f"Etiqueta exacta de estado financiero auditado → {code}",
+            }
         return None
 
     def _classify_by_dictionary_fuzzy(self, account_name: str) -> dict[str, Any] | None:
@@ -289,7 +367,17 @@ class HomologationPipeline:
         self, account_code: str, account_name: str,
         account_tipo: str | None = None,
         store_cmcc_shadow: bool = True,
+        account_section: str | None = None,
     ) -> dict[str, Any]:
+        # Las etiquetas canónicas completas de estados auditados son evidencia
+        # más fuerte que similitudes históricas. Se resuelven antes del motor
+        # aprendido para impedir que una asociación antigua las desvíe.
+        audited_result = self._classify_audited_statement_label(
+            account_name, account_tipo, account_section,
+        )
+        if audited_result is not None:
+            return self._canonicalize_special_code(audited_result, account_name)
+
         learning_result = self._learning_engine.best_match(account_name)
         if learning_result["source"] != "none":
             return self._canonicalize_special_code({
@@ -341,6 +429,7 @@ class HomologationPipeline:
         result = (
             result
             or self._classify_by_code(account_code)
+            or self._classify_audited_statement_label(account_name, account_tipo)
             or self._classify_by_dictionary_exact(account_name)
             or self._classify_by_dictionary_fuzzy(account_name)
         )
@@ -402,7 +491,11 @@ class HomologationPipeline:
         from decision.models import DecisionResult as DEResult
 
         code_r = self._classify_by_code(account_code)
-        dict_r = self._classify_by_dictionary_exact(account_name) or self._classify_by_dictionary_fuzzy(account_name)
+        dict_r = (
+            self._classify_audited_statement_label(account_name, account_tipo)
+            or self._classify_by_dictionary_exact(account_name)
+            or self._classify_by_dictionary_fuzzy(account_name)
+        )
 
         sm_match = None
         sm_code = None
@@ -571,8 +664,7 @@ class HomologationPipeline:
             account_tipo = tipo_result.account_type.value
             if account_tipo == "PASIVO" and is_contra_asset_name(ab.account_name):
                 account_tipo = "ACTIVO"
-            if (is_patrimonial_reserve_name(ab.account_name)
-                    or is_accumulated_result_name(ab.account_name)):
+            if is_equity_account_name(ab.account_name):
                 account_tipo = "PATRIMONIO"
 
             # None significa ausencia de información.
@@ -590,6 +682,7 @@ class HomologationPipeline:
                 ab.account_code, ab.account_name,
                 account_tipo=account_tipo,
                 store_cmcc_shadow=store_shadow,
+                account_section=cr.seccion_contable,
             )
 
             if enable_type_filter and account_tipo and classification.get("standard_code"):

@@ -45,11 +45,23 @@ def is_patrimonial_reserve_name(name: str | None) -> bool:
 def is_accumulated_result_name(name: str | None) -> bool:
     """True para utilidades, ganancias o pérdidas acumuladas patrimoniales."""
     normalized = re.sub(r"\s+", " ", str(name or "").lower()).strip()
+    normalized = re.sub(r"[(),;:/]+", " ", normalized)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
     return bool(re.search(
         r"\b(?:resultado(?:s)?|utilidad(?:es)?|ganancia(?:s)?|p[eé]rdida(?:s)?)\s+"
         r"(?:acumulad[ao]s?|de\s+ejercicios?\s+anteriores?)\b",
         normalized,
     ))
+
+
+def is_equity_account_name(name: str | None) -> bool:
+    """True para partidas canónicas del patrimonio neto."""
+    normalized = re.sub(r"\s+", " ", str(name or "").lower()).strip()
+    return bool(
+        re.fullmatch(r"capital(?: social| emitido| pagado)?", normalized)
+        or is_patrimonial_reserve_name(normalized)
+        or is_accumulated_result_name(normalized)
+    )
 
 
 class AccountType(str, Enum):

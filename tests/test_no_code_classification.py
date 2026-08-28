@@ -121,6 +121,40 @@ def test_ganancias_acumuladas_negativas_clasifican_pat03(tmp_path):
     assert result['standard_code'] == 'PAT.03'
 
 
+@pytest.mark.parametrize('nombre,codigo,tipo', [
+    ('Capital emitido', 'PAT.01', 'PATRIMONIO'),
+    ('Ganancias (pérdidas) acumuladas', 'PAT.03', 'PATRIMONIO'),
+    ('Ingresos de actividades ordinarias', 'ER.01', 'DESCONOCIDO'),
+])
+def test_etiqueta_auditada_precede_aprendizaje_incompatible(
+    tmp_path, nombre, codigo, tipo,
+):
+    pipeline = HomologationPipeline(db_path=tmp_path / 'gold.db')
+    pipeline._learning_engine.best_match = MagicMock(return_value={
+        'source': 'runtime',
+        'code': 'AC.08',
+        'confidence': 0.99,
+        'matched_name': nombre,
+    })
+
+    result = pipeline._classify_account('', nombre, tipo)
+
+    assert result['standard_code'] == codigo
+    assert result['method'] == 'audited_statement_label'
+
+
+def test_pasivo_financiero_generico_usa_seccion_no_corriente(tmp_path):
+    pipeline = HomologationPipeline(db_path=tmp_path / 'gold.db')
+
+    result = pipeline._classify_account(
+        '', 'Pasivos financieros', 'PASIVO',
+        account_section='Pasivos no corrientes',
+    )
+
+    assert result['standard_code'] == 'PNC.01'
+    assert result['method'] == 'audited_statement_label'
+
+
 @pytest.mark.parametrize('nombre,codigo', [
     ('Ganancia atribuible a los propietarios de la controladora', 'ER.20'),
     ('Ganancia atribuible a participaciones no controladoras', 'ER.21'),
@@ -136,6 +170,35 @@ def test_resultado_atribuible_clasifica_sin_depender_del_signo(
     assert result['standard_code'] == codigo
     assert result['method'] == 'regex_fallback'
     assert result['confidence'] == 0.97
+
+
+@pytest.mark.parametrize('nombre,tipo,codigo', [
+    ('Efectivo y equivalentes al efectivo', 'ACTIVO', 'AC.01'),
+    ('Cuentas por cobrar a entidades relacionadas, no corrientes', 'ACTIVO', 'ANC.05'),
+    ('Otros pasivos financieros, no corrientes', 'PASIVO', 'PNC.01'),
+    ('Ganancias (pérdidas) acumuladas', 'PATRIMONIO', 'PAT.03'),
+    ('Ingresos de actividades ordinarias', 'DESCONOCIDO', 'ER.01'),
+    ('Costo de ventas', 'DESCONOCIDO', 'ER.02'),
+    ('Resultados por unidades de reajuste', 'DESCONOCIDO', 'ER.14'),
+])
+def test_etiquetas_exactas_de_estado_auditado_son_automaticas(
+    tmp_path, nombre, tipo, codigo,
+):
+    pipeline = HomologationPipeline(db_path=tmp_path / 'gold.db')
+
+    result = pipeline._classify_audited_statement_label(nombre, tipo)
+
+    assert result['standard_code'] == codigo
+    assert result['method'] == 'audited_statement_label'
+    assert result['confidence'] >= 0.85
+
+
+def test_etiqueta_auditada_de_balance_exige_tipo_compatible(tmp_path):
+    pipeline = HomologationPipeline(db_path=tmp_path / 'gold.db')
+
+    assert pipeline._classify_audited_statement_label(
+        'Otros pasivos financieros, no corrientes', 'ACTIVO',
+    ) is None
 
 
 def test_process_clasifica_monto_comparativo_sin_ocho_columnas(tmp_path):

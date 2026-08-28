@@ -51,6 +51,38 @@ def _row(top, code, name, amounts):
     return top, cells
 
 
+def test_detecta_pagina_comparativa_con_fuente_nativa_fragmentada():
+    rows = []
+    for top in range(10, 90, 10):
+        cells = [
+            (10 + offset * 8, 15 + offset * 8, letter)
+            for offset, letter in enumerate("CUENT")
+        ]
+        cells.extend([(180, 220, "1.234"), (240, 280, "2.345")])
+        rows.append((top, cells))
+    page = FakePage(rows)
+
+    assert parser._pagina_comparativa_con_texto_nativo_corrupto(
+        page, "C U E N T 1.234 2.345",
+    )
+
+
+def test_no_activa_ocr_selectivo_en_tabla_nativa_legible():
+    rows = [
+        (top, [
+            (10, 100, "CuentaNormal"),
+            (180, 220, "1.234"),
+            (240, 280, "2.345"),
+        ])
+        for top in range(10, 110, 10)
+    ]
+    page = FakePage(rows)
+
+    assert not parser._pagina_comparativa_con_texto_nativo_corrupto(
+        page, "CuentaNormal 1.234 2.345",
+    )
+
+
 def test_extractor_coordenadas_preserva_codigo_nombre_y_ocho_columnas():
     page = FakePage([
         _header(),
@@ -615,6 +647,24 @@ def test_parsear_linea_ocr_elimina_signo_falso_en_total_debitos():
     assert cuenta.columnas_derivadas == ["debitos"]
 
 
+@pytest.mark.parametrize('line', [
+    'Ganancia 98.325 259.535',
+    'Ganancia (pérdida) 4.100.989 3.827.959',
+    'Ganancia (pérdida), antes de impuestos 5.099.248 4.238.024',
+])
+def test_balance_auditado_reconoce_controles_de_resultado(line):
+    cuenta = parser.parsear_linea(
+        line, 1, parser.FormatoCodigo.SIN_CODIGO, '.',
+        periodo_comparativo=True,
+        years=['2018', '2017'],
+        currencies=['CLP'],
+    )
+
+    assert cuenta is not None
+    assert cuenta.es_total
+    assert cuenta.montos_periodos
+
+
 def test_parsear_linea_ocr_elimina_prefijo_pegado_si_saldo_cero_exige_igualdad():
     cuenta = parser.parsear_linea(
         "2.01.01.10 Préstamo 121.866.316 1.866.316 0 0 0 0 0 0",
@@ -660,6 +710,36 @@ def test_parsear_linea_ocr_elimina_clasificacion_marginal_con_saldo_completo():
     assert cuenta.montos_columnas["perdida"] == 1_135_074
     assert cuenta.montos_columnas["ganancia"] == 0
     assert cuenta.columnas_derivadas == ["ganancia"]
+
+
+@pytest.mark.parametrize(
+    ("line", "expected_debtor", "expected_creditor", "expected_column"),
+    [
+        (
+            "1102001 Banco Estado 113802944 106159527 0 0 7643417 0 0 0",
+            7_643_417,
+            0,
+            "saldo_deudor",
+        ),
+        (
+            "2301001 Capital Social 0 15201792 0 0 0 15201792 0 0",
+            0,
+            15_201_792,
+            "saldo_acreedor",
+        ),
+    ],
+)
+def test_parsear_linea_recupera_saldo_si_movimiento_y_columna_final_coinciden(
+    line, expected_debtor, expected_creditor, expected_column,
+):
+    cuenta = parser.parsear_linea(
+        line, 1, parser.FormatoCodigo.SIN_CODIGO, ".", 0.75,
+    )
+
+    assert cuenta is not None
+    assert cuenta.montos_columnas["saldo_deudor"] == expected_debtor
+    assert cuenta.montos_columnas["saldo_acreedor"] == expected_creditor
+    assert expected_column in cuenta.columnas_derivadas
 
 
 def test_parsear_linea_nativa_preserva_importe_pequeno_real():
@@ -1468,7 +1548,9 @@ def test_balance_clasificado_cambia_de_activo_a_pasivo_entre_paginas():
     parser.anotar_secciones_balance_clasificado(accounts)
 
     assert accounts[1].origen_columna is parser.OrigenColumna.ACTIVO
+    assert accounts[1].seccion_contable == "Activos no corrientes"
     assert accounts[4].origen_columna is parser.OrigenColumna.PASIVO
+    assert accounts[4].seccion_contable == "Pasivos corrientes"
 
 
 def test_fusiona_glosa_partida_con_importes_de_la_misma_linea():
@@ -1743,6 +1825,25 @@ def test_balance_clasificado_propaga_resultados_por_naturaleza():
     assert accounts[3].origen_columna is parser.OrigenColumna.PERDIDA
 
 
+def test_total_de_resultado_no_propaga_naturaleza_a_fila_cero_siguiente():
+    accounts = [
+        parser.CuentaRaw(
+            1, None, "Ganancia", 10,
+            origen_columna=parser.OrigenColumna.GANANCIA,
+            es_total=True,
+        ),
+        parser.CuentaRaw(2, None, "Otro resultado integral", 0),
+    ]
+
+    parser.anotar_secciones_balance_clasificado(accounts)
+
+    assert accounts[1].origen_columna is parser.OrigenColumna.DESCONOCIDO
+
+
+def test_patron_total_reconoce_resultado_antes_de_impuesto_singular():
+    assert parser.PATRON_TOTAL.fullmatch("Ganancia antes de impuesto")
+
+
 def test_seccion_no_se_filtra_hacia_otro_estado_financiero():
     accounts = [
         parser.CuentaRaw(1, None, "PATRIMONIO NETO", None),
@@ -1882,3 +1983,48 @@ def test_fusion_ocr_recupera_control_partido_por_solapamiento_independiente():
         "perdida": 800_551_567,
         "ganancia": 848_102_769,
     }
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "de diciembre 2018 2017",
+        "meses terminados al 31 de diciembre 2018 2017",
+        "31-12-2018 31-12-2017",
+        "Correspondientes al período comprendido entre",
+        "Correspondientes al período comprendido entre el 1",
+    ],
+)
+def test_comparative_period_headers_are_not_accounts(line):
+    assert parser.parsear_linea(line, 0, None, None, 1.0) is None
+
+
+def test_reconstructs_fragmented_native_comparative_row_from_coordinates():
+    class Page:
+        @staticmethod
+        def extract_words(**_kwargs):
+            return [
+                {"text": "G", "top": 10, "x0": 10, "x1": 15},
+                {"text": "a", "top": 10, "x0": 15, "x1": 20},
+                {"text": "n", "top": 10, "x0": 20, "x1": 25},
+                {"text": "ancia", "top": 10, "x0": 25, "x1": 45},
+                {"text": "bruta", "top": 10, "x0": 48, "x1": 70},
+                {"text": "538.703", "top": 10, "x0": 120, "x1": 155},
+                {"text": "596.939", "top": 10, "x0": 180, "x1": 215},
+            ]
+
+    assert parser._reconstruir_lineas_nativas_fragmentadas(Page()) == [
+        "Ganancia bruta 538.703 596.939",
+    ]
+
+
+def test_detects_unlabeled_note_column_from_repeated_references():
+    lines = [
+        "31-12-2022 31-12-2021",
+        "Nota",
+        "Ingresos ordinarios 15 3.910.774 3.414.827",
+        "Costo de ventas 16 (3.372.071) (2.817.888)",
+        "Ingresos financieros 17 79.234 11.353",
+    ]
+
+    assert parser.detectar_columna_nota_comparativa(lines, ["2022", "2021"])

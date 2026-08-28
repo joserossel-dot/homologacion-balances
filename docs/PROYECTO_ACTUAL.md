@@ -4,13 +4,13 @@
 
 | Campo | Valor verificado |
 |---|---|
-| Fecha del levantamiento | 27 de agosto de 2026 |
+| Fecha del levantamiento | 28 de agosto de 2026 |
 | Repositorio | `homologacion-balances` |
 | Rama candidata documentada | `codex/mejoras-pendientes-20260826` |
-| Commit candidato | `84de74b6d8849e24a16a05415bf4f80f0d6f11d4` |
+| Commit base del trabajo local | `bcfc4af6294e43e57779714da2fb225fb50567ff` |
 | Rama configurada en Render | `codex/release-operativa-neon` |
 | Base de la rama candidata | `origin/codex/release-operativa-neon` |
-| Diferencia respecto de la base | 5 commits por delante, 0 por detrás |
+| Diferencia respecto de la base | 10 commits por delante, 0 por detrás |
 | Persistencia operativa | PostgreSQL en Neon, con fallback local controlado |
 | Interfaz operativa | Streamlit en `app_validacion.py` |
 
@@ -479,7 +479,7 @@ La suite ubicada en `tests/` contiene pruebas de:
 - informes y cuadratura;
 - regresiones de documentos reportados.
 
-En la verificación más reciente, `pytest tests -q` completó 911 pruebas aprobadas, 17 omitidas y 3 advertencias. La prueba privada adicional se omite cuando no está definido `BALANCE_REAL_TEST_DIR`.
+En la verificación más reciente, `pytest tests -q` completó 956 pruebas aprobadas, 17 omitidas y 3 advertencias. La prueba privada adicional se omite cuando no está definido `BALANCE_REAL_TEST_DIR`.
 
 ### 17.2 Saneamiento del simulador histórico
 
@@ -516,12 +516,77 @@ python3 scripts/certify_local_corpus.py "$BALANCE_REAL_TEST_DIR" \
   --output /tmp/homologacion-release-matrix.json
 ```
 
+### 17.4 Gold por cuenta y candidatos auditados
+
+La comprobación agregada anterior no basta para acreditar completitud. El
+certificador conserva ahora la huella SHA-256 del documento, los períodos y
+monedas detectados y una instantánea de todas las filas, incluidos controles,
+montos por período, montos por columna, origen y código homologado.
+
+La opción `--write-gold-candidates` genera un libro por documento con las hojas
+`Resumen`, `Cuentas`, `Controles` y `Advertencias`. Cada fila comienza con
+`Estado_revision=PENDIENTE`. El libro no puede usarse como Gold mientras exista
+una sola fila que no esté marcada `APROBADO` o `EXCLUIR`. `APROBADO` significa
+que la fila debe existir exactamente. `EXCLUIR` identifica ruido que el parser
+debe dejar de emitir; si la salida todavía contiene esa fila, la recertificación
+la detecta como adicional y falla. `PENDIENTE` y `CORREGIR` mantienen bloqueado
+el Gold. Después de la revisión humana, el manifiesto puede declarar
+`gold_file`; una fila faltante, adicional o distinta hace fallar la
+recertificación.
+
+```bash
+python3 scripts/certify_local_corpus.py "$BALANCE_REAL_TEST_DIR" \
+  --manifest tests/fixtures/private_gold_candidate_matrix.json \
+  --output /tmp/homologacion-gold-candidates.json \
+  --write-gold-candidates "$BALANCE_GOLD_DIR"
+
+python3 scripts/certify_local_corpus.py "$BALANCE_REAL_TEST_DIR" \
+  --manifest tests/fixtures/private_gold_candidate_matrix.json \
+  --gold-root "$BALANCE_GOLD_DIR" \
+  --output /tmp/homologacion-gold-recertification.json
+```
+
+Una búsqueda local deduplicada por contenido encontró 528 documentos únicos en
+las carpetas primarias examinadas: 449 PDF, 78 XLSX y 1 XLS. De ellos, 115 tienen
+señales nominales de estados auditados o IFRS. Se revisaron visualmente, fila por
+fila, tres disposiciones comparativas no cubiertas por la matriz privada
+anterior:
+
+- ABS 2022-2021: estados auditados en páginas separadas y tabla de contenidos;
+- Cosemar 2016-2015: Activo, Pasivo y Resultado en páginas distintas, expresado
+  en miles de pesos;
+- Purefruit 2018-2017: estado combinado en una página, USD y negativos entre
+  paréntesis.
+
+Los libros Gold aprobados se mantienen fuera del repositorio y el manifiesto
+sólo conserva nombre, selección de páginas, huella SHA-256 y nombre del Gold.
+Los tres casos detectan ambos períodos y la moneda esperada. La recertificación
+exacta del 28 de agosto de 2026 pasa en los tres, sin filas faltantes,
+adicionales ni distintas respecto de los Gold aprobados. Desde esa revisión son
+casos obligatorios del release gate.
+
+Correcciones acreditadas por los Gold:
+
+- ABS: recupera 37 cuentas, incluidas las filas del estado de resultados de la
+  página 10, sin convertir encabezados o texto truncado en cuentas;
+- Cosemar: recupera 42 cuentas y clasifica automáticamente 32, sin encabezados
+  o bandas adicionales;
+- Purefruit: recupera 41 cuentas y clasifica automáticamente 28, sin
+  encabezados o bandas adicionales.
+
+El directorio privado usado en esta estación es
+`Downloads/homologacion-balances/recertificacion_gold_20260827/`. Debe
+configurarse mediante `BALANCE_REAL_TEST_DIR` y `BALANCE_GOLD_DIR` en cada
+entorno que ejecute la recertificación. No debe versionarse el contenido de los
+balances ni de los libros Gold.
+
 ## 18. Riesgos pendientes antes de producción
 
 ### Prioridad crítica
 
 1. Verificar en la interfaz que la corrección humana de `IMPTOS. POR PAGAR` recertifique Fundación Arte y Solidaridad sin volver a procesar el documento.
-2. Verificar en cada documento que se extrajeron todas las cuentas y que cada monto pertenece al año correcto.
+2. Mantener ABS, Cosemar y Purefruit en el release gate exacto y ampliar la
+   matriz sin relajar sus comparaciones por cuenta, monto y período.
 3. Configurar `RENDER_API_KEY` y `RENDER_SERVICE_ID` en GitHub y validar una ejecución real del release gate hasta estado `live` con el mismo hash certificado.
 4. Definir autenticación, analista responsable y segregación de acceso antes de manejar información contable sensible de terceros.
 
@@ -529,7 +594,8 @@ python3 scripts/certify_local_corpus.py "$BALANCE_REAL_TEST_DIR" \
 
 1. Persistir documentos, ejecuciones, correcciones y reportes en Neon o almacenamiento durable.
 2. Ejecutar OCR en segundo plano con progreso, caché por página y reintentos recuperables.
-3. Ampliar fixtures auditados de dos períodos y distintas disposiciones.
+3. Ampliar el Gold con Excel, OCR y estados auditados de dos períodos después de
+   aplicar el mismo control de huella y aprobación completa.
 4. Medir precisión por cuenta, cobertura monetaria, falsos positivos y tiempo de intervención humana.
 5. Activar gradualmente Coverage y Self-QA como gate de exportación cuando exista evidencia suficiente.
 6. Separar o retirar la arquitectura paralela que no tiene consumidor operativo.

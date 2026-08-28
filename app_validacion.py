@@ -68,6 +68,7 @@ from parsers.column_interpretation import es_ingreso as es_ingreso_col, es_gasto
 from parsers.account_type_resolver import (
     is_accumulated_result_name,
     is_contra_asset_name,
+    is_equity_account_name,
     is_patrimonial_reserve_name,
 )
 from extractor_metadata import extraer_metadata, MetadataEmpresa
@@ -622,7 +623,7 @@ def _es_contra_activo(nombre: str | None) -> bool:
 
 
 def _es_partida_patrimonial(nombre: str | None) -> bool:
-    return is_patrimonial_reserve_name(nombre) or is_accumulated_result_name(nombre)
+    return is_equity_account_name(nombre)
 
 
 def _monto_presentacion(codigo: str | None, monto, nombre: str | None = None,
@@ -1656,6 +1657,13 @@ def main():
                         ab = AccountAdapter.from_cuenta_raw(cuenta_clasificacion)
                         interp = BalanceInterpreter(ab)
                         classification_amount = interp.classification_amount
+                        if (
+                            classification_amount is None
+                            and monto_seleccionado is not None
+                            and c.montos_periodos
+                            and not c.es_total
+                        ):
+                            classification_amount = float(monto_seleccionado)
                         origen_efectivo = _origen_efectivo(
                             c.origen_columna, classification_amount, c.nombre,
                         )
@@ -1681,6 +1689,7 @@ def main():
                                 ab.account_code,
                                 ab.account_name,
                                 account_tipo=account_tipo,
+                                account_section=c.seccion_contable,
                             )
                             tiempo_clasif_ms = round((time.perf_counter() - _t0_clasif) * 1000, 3)
                             adjustment = hp._rule_processor.aplicar(

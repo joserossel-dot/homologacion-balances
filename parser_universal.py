@@ -162,7 +162,23 @@ def detectar_columna_nota_comparativa(
             ]
             if len(nearby_units) >= 2:
                 return True
-    return False
+
+    # Algunos estados imprimen sólo ``Nota`` y dejan la unidad monetaria en
+    # otra zona de la cabecera. Varias referencias breves antes de dos importes
+    # comparativos confirman de forma conservadora esa columna auxiliar.
+    rows_with_note_reference = 0
+    for line in candidates:
+        tokens = line.split()
+        monetary_positions = [
+            index for index, token in enumerate(tokens)
+            if PATRON_MONTOS.fullmatch(token.replace("$", ""))
+        ]
+        if len(monetary_positions) < 3:
+            continue
+        first = tokens[monetary_positions[-3]].strip("()[]")
+        if first.isdigit() and 0 < int(first) <= 99:
+            rows_with_note_reference += 1
+    return rows_with_note_reference >= 3
 
 
 def split_side_by_side(line: str) -> list[str]:
@@ -348,6 +364,92 @@ def _agrupar_palabras_por_linea(words: list[dict], tolerancia: float = 2.5) -> l
         else:
             grupos[-1].append(word)
     return grupos
+
+
+def _pagina_comparativa_con_texto_nativo_corrupto(page, texto: str) -> bool:
+    """Detecta fuentes PDF que visualmente forman una tabla pero extraen letras sueltas.
+
+    Algunos estados financieros auditados contienen una fuente embebida cuya
+    codificación rompe las glosas y separa casi cada letra, aunque la página se
+    vea nítida. La detección exige simultáneamente fragmentación alfabética alta
+    y varias filas con al menos dos importes comparativos. Así no se activa OCR
+    por una portada, una nota narrativa o una tabla nativa correctamente leída.
+    """
+    if not texto.strip():
+        return False
+    try:
+        words = page.extract_words(
+            x_tolerance=2, y_tolerance=2,
+            use_text_flow=False, keep_blank_chars=False,
+        ) or []
+    except Exception:
+        return False
+    alpha_tokens = [
+        str(word.get("text", ""))
+        for word in words
+        if re.search(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]", str(word.get("text", "")))
+    ]
+    if len(alpha_tokens) < 40:
+        return False
+    fragmented = sum(
+        len(re.sub(r"[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ]", "", token)) <= 1
+        for token in alpha_tokens
+    )
+    if fragmented / len(alpha_tokens) < 0.55:
+        return False
+
+    comparative_rows = 0
+    for group in _agrupar_palabras_por_linea(words):
+        has_label = any(
+            re.search(
+                r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]", str(word.get("text", "")),
+            )
+            for word in group
+        )
+        amounts = sum(
+            bool(PATRON_MONTOS.fullmatch(
+                normalizar_token_ocr(str(word.get("text", ""))).replace("$", ""),
+            ))
+            for word in group
+        )
+        if has_label and amounts >= 2:
+            comparative_rows += 1
+    return comparative_rows >= 5
+
+
+def _reconstruir_lineas_nativas_fragmentadas(page) -> list[str]:
+    """Rearma texto cuyos caracteres conservan coordenadas PDF válidas.
+
+    Algunas fuentes embebidas hacen que ``extract_text`` separe cada letra y
+    dígito. La distancia horizontal sí conserva la frontera entre palabras y
+    columnas, de modo que puede reconstruirse la fila sin inventar importes ni
+    aplicar identidades contables.
+    """
+    try:
+        words = page.extract_words(
+            x_tolerance=2, y_tolerance=2,
+            use_text_flow=False, keep_blank_chars=False,
+        ) or []
+    except Exception:
+        return []
+    rebuilt: list[str] = []
+    for group in _agrupar_palabras_por_linea(words):
+        ordered = sorted(group, key=lambda item: float(item["x0"]))
+        parts: list[str] = []
+        previous_x1: Optional[float] = None
+        for word in ordered:
+            token = str(word.get("text", ""))
+            if not token:
+                continue
+            x0 = float(word["x0"])
+            if previous_x1 is not None and x0 - previous_x1 > 1.2:
+                parts.append(" ")
+            parts.append(token)
+            previous_x1 = float(word["x1"])
+        line = re.sub(r"\s+", " ", "".join(parts)).strip()
+        if line:
+            rebuilt.append(line)
+    return rebuilt
 
 
 _HEADER_ALIASES = {
@@ -588,6 +690,7 @@ class CuentaRaw:
     montos_columnas: dict[str, float] = field(default_factory=dict)
     montos_periodos: dict[str, float] = field(default_factory=dict)
     columnas_derivadas: list[str] = field(default_factory=list)
+    seccion_contable: Optional[str] = None
 
 
 @dataclass
@@ -1726,6 +1829,7 @@ def anotar_secciones_balance_clasificado(cuentas: list[CuentaRaw]) -> int:
     cuentas de detalle. Retorna el número de filas enriquecidas.
     """
     seccion: Optional[OrigenColumna] = None
+    seccion_contable: Optional[str] = None
     secciones_paralelas = False
     posiciones_paralelas: dict[int, int] = {}
     detalles_por_linea = Counter(
@@ -1742,6 +1846,7 @@ def anotar_secciones_balance_clasificado(cuentas: list[CuentaRaw]) -> int:
             nombre, re.I,
         ):
             seccion = None
+            seccion_contable = None
             secciones_paralelas = False
             continue
         if re.match(
@@ -1751,6 +1856,7 @@ def anotar_secciones_balance_clasificado(cuentas: list[CuentaRaw]) -> int:
             nombre, re.I,
         ):
             seccion = None
+            seccion_contable = None
             secciones_paralelas = False
             continue
         normalized_english = nombre.replace("-", " ")
@@ -1760,6 +1866,7 @@ def anotar_secciones_balance_clasificado(cuentas: list[CuentaRaw]) -> int:
             and not cuenta.es_total
         ):
             seccion = None
+            seccion_contable = None
             secciones_paralelas = True
             continue
         encabezado = _normalizar_encabezado_seccion(nombre)
@@ -1771,7 +1878,15 @@ def anotar_secciones_balance_clasificado(cuentas: list[CuentaRaw]) -> int:
                 nueva_seccion = origen
                 break
         if nueva_seccion is not None:
+            if cuenta.es_total and nueva_seccion in (
+                OrigenColumna.PERDIDA, OrigenColumna.GANANCIA,
+            ):
+                seccion = None
+                seccion_contable = None
+                secciones_paralelas = False
+                continue
             seccion = nueva_seccion
+            seccion_contable = encabezado
             secciones_paralelas = False
             continue
         if (
@@ -1802,6 +1917,7 @@ def anotar_secciones_balance_clasificado(cuentas: list[CuentaRaw]) -> int:
                 or not cuenta.montos_columnas
             )
         ):
+            cuenta.seccion_contable = seccion_contable
             if cuenta.origen_columna != seccion:
                 cuenta.origen_columna = seccion
                 anotadas += 1
@@ -1909,7 +2025,9 @@ PATRON_TOTAL = re.compile(
     r'^patrimonio\s+atribuible\s+a\b.*$|'
     r'^(?:resultado(?: del ejercicio| [\x22\x27]?(?:positivo|negativo))?|utilidad(?: neta| del ejercicio)?|'
     r'perdida(?: o ganancia| neta| neto| del ejercicio)?)$|'
-    r'^ganancia(?:\s*\(p[eé]rdida\))?\s+(?:bruta|antes\s+de\s+impuestos|'
+    r'^ganancia(?:\s*\(p[eé]rdida\))?$|'
+    r'^ganancia\s*\(p[eé]rdida\)\s*,?\s*antes\s+de\s+impuestos?$|'
+    r'^ganancia(?:\s*\(p[eé]rdida\))?\s+(?:bruta|antes\s+de\s+impuestos?|'
     r'procedente\s+de\s+operaciones\s+(?:continuadas|discontinuadas)|del\s+ejercicio)$',
     re.IGNORECASE
 )
@@ -1963,6 +2081,23 @@ GARBAGE_PATTERNS: list[re.Pattern] = [
     re.compile(
         r'^\s*de\s+\w+(?:\s+de)?\s+(?:19|20)\d{2}'
         r'(?:\s+(?:19|20)\d{2})?\s*$',
+        re.I,
+    ),
+    # Cabeceras de período comparativo que contienen cifras de años. Esas
+    # cifras no son importes ni códigos de cuenta.
+    re.compile(
+        r'^\s*(?:correspondientes\s+al\s+per[ií]odo\s+comprendido\s+entre|'
+        r'(?:\d+\s+)?meses\s+terminados\s+al|de\s+enero\s+y\s+el|'
+        r'de\s+diciembre)\b.*(?:19|20)\d{2}\b.*$',
+        re.I,
+    ),
+    re.compile(
+        r'^\s*correspondientes\s+al\s+per[ií]odo\s+comprendido\s+entre\b.*$',
+        re.I,
+    ),
+    re.compile(
+        r'^\s*\d{2}[-/]\d{2}[-/](?:19|20)\d{2}\s+'
+        r'(?:al\s+)?\d{2}[-/]\d{2}[-/](?:19|20)\d{2}(?:\s+al)?\s*$',
         re.I,
     ),
     # Títulos de estados auditados que incorporan años o duración del período.
@@ -2468,6 +2603,56 @@ def parsear_linea(
                         montos_columnas[column] = 0.0
                         columnas_derivadas.append(column)
                         break
+
+            # En una fila de ocho columnas, el movimiento neto y la columna
+            # final son dos copias independientes del saldo. Si ambas
+            # coinciden y sólo existe una naturaleza final, recuperamos el
+            # saldo que la extracción por coordenadas haya perdido. La regla
+            # no depende del código ni se aplica a texto nativo confiable.
+            nonzero_classifications = [
+                column for column in ("activo", "pasivo", "perdida", "ganancia")
+                if montos_columnas[column] != 0
+            ]
+            if len(nonzero_classifications) == 1:
+                target = nonzero_classifications[0]
+                final_value = abs(montos_columnas[target])
+                movement = montos_columnas["debitos"] - montos_columnas["creditos"]
+                missing_balance = (
+                    montos_columnas["saldo_deudor"] == 0
+                    and montos_columnas["saldo_acreedor"] == 0
+                )
+                if (
+                    missing_balance
+                    and target in {"activo", "perdida"}
+                    and movement > 0
+                    and abs(movement - final_value) <= 10
+                    and (
+                        montos_columnas["saldo_deudor"] != final_value
+                        or montos_columnas["saldo_acreedor"] != 0
+                    )
+                ):
+                    if montos_columnas["saldo_deudor"] != final_value:
+                        columnas_derivadas.append("saldo_deudor")
+                    if montos_columnas["saldo_acreedor"] != 0:
+                        columnas_derivadas.append("saldo_acreedor")
+                    montos_columnas["saldo_deudor"] = final_value
+                    montos_columnas["saldo_acreedor"] = 0.0
+                elif (
+                    missing_balance
+                    and target in {"pasivo", "ganancia"}
+                    and movement < 0
+                    and abs(-movement - final_value) <= 10
+                    and (
+                        montos_columnas["saldo_acreedor"] != final_value
+                        or montos_columnas["saldo_deudor"] != 0
+                    )
+                ):
+                    if montos_columnas["saldo_deudor"] != 0:
+                        columnas_derivadas.append("saldo_deudor")
+                    if montos_columnas["saldo_acreedor"] != final_value:
+                        columnas_derivadas.append("saldo_acreedor")
+                    montos_columnas["saldo_deudor"] = 0.0
+                    montos_columnas["saldo_acreedor"] = final_value
 
             # Si movimiento y clasificación repiten exactamente el mismo
             # importe unilateral, ambos son evidencia independiente frente a
@@ -3119,6 +3304,7 @@ class ParserPDF:
 
         self._ocr_advertencias: list[str] = []
         self._extraction_method = "text"
+        self._extraction_confidence = 1.0
         lineas, requirio_ocr, rotacion = self._extraer_lineas(path, context)
 
         if not lineas:
@@ -3296,7 +3482,10 @@ class ParserPDF:
         lineas = asociar_lineas_verticales(lineas)
 
         # 4. Parsear todas las líneas
-        confianza = 0.75 if requirio_ocr else 1.0
+        confianza = min(
+            0.75 if requirio_ocr else 1.0,
+            self._extraction_confidence,
+        )
         cuentas = []
         for i, l in enumerate(lineas):
             sub_lines = split_side_by_side(l)
@@ -3330,6 +3519,23 @@ class ParserPDF:
                 "desde encabezados del balance clasificado."
             )
 
+        # Los encabezados deben permanecer hasta propagar su sección contable,
+        # pero no son cuentas ni deben llegar a clasificación, cobertura o
+        # exportación. Retirarlos después de ``anotar_secciones...`` evita
+        # perder el contexto Activo/Pasivo/Patrimonio/Resultados.
+        cuentas = [
+            cuenta for cuenta in cuentas
+            if (
+                cuenta.codigo
+                or cuenta.monto is not None
+                or bool(cuenta.montos_periodos)
+                or any(
+                    float(value or 0.0) != 0.0
+                    for value in cuenta.montos_columnas.values()
+                )
+            )
+        ]
+
         # NOTA (Fase A): la resolución de tipo_cuenta se eliminó de ParserPDF.
         # El parser es un extractor pasivo: NO escribe CuentaRaw.tipo_cuenta.
         # La resolución contable ocurre fuera del parser (HomologationPipeline
@@ -3338,8 +3544,15 @@ class ParserPDF:
 
         if requirio_ocr:
             advertencias.append(
-                f"Documento procesado vía OCR (rotación={rotacion}°). "
+            f"Documento procesado vía OCR total o parcialmente "
+                f"(rotación={rotacion}°). "
                 "Confianza de extracción reducida a 0.75 — recomendar revisión humana."
+            )
+        elif self._extraction_confidence < 1.0:
+            advertencias.append(
+                "El texto nativo estaba fragmentado y se reconstruyó mediante "
+                "coordenadas. Confianza de extracción reducida a 0.75; se "
+                "recomienda revisión humana."
             )
 
         if not requirio_ocr and rotacion == 180 and context and context.rotation_confidence >= ROTATION_CORRECTION_THRESHOLD:
@@ -3433,6 +3646,7 @@ class ParserPDF:
                 return lineas, False, 0
 
         lineas: list[str] = []
+        uso_ocr_parcial = False
         # Conserva el layout monetario detectado entre paginas nativas. Debe
         # existir incluso cuando la primera pagina no contiene una tabla de
         # ocho columnas; de lo contrario el fallback por coordenadas intentaba
@@ -3441,10 +3655,53 @@ class ParserPDF:
 
         with pdfplumber.open(path) as pdf:
             n_paginas = len(pdf.pages)
-            for page in pdf.pages:
+            for page_number, page in enumerate(pdf.pages, 1):
                 texto = page.extract_text() or ""
                 if not texto.strip():
                     continue
+                if _pagina_comparativa_con_texto_nativo_corrupto(page, texto):
+                    tabla_coordenadas, detected_centers = (
+                        _extraer_tabla_balance_por_coordenadas(
+                            page, coordinate_centers,
+                        )
+                    )
+                    if len(tabla_coordenadas) >= 5 and detected_centers:
+                        lineas.extend(tabla_coordenadas)
+                        coordinate_centers = detected_centers
+                        self._extraction_method = "native_corrupt_coordinates"
+                        self._extraction_confidence = min(
+                            self._extraction_confidence, 0.75,
+                        )
+                        self._ocr_advertencias.append(
+                            f"Página {page_number}: el texto nativo estaba "
+                            "fragmentado y la tabla se reconstruyó desde sus "
+                            "coordenadas."
+                        )
+                        continue
+                    reconstructed = _reconstruir_lineas_nativas_fragmentadas(page)
+                    if len(reconstructed) >= 5:
+                        lineas.extend(reconstructed)
+                        self._extraction_method = "native_fragment_reconstruction"
+                        self._extraction_confidence = min(
+                            self._extraction_confidence, 0.75,
+                        )
+                        self._ocr_advertencias.append(
+                            f"Página {page_number}: se reconstruyó el texto "
+                            "comparativo desde las coordenadas nativas del PDF."
+                        )
+                        coordinate_centers = None
+                        continue
+                    recovered = self._ocr_pagina_tabular(path, page_number)
+                    if len(recovered) >= 5:
+                        lineas.extend(recovered)
+                        uso_ocr_parcial = True
+                        self._extraction_method = "partial_ocr_comparative"
+                        self._ocr_advertencias.append(
+                            f"Página {page_number}: el texto nativo comparativo "
+                            "estaba fragmentado y se recuperó mediante OCR tabular."
+                        )
+                        coordinate_centers = None
+                        continue
                 # Sprint F — doble columna: si la página parece tener dos
                 # columnas de cuenta (pre-filtro barato sobre el texto plano),
                 # intentar la separación estructural por coordenadas (x0).
@@ -3486,10 +3743,49 @@ class ParserPDF:
         if lineas:
             if self._debe_corregir_rotacion(context):
                 lineas = [ParserPDF._reverse_line(l) for l in lineas]
-                return lineas, False, 180
-            return lineas, False, 0
+                return lineas, uso_ocr_parcial, 180
+            return lineas, uso_ocr_parcial, 0
 
         return self._ocr_documento(path, n_paginas)
+
+    def _ocr_pagina_tabular(self, path: Path, page_number: int) -> list[str]:
+        """Rasteriza y recupera una sola página comparativa con PSM 4."""
+        pdftoppm_bin = shutil.which("pdftoppm") or "pdftoppm"
+        with tempfile.TemporaryDirectory(prefix="balance-page-ocr-") as tmpdir:
+            tmpdir_path = Path(tmpdir)
+            prefix = tmpdir_path / f"pg{page_number}"
+            try:
+                raster = subprocess.run(
+                    [
+                        pdftoppm_bin, "-png", "-gray", "-r", str(OCR_RENDER_DPI),
+                        "-f", str(page_number), "-l", str(page_number),
+                        str(path), str(prefix),
+                    ],
+                    capture_output=True,
+                    timeout=OCR_PAGE_TIMEOUT_SECONDS,
+                )
+            except subprocess.TimeoutExpired:
+                self._ocr_advertencias.append(
+                    f"Página {page_number}: la recuperación OCR selectiva excedió "
+                    f"{OCR_PAGE_TIMEOUT_SECONDS} segundos."
+                )
+                return []
+            if raster.returncode != 0:
+                logger.warning(
+                    "No se pudo rasterizar página comparativa %d de %s: %s",
+                    page_number, path.name,
+                    (raster.stderr or b"").decode(errors="replace")[:300],
+                )
+                return []
+            images = sorted(tmpdir_path.glob(f"pg{page_number}*.png"))
+            if not images:
+                return []
+            texto = ocr_pagina(images[0], 0, psm=4)
+            return [
+                normalizar_linea_ocr_tabla(line)
+                for line in texto.splitlines()
+                if normalizar_linea_ocr_tabla(line).strip()
+            ]
 
     @staticmethod
     def _debe_corregir_rotacion(context: Optional[ExtractionContext]) -> bool:
