@@ -95,7 +95,9 @@ def test_database_is_internal_and_has_no_published_ports() -> None:
     assert not db.get("ports")
     assert set(db["networks"]) == {"data"}
     assert config["networks"]["data"]["internal"] is True
-    assert set(config["services"]["reverse-proxy"]["networks"]) == {"frontend"}
+    assert set(config["services"]["reverse-proxy"]["networks"]) == {
+        "edge", "frontend",
+    }
     assert config["networks"]["frontend"]["internal"] is True
     services = config["services"]
     assert services["db"]["profiles"] == ["legacy-postgres"]
@@ -239,10 +241,17 @@ def test_docker_context_excludes_sensitive_runtime_material() -> None:
         assert pattern in source
     assert "!**/.env.example" in source
     assert "!migrations/**/*.sql" in source
+    assert "!persistence/migrations/**/*.sql" in source
+    assert "!persistence/local/migrations/**/*.sql" in source
+    assert "**/__pycache__/" in source
+    assert "**/*.py[cod]" in source
 
 
 def test_production_authentication_is_default_deny() -> None:
     source = (ONPREM / "Caddyfile.production").read_text(encoding="utf-8")
+    evaluation_source = (ONPREM / "Caddyfile").read_text(encoding="utf-8")
+    assert source.count("bind 0.0.0.0") == 2
+    assert evaluation_source.count("bind 0.0.0.0") == 2
     assert "forward_auth" in source
     assert "AUTH_GATEWAY_URL:http://127.0.0.1:1" in source
     assert "X-Authenticated-User" in source
@@ -257,6 +266,12 @@ def test_production_compose_has_no_local_build_and_uses_auth_config() -> None:
     config = _production_compose_config()
     assert "build" not in config["services"]["app"]
     assert "build" not in config["services"]["bootstrap"]
+    assert set(config["services"]["reverse-proxy"]["networks"]) == {
+        "edge", "frontend",
+    }
+    assert config["networks"]["frontend"]["internal"] is True
+    assert config["networks"]["edge"].get("internal", False) is False
+    assert set(config["services"]["app"]["networks"]) == {"frontend"}
     assert config["services"]["reverse-proxy"]["volumes"][0]["source"].endswith(
         "Caddyfile.production"
     )

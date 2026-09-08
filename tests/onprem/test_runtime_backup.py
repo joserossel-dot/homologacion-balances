@@ -165,6 +165,11 @@ def test_runtime_scripts_require_encryption_and_restore_direct_directory(tmp_pat
     )
 
 
+def test_container_restore_reassigns_runtime_to_application_user() -> None:
+    source = (ONPREM / "scripts" / "restore-runtime.sh").read_text(encoding="utf-8")
+    assert "chown -R 10001:10001 /var/lib/homologacion/runtime" in source
+
+
 def test_runtime_backup_production_rejects_missing_external_key(tmp_path) -> None:
     source = _runtime(tmp_path / "source")
     result = subprocess.run(

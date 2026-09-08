@@ -87,7 +87,7 @@ replace_volume_from() {
     source="$1"
     compose run --rm --no-deps --user 0:0 --entrypoint sh \
         -v "$source:/replacement:ro" app -eu -c \
-        'find /var/lib/homologacion/runtime -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +; cp -a /replacement/. /var/lib/homologacion/runtime/'
+        'find /var/lib/homologacion/runtime -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +; cp -a /replacement/. /var/lib/homologacion/runtime/; chown -R 10001:10001 /var/lib/homologacion/runtime'
 }
 cleanup() {
     code=$?

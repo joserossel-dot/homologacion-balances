@@ -15,6 +15,8 @@
 **/*.bak
 **/*.sql
 !migrations/**/*.sql
+!persistence/migrations/**/*.sql
+!persistence/local/migrations/**/*.sql
 **/*.sqlite
 **/*.sqlite3
 **/*.db
@@ -28,8 +30,8 @@
 .mypy_cache
 .ruff_cache
 .venv
-__pycache__
-*.py[cod]
+**/__pycache__/
+**/*.py[cod]
 
 docs
 reports
