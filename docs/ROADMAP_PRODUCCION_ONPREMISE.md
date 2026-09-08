@@ -58,7 +58,8 @@ libros con métricas o alertas de extracción incompletas.
 1. Revisar Gold schema 2 una vez integrados los controles P0.
 2. Elegir proveedor de identidad, claims y responsables de roles.
 3. Aprobar telemetría, custodia de claves, CA, RPO, RTO y retención.
-4. Ejecutar y aceptar el ciclo Docker real en un servidor limpio.
+4. Aceptar el ciclo Docker en el entorno objetivo; la evaluación técnica real
+   quedó aprobada en B2 el 8 de septiembre, con controles humanos pendientes.
 
 ## Oleadas paralelas
 
@@ -72,16 +73,37 @@ libros con métricas o alertas de extracción incompletas.
 
 ## Estado general
 
+Actualización vigente: 8 de septiembre de 2026. La evidencia
+[B2](../entrega/AUDITORIA_ANTIGRAVITY_B2_0e2625d.md) audita exactamente
+`0e2625df513e63263886e54d7cd4edd90dbedb10`; el HEAD publicado
+`535ecb1d6410fdfb909dda9228ad2f8a254b4636` incorpora ese informe documental.
+Las cifras B2 siguientes pertenecen al candidato auditado. Posteriormente, el
+commit funcional `ea51045` corrigió el tratamiento de prefijos jerárquicos y
+cerró un falso positivo de ecuaciones de resultados. Sobre ese commit se
+recolectaron 1.440 pruebas: 1.423 aprobadas, 17 omitidas y 3 advertencias. Las
+17 omisiones fueron activadas por separado con recursos privados externos al
+repositorio: 119 aprobadas, ninguna omitida ni fallida. El smoke Docker real
+volvió a aprobar sus 8 controles. Gold exacto permanece 0/3, por lo que esta
+regresión no cambia el `NO-GO` de producción.
+
+B2 registra 1.418 pruebas recolectadas, 1.401 aprobadas, 17 omitidas y
+3 advertencias; verificador on-premise 49/49; smoke Docker real de evaluación
+8/8 con salida 0. Se verificaron HTTPS con CA local explícita, persistencia,
+backup cifrado, restore y recuperación de salud. Dictamen: aprobado con
+observaciones para continuar controles preproductivos; producción sigue NO-GO.
+Los cierres diarios anteriores se conservan como historia y no sustituyen
+esta actualización del estado Docker.
+
 Estados permitidos: `PENDIENTE`, `EN_CURSO`, `BLOQUEADO`, `EN_REVISION`,
 `COMPLETADO`.
 
-| Fase | Estado inicial | Evidencia mínima de cierre |
+| Fase | Estado al 2026-09-08 | Evidencia mínima de cierre |
 |---|---|---|
 | 0. Contención y línea base | EN_CURSO | Acceso restringido, repositorio y ramas protegidos, 2FA y respaldos verificados |
 | 1. Candidato funcional definitivo | BLOQUEADO | Suite completa y Gold exacto sin fallas |
 | 2. Arquitectura y contrato de datos | EN_REVISION | ADR y contrato nodo-nube aprobados |
 | 3. Desacoplamiento del código | EN_REVISION | Interfaces locales/remotas y operación sin dependencia directa de Neon |
-| 4. Paquete on-premise | EN_REVISION | Instalación reproducible en servidor limpio con Docker Compose |
+| 4. Paquete on-premise | EN_REVISION | Evaluación Docker real aprobada en B2; faltan aceptación del entorno cliente, red, actualización y rollback operativo |
 | 5. API central | PENDIENTE | Licencias, paquetes firmados y telemetría mínima probados |
 | 6. Seguridad, identidad y auditoría | EN_REVISION | Autenticación, roles, auditoría, cifrado y pruebas de aislamiento |
 | 7. Certificación integral | BLOQUEADO | Matriz funcional, documental, técnica y de seguridad aprobada |
@@ -94,7 +116,8 @@ Estados permitidos: `PENDIENTE`, `EN_CURSO`, `BLOQUEADO`, `EN_REVISION`,
 - [ ] Resolver la exposición pública del repositorio y sus datos derivados.
 - [ ] Activar 2FA, secret scanning, Dependabot y análisis de código.
 - [ ] Proteger `main` y la rama de release.
-- [ ] Registrar `c70e60e` como línea base histórica.
+- [x] Registrar `c70e60e` como línea base histórica; candidato B2 `0e2625d`,
+  informe incorporado en HEAD publicado `535ecb1`.
 - [ ] Probar respaldo y lectura de catálogo/diccionario Neon.
 - [ ] Definir responsable de seguridad y responsable de release.
 
@@ -126,7 +149,8 @@ aprobar Gold nuevamente.
 ## Fase 2. Arquitectura y contrato de datos
 
 - [ ] Aprobar diagrama local, plano central y límites de confianza.
-- [ ] Elegir PostgreSQL local como opción corporativa y definir uso de SQLite.
+- [ ] Aprobar el perfil de persistencia: B2 verifica SQLite WAL para nodo único;
+  evaluar PostgreSQL si se requiere escalamiento distribuido.
 - [ ] Definir modo conectado, período de gracia y modo desconectado.
 - [ ] Definir autenticación local: OIDC, Active Directory o cuentas administradas.
 - [ ] Aprobar campos permitidos y prohibidos en telemetría.
@@ -154,8 +178,16 @@ aprobar Gold nuevamente.
 - [x] Configurar volúmenes persistentes y temporales separados.
 - [x] Gestionar secretos y respaldos fuera del contexto y de la imagen.
 - [ ] Restringir la salida de red al plano central autorizado.
-- [ ] Probar instalación, actualización, respaldo, restauración y rollback en
-  un daemon Docker real. Los contratos estáticos y la simulación local pasan.
+- [x] Probar instalación, arranque y persistencia en Docker real de evaluación,
+  con HTTPS y CA local explícita; B2 registra salida 0 del smoke 8/8.
+- [x] Probar backup cifrado, restore runtime, permisos UID/GID 10001 y
+  recuperación de salud en Docker real de evaluación, según B2.
+- [ ] Aceptar instalación en entorno objetivo, actualización y rollback con
+  fallo real; completar custodia de claves y ejercicio operativo con RPO/RTO.
+
+La fase permanece `EN_REVISION`. El subcontrol Docker de evaluación pasa de
+bloqueado por daemon a aprobado con observaciones. B2 no cierra identidad,
+TLS corporativo, tráfico saliente ni recuperación supervisada por el cliente.
 
 `scientific_validation` no está implementado ni operativo. No forma parte de
 ningún gate declarado y no debe presentarse como evidencia de certificación.
@@ -233,7 +265,9 @@ Controles cerrados por las oleadas sexta y séptima:
   de imagen.
 - Las semillas empaquetadas no sobrescriben decisiones humanas locales.
 - La restauración runtime verifica integridad, crea respaldo previo y usa
-  staging con rollback local probado; el recorrido Docker real sigue pendiente.
+  staging con rollback local probado. B2 verifica restore y recuperación de
+  salud en Docker real de evaluación; rollback ante fallo real y aceptación
+  operativa del cliente siguen pendientes.
 - La aplicación crea o recupera la ejecución durable después de confirmar
   páginas y períodos, audita correcciones sin montos y sólo persiste un reporte
   definitivo cuando la certificación completa está aprobada.
@@ -247,15 +281,16 @@ Bloqueadores que todavía anulan una aprobación de producción:
 - Gold permanece 0/3. La medición integrada del 2026-09-07 contiene 97 filas
   distintas, principalmente por método y confianza; no son 97 decisiones de
   clasificación humana. Véase el cierre integrado más abajo.
-- Falta ejecutar build, smoke, backup, restore y rollback con un daemon Docker
-  real en un servidor limpio.
+- Build, smoke, backup cifrado y restore Docker de evaluación están aprobados
+  en B2. Faltan actualización, rollback ante fallo real y aceptación supervisada
+  de recuperación en el entorno objetivo del cliente.
 - Falta elegir el proveedor de identidad, mapear claims y probar roles internos.
 - Docker Compose puede negar egress general, pero no implementar por sí solo
   una allow-list FQDN del plano central.
 - El cliente debe aprobar custodia de claves, CA, digests de imágenes, retención
   y objetivos RPO/RTO.
-- Los scripts cifrados aún dependen de `openssl` disponible en el host; debe
-  empaquetarse o verificarse como prerrequisito de instalación.
+- OpenSSL se verificó en el host B2; el smoke comprueba su disponibilidad como
+  prerrequisito. Debe comprobarse también en el servidor objetivo del cliente.
 - La medición amplia fija de 23 documentos produjo 1 certificado, 5 parciales,
   4 fallidos, 8 no evaluables y 5 timeouts. Es evidencia de cobertura y riesgo,
   no una aprobación de exactitud productiva.
@@ -333,7 +368,26 @@ globales permanecen abiertas. Detalle en `AVANCE_PRODUCCION_20260907.md`.
   la corrección, integrar solo los cambios aprobados y repetir regresiones y corpus
   privado. Mantener NO-GO. Sin commit, push, despliegue ni cambios en Neon.
 
-### Campos de seguimiento
+### Actualización documental del 2026-09-08 con auditoría B2
+
+- Trazabilidad: B2 auditó `0e2625df513e63263886e54d7cd4edd90dbedb10`;
+  `535ecb1d6410fdfb909dda9228ad2f8a254b4636` incorpora el informe publicado.
+- Evidencia B2: gate 1.418; suite 1.401 aprobadas, 17 omitidas, 3 advertencias;
+  verificador 49/49 y smoke Docker real de evaluación 8/8, todos con salida 0.
+  Suite ejecutada en Python 3.14 host; contenedor de aplicación Python 3.12.
+- Fase 4 mantiene `EN_REVISION`; los subcontroles de instalación, persistencia,
+  backup cifrado y restore Docker real pasan a aprobados. Las otras fases
+  conservan su estado; B2 no acredita cierres adicionales.
+- Gold y UAT contable, identidad corporativa y aislamiento dinámico, TLS/red,
+  custodia de claves, recuperación humana con RPO/RTO, promociones productivas
+  y aceptación de API central siguen pendientes. Las 17 omisiones están
+  inventariadas en B2 y requieren resolución antes del acta GO/NO-GO.
+- Siguiente paso: ejecutar los controles humanos del entorno objetivo y
+  recertificar Gold sobre candidato trazable. Mantener NO-GO para producción.
+- Esta actualización sólo reconcilia documentación con evidencia B2; no
+  ejecutó nuevamente Docker, suite, Neon ni despliegues.
+
+### Campos de seguimiento diario
 
 1. Cambios realizados, con archivos concretos.
 2. Pruebas ejecutadas y resultado exacto.

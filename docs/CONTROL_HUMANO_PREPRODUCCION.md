@@ -1,30 +1,57 @@
 # Control humano previo a producción
 
-Este procedimiento comienza sólo después de que la suite automatizada y la
-recertificación privada hayan terminado. No aprueba producción por sí solo.
+Los controles de plataforma, identidad y operación pueden avanzar mientras se
+cierra la recertificación privada. El acta final exige ambos frentes aprobados.
+Este procedimiento no aprueba producción por sí solo.
 Cada responsable debe conservar la salida completa, fecha, identidad y versión
 evaluada.
 
 ## Estado automatizado que habilita este control
 
-Evidencia local del 7 de septiembre de 2026:
+Evidencia de [auditoría B2](../entrega/AUDITORIA_ANTIGRAVITY_B2_0e2625d.md),
+del 8 de septiembre de 2026, sobre
+`0e2625df513e63263886e54d7cd4edd90dbedb10`. El HEAD publicado
+`535ecb1d6410fdfb909dda9228ad2f8a254b4636` incorpora ese informe. Esta
+actualización documental no reejecutó las pruebas:
 
-- 1.219 pruebas recolectadas; 1.202 aprobadas y 17 omitidas por fixtures privados
-  o Gold no disponibles en la suite pública;
+- 1.418 pruebas recolectadas; 1.401 aprobadas, 17 omitidas y 3 advertencias.
+  B2 inventaría las omisiones por PDF local ausente, `gold_standard.db` ausente
+  y matriz privada sin `BALANCE_REAL_TEST_DIR`; deben resolverse antes del acta;
+- verificador on-premise 49/49 aprobado;
+- smoke Docker real de evaluación 8/8 aprobado con salida 0: HTTPS con CA local,
+  persistencia, backup cifrado, restore y recuperación de salud;
+- migraciones SQL presentes en imagen, app en red interna y proxy en red
+  `edge`, permisos restaurados para UID/GID 10001, sin bytecode del host;
+- B2 permite continuar controles preproductivos; no certifica Gold/UAT,
+  identidad corporativa, tráfico saliente ni recuperación humana con RPO/RTO.
+
+Regresión funcional posterior sobre `ea51045`:
+
+- 1.440 pruebas recolectadas; 1.423 aprobadas, 17 omitidas y 3 advertencias;
+- las 17 omisiones fueron activadas con recursos privados externos: 119
+  aprobadas, ninguna omitida ni fallida;
+- matriz documental básica 4/4 y smoke Docker real 8/8 aprobados;
+- Gold exacto 0/3, sin cierre del bloqueo de certificación.
+
+Esta evidencia local todavía requiere auditoría independiente y publicación
+del candidato acordado. No reemplaza el dictamen B2 ni autoriza producción.
+
+Antecedentes documentales del 7 de septiembre no recertificados por B2:
+
 - matriz privada básica con 4/4 expectativas aprobadas: 3/3 casos obligatorios
   certificados y Fundación Arte y Solidaridad en estado `parcial`, fuera del
   gate automático hasta confirmar manualmente la fila 19 (`IMPTOS. POR PAGAR`);
-- matriz Gold 0/3 rechazada. La reproducción posterior separa 97 filas
-  distintas: tres códigos contables y diferencias superpuestas de método o
-  confianza. No son 97 reclasificaciones humanas pendientes. Véase
+- matriz Gold 0/3 rechazada. Se registraron 97 filas distintas con diferencias
+  superpuestas de método, confianza y código. Las tres decisiones globales
+  ya fueron recibidas; no son 97 reclasificaciones humanas pendientes. Véase
   `GOLD_PENDIENTES_20260907.md` para el alcance exacto del contrato comparado;
-- verificador estático on-premise 37/37 aprobado;
 - Tesseract disponible con idioma español y hash del modelo registrado;
 - inventario de arquitectura sin bypass TLS y sin entrypoints faltantes;
 - auditoría Neon parcialmente verificada mediante transacción de solo lectura:
   469 validaciones y dos revisores; no existe la fuente completa de estados
   de la cola. Las validaciones no acreditan candidatos pendientes ni aprobaciones;
-- smoke Docker real no ejecutado porque el daemon local no está disponible.
+- la falta de daemon indicada el 7 de septiembre fue superada en la ejecución
+  Docker real B2 del 8 de septiembre.
 
 Este estado es `NO-GO` para producción hasta completar las secciones 2 a 9 de
 este documento.
@@ -32,6 +59,11 @@ este documento.
 ## 1. Identificar exactamente el candidato
 
 Responsable: release manager.
+
+Referencia B2: commit auditado `0e2625df513e63263886e54d7cd4edd90dbedb10`;
+HEAD que agrega el informe `535ecb1d6410fdfb909dda9228ad2f8a254b4636`;
+corrección funcional posterior `ea51045`.
+Toda modificación funcional posterior necesita regresión asociada a su SHA.
 
 Desde la raíz del repositorio:
 
@@ -50,17 +82,21 @@ Criterio de aceptación:
 - no se continúa desde un commit distinto al certificado;
 - el resultado se adjunta al acta de release.
 
-## 2. Ejecutar el ciclo Docker real en un ambiente aislado
+## 2. Aceptar el ciclo Docker en el entorno objetivo
 
 Responsable: administrador de plataforma.
+
+El ciclo Docker de evaluación ya está aprobado técnicamente en B2. Lo pendiente
+es reproducirlo y aceptarlo en la infraestructura objetivo, vinculado al commit
+e imágenes seleccionados, y completar identidad, TLS y recuperación operativa.
 
 Prerrequisitos: Docker Desktop o Docker Engine activo, al menos 10 GB libres y
 ninguna instalación productiva usando los puertos 18080 o 18443.
 
 ```bash
 docker info
-deployment/onprem/scripts/verify-package.sh
-deployment/onprem/scripts/smoke-test.sh
+sh deployment/onprem/scripts/verify-package.sh
+sh deployment/onprem/scripts/smoke-test.sh
 ```
 
 El smoke crea un proyecto efímero. En evaluación construye la imagen y prueba
@@ -74,7 +110,7 @@ SMOKE ON-PREMISE (evaluation): APROBADO; CA local explícita y backup cifrado. I
 Si falla, repetir una sola vez con evidencia conservada:
 
 ```bash
-KEEP_ONPREM_SMOKE_ARTIFACTS=true deployment/onprem/scripts/smoke-test.sh
+KEEP_ONPREM_SMOKE_ARTIFACTS=true sh deployment/onprem/scripts/smoke-test.sh
 ```
 
 No convertir una segunda falla en aprobación manual. Adjuntar los logs y la
@@ -85,7 +121,8 @@ con los prerrequisitos de `DOCKER_PENDIENTES_20260907.md`. Ese modo no construye
 la imagen y exige el preflight de producción. La CA del smoke sigue siendo
 local al proyecto: la CA corporativa, las rutas autenticadas, la ausencia de
 exposición de la instalación objetivo y el rollback con fallo real requieren
-evidencias separadas. El daemon local no estaba disponible en la última revisión.
+evidencias separadas. B2 verificó el daemon y el recorrido de evaluación;
+no sustituye esas evidencias del entorno cliente.
 
 ## 3. Fijar y aprobar las imágenes por digest
 
@@ -231,7 +268,8 @@ Completar y firmar:
 - frecuencia de prueba de restore y responsable de ejecución;
 - procedimiento de actualización y rollback.
 
-Ejecutar un restore con respaldo cifrado en un ambiente no productivo y medir
+El restore cifrado técnico ya fue probado por B2. Ejecutar ahora el ejercicio
+supervisado con claves bajo custodia aprobada en un ambiente no productivo y medir
 los tiempos reales. Si exceden RPO/RTO, el control queda rechazado aunque el
 restore termine.
 
@@ -284,9 +322,11 @@ Un estado `NO-GO` no autoriza commit, push, despliegue ni modificación de Gold.
 ## Orden recomendado para reducir retrabajo
 
 1. Confirmar la fila 19 de Fundación Arte y Solidaridad contra el PDF.
-2. Revisar las 97 discrepancias Gold entre dos analistas.
+2. Resolver las diferencias Gold vigentes según su informe técnico, conservando
+   las decisiones globales ya aprobadas y la trazabilidad por cuenta.
 3. Elegir proveedor de identidad y mapear claims a actor, organización y roles.
-4. Ejecutar el ciclo Docker completo con esas identidades y guardar evidencias.
+4. Aceptar Docker en el entorno objetivo e integrar esas identidades; conservar
+   B2 como evidencia técnica previa y guardar la nueva evidencia por SHA.
 5. Medir la cola de promociones mediante la vista Neon agregada de sólo lectura.
 6. Confirmar consumidores externos de los cuatro módulos pendientes de poda.
 7. Aprobar RPO, RTO, retención, CA, claves, digests, SBOM y allow-list.
