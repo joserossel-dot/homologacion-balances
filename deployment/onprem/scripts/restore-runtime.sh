@@ -17,10 +17,13 @@ docker_bin="${DOCKER_BIN:-docker}"
 script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 compose_dir="$(dirname -- "${script_dir}")"
 archive_tool="${compose_dir}/runtime_archive.py"
+host_uid="$(id -u)"
+host_gid="$(id -g)"
 
 [ -s "$source_file" ] && [ -s "$checksum_file" ] || {
     echo "Se requiere respaldo runtime y checksum." >&2; exit 66;
 }
+case "$host_uid:$host_gid" in *[!0-9:]*) echo "UID/GID del operador inválido." >&2; exit 78;; esac
 case "$source_file" in *.enc) encrypted=true;; *) encrypted=false;; esac
 if [ "$mode" = production ] && { [ "$encryption_required" != true ] || [ "$encrypted" != true ]; }; then
     echo "Producción exige restore runtime cifrado." >&2; exit 78
@@ -130,8 +133,9 @@ services_stopped=1
 compose stop app reverse-proxy >/dev/null
 mkdir -p "$rollback"
 compose run --rm --no-deps --user 0:0 --entrypoint sh \
+    -e "SNAPSHOT_UID=${host_uid}" -e "SNAPSHOT_GID=${host_gid}" \
     -v "$rollback:/snapshot" app -eu -c \
-    'cp -a /var/lib/homologacion/runtime/. /snapshot/'
+    'cp -a /var/lib/homologacion/runtime/. /snapshot/; chown -R "${SNAPSHOT_UID}:${SNAPSHOT_GID}" /snapshot'
 pre_restore_dir="${BACKUP_DIR:-${compose_dir}/backups}/pre-restore"
 mkdir -p "$pre_restore_dir"
 BACKUP_DIR="$pre_restore_dir" RUNTIME_SOURCE_DIR="$rollback" \

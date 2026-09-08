@@ -15,8 +15,11 @@ rto_hours="${BACKUP_RTO_HOURS:-8}"
 docker_bin="${DOCKER_BIN:-docker}"
 runtime_source="${RUNTIME_SOURCE_DIR:-}"
 encrypted=false
+host_uid="$(id -u)"
+host_gid="$(id -g)"
 
 case "$backup_dir" in ''|/) echo "BACKUP_DIR inseguro." >&2; exit 78;; esac
+case "$host_uid:$host_gid" in *[!0-9:]*) echo "UID/GID del operador inválido." >&2; exit 78;; esac
 case "$retention_days:$rpo_hours:$rto_hours" in *[!0-9:]*) echo "Retención/RPO/RTO inválido." >&2; exit 78;; esac
 [ "$retention_days" -ge 1 ] && [ "$retention_days" -le 3650 ] || exit 78
 if [ "$mode" = production ] && [ "$encryption_required" != true ]; then
@@ -79,8 +82,9 @@ else
     compose stop app reverse-proxy >/dev/null
     mkdir -p "$snapshot"
     compose run --rm --no-deps --user 0:0 --entrypoint sh \
+        -e "SNAPSHOT_UID=${host_uid}" -e "SNAPSHOT_GID=${host_gid}" \
         -v "$snapshot:/snapshot" app -eu -c \
-        'cp -a /var/lib/homologacion/runtime/. /snapshot/'
+        'cp -a /var/lib/homologacion/runtime/. /snapshot/; chown -R "${SNAPSHOT_UID}:${SNAPSHOT_GID}" /snapshot'
 fi
 
 python3 "$archive_tool" create "$snapshot" "$plain" \

@@ -170,6 +170,16 @@ def test_container_restore_reassigns_runtime_to_application_user() -> None:
     assert "chown -R 10001:10001 /var/lib/homologacion/runtime" in source
 
 
+def test_container_snapshots_are_readable_by_the_host_operator() -> None:
+    for script_name in ("backup-runtime.sh", "restore-runtime.sh"):
+        source = (ONPREM / "scripts" / script_name).read_text(encoding="utf-8")
+        assert 'host_uid="$(id -u)"' in source
+        assert 'host_gid="$(id -g)"' in source
+        assert '-e "SNAPSHOT_UID=${host_uid}"' in source
+        assert '-e "SNAPSHOT_GID=${host_gid}"' in source
+        assert 'chown -R "${SNAPSHOT_UID}:${SNAPSHOT_GID}" /snapshot' in source
+
+
 def test_runtime_backup_production_rejects_missing_external_key(tmp_path) -> None:
     source = _runtime(tmp_path / "source")
     result = subprocess.run(
