@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from contextlib import closing
 import json
 from pathlib import Path
 import sqlite3
@@ -71,9 +72,10 @@ class SqliteOperationalRepository:
         return connection
 
     def _initialize(self) -> None:
-        with self._connect() as connection:
-            connection.executescript(
-                """
+        with closing(self._connect()) as connection:
+            with connection:
+                connection.executescript(
+                    """
                 CREATE TABLE IF NOT EXISTS local_users (
                     user_id TEXT PRIMARY KEY,
                     display_name TEXT NOT NULL,
@@ -122,43 +124,43 @@ class SqliteOperationalRepository:
                     version TEXT PRIMARY KEY,
                     applied_at TEXT NOT NULL
                 );
-                """
-            )
-            self._migrate_local_users_admin_role(connection)
-            promotion_migration = (
-                Path(__file__).resolve().parent
-                / "migrations"
-                / "003_promotion_policy_metadata.sql"
-            ).read_text(encoding="utf-8")
-            connection.executescript(promotion_migration)
-            outcome_migration = (
-                Path(__file__).resolve().parent
-                / "migrations"
-                / "004_promotion_outcomes.sql"
-            ).read_text(encoding="utf-8")
-            connection.executescript(outcome_migration)
-            self._migrate_promotion_outcomes_batch_ids(connection)
-            now = _utc_now().isoformat()
-            connection.execute(
-                """INSERT OR IGNORE INTO local_schema_migrations(version, applied_at)
-                   VALUES ('001_identity_role_admin', ?)""",
-                (now,),
-            )
-            connection.execute(
-                """INSERT OR IGNORE INTO local_schema_migrations(version, applied_at)
-                   VALUES ('004_promotion_outcomes', ?)""",
-                (now,),
-            )
-            connection.execute(
-                """INSERT OR IGNORE INTO local_schema_migrations(version, applied_at)
-                   VALUES ('005_promotion_outcome_batches', ?)""",
-                (now,),
-            )
-            connection.execute(
-                """INSERT OR IGNORE INTO local_schema_migrations(version, applied_at)
-                   VALUES ('003_promotion_policy_metadata', ?)""",
-                (now,),
-            )
+                    """
+                )
+                self._migrate_local_users_admin_role(connection)
+                promotion_migration = (
+                    Path(__file__).resolve().parent
+                    / "migrations"
+                    / "003_promotion_policy_metadata.sql"
+                ).read_text(encoding="utf-8")
+                connection.executescript(promotion_migration)
+                outcome_migration = (
+                    Path(__file__).resolve().parent
+                    / "migrations"
+                    / "004_promotion_outcomes.sql"
+                ).read_text(encoding="utf-8")
+                connection.executescript(outcome_migration)
+                self._migrate_promotion_outcomes_batch_ids(connection)
+                now = _utc_now().isoformat()
+                connection.execute(
+                    """INSERT OR IGNORE INTO local_schema_migrations(version, applied_at)
+                       VALUES ('001_identity_role_admin', ?)""",
+                    (now,),
+                )
+                connection.execute(
+                    """INSERT OR IGNORE INTO local_schema_migrations(version, applied_at)
+                       VALUES ('004_promotion_outcomes', ?)""",
+                    (now,),
+                )
+                connection.execute(
+                    """INSERT OR IGNORE INTO local_schema_migrations(version, applied_at)
+                       VALUES ('005_promotion_outcome_batches', ?)""",
+                    (now,),
+                )
+                connection.execute(
+                    """INSERT OR IGNORE INTO local_schema_migrations(version, applied_at)
+                       VALUES ('003_promotion_policy_metadata', ?)""",
+                    (now,),
+                )
 
     @staticmethod
     def _migrate_promotion_outcomes_batch_ids(

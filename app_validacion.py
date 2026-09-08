@@ -33,6 +33,7 @@ from pathlib import Path
 from datetime import date, datetime
 from io import BytesIO
 from html import escape
+from typing import Any
 from uuid import uuid4
 from document_scope import page_count, parse_pages, select_pdf, render_page
 from report_presentation import (
