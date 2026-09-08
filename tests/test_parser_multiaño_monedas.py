@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,17 @@ from parser_universal import (
 
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures" / "balances_reales"
+PRIVATE_FIXTURES_REQUIRED = os.getenv(
+    "PRIVATE_DOCUMENT_FIXTURES_REQUIRED", "false",
+).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _private_fixture(name: str | None = None):
+    path = FIXTURES_DIR if name is None else FIXTURES_DIR / name
+    return pytest.mark.skipif(
+        not path.exists() and not PRIVATE_FIXTURES_REQUIRED,
+        reason=f"Corpus documental privado no disponible: {path.name}",
+    )
 
 
 @pytest.fixture
@@ -21,6 +33,7 @@ def parser():
     return ParserPDF()
 
 
+@_private_fixture()
 def test_fixtures_exist():
     assert FIXTURES_DIR.exists(), f"Fixtures directory not found: {FIXTURES_DIR}"
     files = list(FIXTURES_DIR.glob("*"))
@@ -99,6 +112,7 @@ def test_safe_footer_descarta_control_aunque_tenga_monto(label):
     assert qualified == [{"name": "Caja", "columns": {"activo": 100.0}}]
 
 
+@_private_fixture("Balance 2017 - Mar Vivo.pdf")
 def test_mar_vivo_pdf(parser):
     pdf_path = FIXTURES_DIR / "Balance 2017 - Mar Vivo.pdf"
     assert pdf_path.exists(), f"Missing: {pdf_path}"
@@ -125,6 +139,7 @@ def test_mar_vivo_pdf(parser):
     assert deuda.montos_periodos["USD"] == 1514356.0
 
 
+@_private_fixture("Balance 2017 - Naviera Orca.pdf")
 def test_naviera_orca_pdf(parser):
     pdf_path = FIXTURES_DIR / "Balance 2017 - Naviera Orca.pdf"
     assert pdf_path.exists(), f"Missing: {pdf_path}"
@@ -138,6 +153,7 @@ def test_naviera_orca_pdf(parser):
     ), "Should populate the unequivocal USD key in montos_periodos"
 
 
+@_private_fixture("Pre-Balance al 31-12-2020_Inagal 76 273 859-7.xlsx")
 def test_inagal_excel():
     excel_path = (
         FIXTURES_DIR / "Pre-Balance al 31-12-2020_Inagal 76 273 859-7.xlsx"
@@ -155,6 +171,7 @@ def test_inagal_excel():
     ).estado == "no_evaluable"
 
 
+@_private_fixture("BALANCE GENERAL AGRICOLA 2013.xlsx")
 def test_agricola_general_excel():
     excel_path = FIXTURES_DIR / "BALANCE GENERAL AGRICOLA 2013.xlsx"
     assert excel_path.exists(), f"Missing: {excel_path}"
@@ -191,6 +208,7 @@ def test_agricola_general_excel():
     assert all(value == 0 for value in certification.diferencias.values())
 
 
+@_private_fixture("EEFF- 2017 Los Maitenes.pdf")
 def test_los_maitenes_pdf(parser):
     pdf_path = FIXTURES_DIR / "EEFF- 2017 Los Maitenes.pdf"
     assert pdf_path.exists(), f"Missing: {pdf_path}"
