@@ -13,6 +13,7 @@ Pipeline:
      y columna de origen (activo/pasivo/pérdida/ganancia) cuando exista
 """
 
+import copy
 import csv
 import io
 import logging
@@ -26,6 +27,7 @@ import zipfile
 from collections import Counter
 from dataclasses import dataclass, field
 from enum import Enum
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Optional
 
@@ -49,58 +51,166 @@ def _sin_acentos(texto: str) -> str:
     )
 
 
+def detectar_unidades_monetarias(lineas: list[str]) -> list[str]:
+    """Detecta la unidad declarada en encabezados contables.
+
+    Distingue la moneda de su escala de presentación. ``$``, ``M``, ``MM`` y
+    ``M$`` se conservan como unidades de pesos; ``USD`` y ``US$`` se
+    normalizan como USD. Los tokens ``M`` y ``MM`` sólo se aceptan en líneas
+    breves con señales de cabecera para no confundir texto narrativo.
+    """
+    unidades: list[str] = []
+    unidades_cabecera: list[str] = []
+
+    def agregar(unidad: str, linea: list[str]) -> None:
+        if unidad not in unidades:
+            unidades.append(unidad)
+        linea.append(unidad)
+
+    for line in lineas[:100]:
+        normalized = _sin_acentos(line).upper().strip()
+        if not normalized:
+            continue
+        compact = re.sub(r"\s+", " ", normalized)
+        tokens = [token.strip(".,:;()[]") for token in compact.split()]
+        unidades_linea: list[str] = []
+        header_context = bool(
+            len(compact) <= 60
+            and (
+                re.search(r"\b(?:NOTA|MONEDA|UNIDAD|19\d{2}|20\d{2})\b", compact)
+                or len(tokens) <= 4
+                or sum(token in {"M", "MM", "M$", "MM$"} for token in tokens) >= 2
+            )
+        )
+        for token in tokens:
+            token_compact = token.replace(".", "")
+            if re.fullmatch(r"(?:MM?US\$|M?USD|US\$)", token_compact):
+                agregar("USD", unidades_linea)
+            elif re.fullmatch(r"CLP\$?", token_compact):
+                agregar("CLP", unidades_linea)
+            elif token_compact == "$":
+                agregar("$", unidades_linea)
+            elif header_context and token_compact in {"MM", "MM$"}:
+                agregar("MM$", unidades_linea)
+            elif header_context and token_compact in {"M", "M$"}:
+                agregar("M$", unidades_linea)
+        if re.search(r"\bMILLONES\s+DE\s+PESOS\b", compact):
+            agregar("MM$", unidades_linea)
+        elif re.search(r"\bMILES\s+DE\s+PESOS\b", compact):
+            agregar("M$", unidades_linea)
+        elif re.search(r"\bDOLAR(?:ES)?(?:\s+ESTADOUNIDENSES?)?\b", compact):
+            agregar("USD", unidades_linea)
+        elif re.search(r"\bPESOS(?:\s+CHILENOS?)?\b", compact):
+            agregar("CLP", unidades_linea)
+        # Una unidad repetida en una cabecera comparativa breve es evidencia
+        # más específica que la leyenda de monedas de una portada.
+        if (
+            len(unidades_linea) >= 2
+            and len(set(unidades_linea)) == 1
+            and len(compact) <= 60
+        ):
+            for unidad in unidades_linea:
+                if unidad not in unidades_cabecera:
+                    unidades_cabecera.append(unidad)
+    return unidades_cabecera or unidades
+
+
 def detectar_años_y_monedas(lineas: list[str]) -> tuple[list[str], list[str]]:
-    años = []
-    monedas = []
-    monedas_cabecera: list[str] = []
-    patron_año = re.compile(r'\b(20\d{2})\b')
+    """Detecta como máximo dos períodos monetarios desde cabeceras contables.
 
-    def moneda_de_token(token: str) -> Optional[str]:
-        normalizado = _sin_acentos(token).lower().strip(".,:;()[]")
-        if any(valor in normalizado for valor in ('usd', 'dolar', 'us$')):
-            return 'USD'
-        if any(valor in normalizado for valor in ('clp', 'peso', 'clp$')):
-            return 'CLP'
-        return None
+    Un año citado en texto histórico o en una nota no identifica una columna
+    monetaria. Se aceptan fechas de estado, rangos de balance y cabeceras
+    tabulares breves respaldadas por una fila adyacente de unidades/``Nota``.
+    """
+    años: list[str] = []
+    patron_año = re.compile(r'\b((?:19|20)\d{2})\b')
 
-    for l in lineas[:60]:
-        l_norm = _sin_acentos(l).lower()
-        matches = patron_año.findall(l_norm)
-        for m in matches:
-            if m not in años:
-                años.append(m)
-        if 'actual' in l_norm and 'actual' not in años:
-            años.append('actual')
-        if 'anterior' in l_norm and 'anterior' not in años:
-            años.append('anterior')
-        if 'acumulado' in l_norm and 'acumulado' not in años:
-            años.append('acumulado')
-
-        # Scan tokens in order to preserve header column order
-        monedas_linea = [
-            moneda for token in l.split()
-            if (moneda := moneda_de_token(token)) is not None
-        ]
-        for moneda in monedas_linea:
-            if moneda not in monedas:
-                monedas.append(moneda)
-        # Una cabecera tabular repite la unidad para ambos periodos, por
-        # ejemplo ``US$ US$``. Esa evidencia es más específica que la
-        # leyenda general de monedas de una portada (CLP, UF, USD, EUR).
-        if len(monedas_linea) >= 2 and len(l.strip()) <= 50:
-            for moneda in monedas_linea:
-                if moneda not in monedas_cabecera:
-                    monedas_cabecera.append(moneda)
-
-    if monedas_cabecera:
-        monedas = monedas_cabecera
-
-    if not monedas:
-        for l in lineas[:60]:
-            if '$' in l:
-                monedas.append('CLP')
+    candidates = [str(line or "").strip() for line in lineas[:100]]
+    for index, line in enumerate(candidates):
+        normalized = _sin_acentos(line).upper()
+        matches = list(dict.fromkeys(patron_año.findall(normalized)))
+        if not matches:
+            continue
+        nearby = " ".join(
+            _sin_acentos(value).upper()
+            for value in candidates[max(0, index - 2):index + 3]
+        )
+        date_header = bool(re.search(
+            r"\b(?:AL|A)\s+\d{1,2}\s+DE\s+"
+            r"(?:ENERO|FEBRERO|MARZO|ABRIL|MAYO|JUNIO|JULIO|AGOSTO|"
+            r"SEPTIEMBRE|OCTUBRE|NOVIEMBRE|DICIEMBRE)\b|"
+            r"\bPOR\s+(?:LOS\s+)?(?:ANOS|EJERCICIOS|PERIODOS)\s+TERMINADOS\b|"
+            r"\b(?:JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|"
+            r"SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER|JAN|FEB|MAR|APR|JUN|"
+            r"JUL|AUG|SEP|OCT|NOV|DEC)\s+\d{1,2},?\s+(?:19|20)\d{2}\b|"
+            r"\b\d{1,2}[/-]\d{1,2}[/-](?:19|20)\d{2}\s+"
+            r"(?:A|AL|-)\s+\d{1,2}[/-]\d{1,2}[/-](?:19|20)\d{2}\b",
+            normalized,
+        ))
+        mostly_years = bool(re.fullmatch(
+            r"\s*(?:19|20)\d{2}(?:\s+(?:Y|/|-)?\s*(?:19|20)\d{2})?\s*",
+            normalized,
+        ))
+        tabular_support = bool(
+            re.search(r"\bNOTA\b", nearby)
+            and (
+                detectar_unidades_monetarias(
+                    candidates[max(0, index - 2):index + 3]
+                )
+                or re.search(r"\b(?:ACTIVOS?|PASIVOS?|PATRIMONIO|RESULTADOS?)\b", nearby)
+            )
+        )
+        balance_range = bool(
+            date_header
+            and re.search(r"\b(?:BALANCE|ESTADO|SITUACION|RESULTADO)\b", nearby)
+        )
+        if not (date_header or balance_range or mostly_years and tabular_support):
+            continue
+        for match in matches:
+            if match not in años:
+                años.append(match)
+            if len(años) == 2:
                 break
+        if len(años) == 2:
+            break
+
+    unidades = detectar_unidades_monetarias(lineas)
+    monedas = []
+    for unidad in unidades:
+        if unidad == "USD":
+            moneda = "USD"
+        elif unidad in {"CLP", "M$", "MM$"}:
+            moneda = "CLP"
+        else:
+            # ``$`` sin país ni nombre de moneda es deliberadamente ambiguo.
+            continue
+        if moneda not in monedas:
+            monedas.append(moneda)
     return años, monedas
+
+
+def extraer_encabezados_documento_pdf(path: Path) -> list[str]:
+    """Lee encabezados nativos sin depender del extractor tabular elegido.
+
+    Los extractores por coordenadas conservan las filas contables, pero pueden
+    omitir el título, la fecha y la unidad. Esta lectura auxiliar toma sólo las
+    primeras líneas de cada página inicial y no altera las cuentas extraídas.
+    """
+    encabezados: list[str] = []
+    try:
+        with pdfplumber.open(path) as pdf:
+            for page in pdf.pages[:20]:
+                text = page.extract_text() or ""
+                encabezados.extend(
+                    line.strip() for line in text.splitlines()[:30]
+                    if line.strip()
+                )
+    except Exception as exc:  # noqa: BLE001 - metadato auxiliar no bloqueante
+        logger.debug(
+            "No se pudieron recuperar encabezados del PDF: %s", exc,
+            exc_info=True,
+        )
+    return encabezados
 
 
 def detectar_columna_nota_comparativa(
@@ -377,6 +487,11 @@ def _pagina_comparativa_con_texto_nativo_corrupto(page, texto: str) -> bool:
     """
     if not texto.strip():
         return False
+    # Algunos PDF conservan texto seleccionable, pero su mapa de caracteres
+    # sólo expone marcadores ``(cid:N)``. Ese contenido no es una fuente útil
+    # para el parser aunque tenga miles de caracteres y debe pasar por OCR.
+    if len(re.findall(r"\(cid:\d+\)", texto, flags=re.I)) >= 20:
+        return True
     try:
         words = page.extract_words(
             x_tolerance=2, y_tolerance=2,
@@ -453,16 +568,64 @@ def _reconstruir_lineas_nativas_fragmentadas(page) -> list[str]:
 
 
 _HEADER_ALIASES = {
-    "nombre": {"CUENTA", "NOMBRE", "DESCRIPCION", "DETALLE"},
+    "nombre": {"CUENTA", "CUENTAS", "NOMBRE", "DESCRIPCION", "DETALLE"},
     "debitos": {"DEBITOS", "DEBITO", "DEBE", "PEBITOS", "DEBIT0S"},
     "creditos": {"CREDITOS", "CREDITO", "HABER"},
     "saldo_deudor": {"DEUDOR", "SDEUDOR", "SALDODEUDOR"},
     "saldo_acreedor": {"ACREEDOR", "ACREEEDOR", "SACREEDOR", "SALDOACREEDOR"},
-    "activo": {"ACTIVO", "ACTIVOS"},
+    # ``Ac?vo`` y ``Actvo`` son extracciones nativas observadas cuando la
+    # fuente embebida pierde la sílaba central. Sólo se aceptan como cabecera.
+    "activo": {"ACTIVO", "ACTIVOS", "ACVO", "ACTVO"},
     "pasivo": {"PASIVO", "PASIVOS", "PASIWO", "PATRIMONIO"},
     "perdida": {"PERDIDA", "PERDIDAS"},
     "ganancia": {"GANANCIA", "GANANCIAS"},
 }
+
+
+def _inferir_bordes_columnas_monetarias(
+    grupos: list[list[dict]], *, header_bottom: float, text_boundary: float,
+) -> list[float]:
+    """Infiere ocho bordes derechos desde filas, no desde textos de cabecera.
+
+    Los importes están alineados a la derecha y sus glosas de cabecera suelen
+    estar centradas o alineadas a la izquierda. Usar el centro de ``PASIVO``
+    como centro del importe desplaza columnas en tablas anchas.
+    """
+    positions: list[float] = []
+    for group in grupos:
+        if float(group[0]["top"]) <= header_bottom + 1.5:
+            continue
+        for word in group:
+            token = normalizar_token_ocr(str(word.get("text", ""))).replace("$", "")
+            if (
+                float(word["x1"]) > text_boundary
+                and (token == "-" or PATRON_MONTOS.fullmatch(token))
+            ):
+                positions.append(float(word["x1"]))
+    clusters: list[list[float]] = []
+    for position in sorted(positions):
+        if not clusters or position - sum(clusters[-1]) / len(clusters[-1]) > 9:
+            clusters.append([position])
+        else:
+            clusters[-1].append(position)
+    # Columnas que son cero en casi todo el documento pueden aparecer sólo en
+    # subtotal y cierre. Dos observaciones alineadas son suficientes cuando el
+    # conjunto completo forma exactamente ocho columnas; una marca aislada no.
+    stable = [cluster for cluster in clusters if len(cluster) >= 2]
+    if len(stable) != 8:
+        return []
+    return [sum(cluster) / len(cluster) for cluster in stable]
+
+
+def _es_cierre_final_balance(nombre: str) -> bool:
+    """Reconoce sólo controles finales inequívocos de una tabla tributaria."""
+    normalized = re.sub(
+        r"[^A-Z ]", " ", _sin_acentos(str(nombre or "")).upper(),
+    )
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    return normalized in {
+        "TOTALES", "TOTAL GENERAL", "SUMAS TOTALES", "TOTALES IGUALES",
+    }
 
 
 def _extraer_tabla_balance_por_coordenadas(
@@ -535,8 +698,17 @@ def _extraer_tabla_balance_por_coordenadas(
         return [], column_centers
     name_center = centers[0]
     amount_centers = centers[1:]
-    text_boundary = (name_center + amount_centers[0]) / 2
     header_bottom = max(float(w["top"]) for w in header_words) if header_words else -1.0
+    text_boundary = (
+        (float(detected["nombre"]["x1"]) + amount_centers[0]) / 2
+        if header_words else (name_center + amount_centers[0]) / 2
+    )
+    inferred_edges = _inferir_bordes_columnas_monetarias(
+        grupos, header_bottom=header_bottom, text_boundary=text_boundary,
+    )
+    if inferred_edges:
+        amount_centers = inferred_edges
+        centers = [name_center, *amount_centers]
     lineas: list[str] = []
     for grupo in grupos:
         if float(grupo[0]["top"]) <= header_bottom + 1.5:
@@ -552,20 +724,21 @@ def _extraer_tabla_balance_por_coordenadas(
             and all(PATRON_MONTOS.fullmatch(normalizar_token_ocr(str(w["text"])))
                     for w in tail)
             and all(min(range(8), key=lambda j: abs(
-                (float(w["x0"]) + float(w["x1"])) / 2 - amount_centers[j]
+                float(w["x1"]) - amount_centers[j]
             )) == i for i, w in enumerate(tail))
         )
         tail_boundary = float(tail[0]["x0"]) if full_amount_tail else text_boundary
         for word in grupo:
             token = str(word["text"]).strip()
             xmid = (float(word["x0"]) + float(word["x1"])) / 2
+            x_amount = float(word["x1"]) if inferred_edges else xmid
             token_normalizado = normalizar_token_ocr(token).replace("$", "")
             es_monto = token == "-" or bool(PATRON_MONTOS.fullmatch(token_normalizado))
             # En tablas escaneadas Tesseract suele leer el cero aislado como
             # pequeños glifos sin dígitos (``o``, ``]``, ``»``...). Sólo los
             # aceptamos dentro de la vecindad de una columna monetaria para no
             # convertir palabras legítimas del nombre en importes.
-            distancia_columna = min(abs(xmid - center) for center in amount_centers)
+            distancia_columna = min(abs(x_amount - center) for center in amount_centers)
             es_cero_en_celda = (
                 distancia_columna <= 32
                 and _es_token_cero_ocr_en_celda(token)
@@ -577,7 +750,7 @@ def _extraer_tabla_balance_por_coordenadas(
                 continue
             nearest = min(
                 range(len(amount_centers)),
-                key=lambda index: abs(xmid - amount_centers[index]),
+                key=lambda index: abs(x_amount - amount_centers[index]),
             )
             amount_cells[nearest].append(word)
         text_tokens = [str(w["text"]) for w in sorted(text_words, key=lambda w: w["x0"])]
@@ -597,6 +770,11 @@ def _extraer_tabla_balance_por_coordenadas(
             )
         prefix = f"{code} " if code else ""
         lineas.append(f"{prefix}{name} {' '.join(amounts)}")
+        # Firmas, pies legales y sellos posteriores al cierre no son cuentas.
+        # El corte exige una etiqueta final exacta para no truncar subtotales
+        # ni encabezados jerárquicos que contienen la palabra ``total``.
+        if _es_cierre_final_balance(name):
+            break
     return lineas, centers
 
 
@@ -691,11 +869,16 @@ class CuentaRaw:
     montos_periodos: dict[str, float] = field(default_factory=dict)
     columnas_derivadas: list[str] = field(default_factory=list)
     seccion_contable: Optional[str] = None
+    jerarquia_contable: Optional[str] = None
+    requiere_revision_extraccion: bool = False
+    razones_revision_extraccion: list[str] = field(default_factory=list)
 
 
 @dataclass
 class CertificacionExtraccion:
-    estado: str = "no_evaluable"  # certificada | parcial | fallida | no_evaluable
+    # ``timeout`` es operativo, no una discrepancia contable. Nunca certifica,
+    # pero conserva las cuentas y diagnósticos recuperados de otras páginas.
+    estado: str = "no_evaluable"  # certificada | parcial | fallida | no_evaluable | timeout
     metodo: str = ""
     totales_impresos: dict[str, float] = field(default_factory=dict)
     totales_calculados: dict[str, float] = field(default_factory=dict)
@@ -728,6 +911,9 @@ class ResultadoParseo:
     # confidence, fallback, tiempo). NO cambia la extracción: None cuando no
     # hubo análisis documental o cuando el análisis de extractor falló.
     extractor_info: Optional[dict] = None
+    periodos_detectados: list[str] = field(default_factory=list)
+    monedas_detectadas: list[str] = field(default_factory=list)
+    unidades_monetarias: list[str] = field(default_factory=list)
     certificacion_extraccion: CertificacionExtraccion = field(
         default_factory=CertificacionExtraccion
     )
@@ -936,14 +1122,82 @@ TESSDATA_DIR = '/usr/local/share/tessdata'
 
 def _tesseract_env() -> dict[str, str]:
     """Entorno estable para instancias con una fracción pequeña de CPU."""
-    return {
-        'TESSDATA_PREFIX': TESSDATA_DIR,
-        'OMP_THREAD_LIMIT': '1',
-    }
+    env = {'OMP_THREAD_LIMIT': '1'}
+    if Path(TESSDATA_DIR).is_dir():
+        env['TESSDATA_PREFIX'] = TESSDATA_DIR
+    return env
 
 
 def obtener_tesseract_bin() -> str:
     return shutil.which('tesseract') or 'tesseract'
+
+
+@lru_cache(maxsize=1)
+def verificar_runtime_ocr() -> dict:
+    """Verifica que Tesseract y el modelo español sean utilizables."""
+    try:
+        from scripts.ocr_preflight import inspect_ocr_runtime
+        return inspect_ocr_runtime(obtener_tesseract_bin())
+    except Exception as exc:  # noqa: BLE001 - se convierte en estado explícito
+        return {
+            "available": False,
+            "spa_available": False,
+            "version": "",
+            "error": f"No se pudo verificar el runtime OCR: {exc}",
+        }
+
+
+_EMBEDDED_AMOUNT = re.compile(
+    r"(?<!\w)\(?-?\d{1,3}(?:[.,]\d{3})+(?:[.,]\d+)?\)?(?!\w)"
+)
+_DOCUMENT_IDENTIFIER = re.compile(
+    r"\b(?:RUT|C\.?\s*I\.?)?\s*\d{1,2}[.]\d{3}[.]\d{3}[-·][0-9K]\b",
+    re.I,
+)
+_LETTER_BLOCK = r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ][A-Za-zÁÉÍÓÚÜÑáéíóúüñ\s./()-]{2,}"
+_FUSED_LABELS = re.compile(
+    rf"(?P<left>{_LETTER_BLOCK}?)\s+(?P<amount>\(?-?\d{{1,3}}(?:[.,]\d{{3}})+(?:[.,]\d+)?\)?)\s+"
+    rf"(?P<right>{_LETTER_BLOCK})$"
+)
+
+
+def detectar_linea_sospechosa(
+    linea: str, *, mediana_longitud: float = 0.0,
+) -> list[str]:
+    """Detecta fusiones estructurales sin interpretar su valor contable."""
+    limpia = re.sub(r"\s+", " ", linea).strip()
+    razones: list[str] = []
+    if _FUSED_LABELS.search(limpia):
+        razones.append("multiples_glosas_separadas_por_monto")
+    numeric_tokens = re.findall(r"\(?-?\d[\d.,]*\)?", limpia)
+    letter_tokens = re.findall(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]{2,}", limpia)
+    if (
+        mediana_longitud > 0
+        and len(limpia) >= max(180, int(mediana_longitud * 3))
+        and len(numeric_tokens) >= 4
+        and len(letter_tokens) >= 4
+    ):
+        razones.append("longitud_y_densidad_anomala")
+    return razones
+
+
+def marcar_cuenta_sospechosa(cuenta: CuentaRaw, linea: str, razones: list[str]) -> None:
+    """Propaga señales de extracción antes de cualquier clasificación."""
+    nombre_sin_identificadores = _DOCUMENT_IDENTIFIER.sub("", cuenta.nombre or "")
+    contexto_no_contable = bool(re.search(
+        r"\b(?:RUT|C\.?\s*I\.?|DIRECCI[ÓO]N|P[ÁA]GINA|OFICINA)\b",
+        cuenta.nombre or "", re.I,
+    ))
+    nombre_con_monto = bool(
+        not contexto_no_contable and _EMBEDDED_AMOUNT.search(nombre_sin_identificadores)
+    )
+    if nombre_con_monto:
+        razones = list(dict.fromkeys([*razones, "monto_incrustado_en_glosa"]))
+    if not razones:
+        return
+    cuenta.requiere_revision_extraccion = True
+    cuenta.razones_revision_extraccion = list(dict.fromkeys(razones))
+    cuenta.confianza_extraccion = min(float(cuenta.confianza_extraccion), 0.35)
 
 
 def detectar_rotacion_osd(img_path: Path) -> Optional[int]:
@@ -995,7 +1249,14 @@ def detectar_rotacion_heuristica(img_path: Path) -> int:
     return mejor_rotacion
 
 
-def ocr_pagina(img_path: Path, rotacion: int, psm: int = 6) -> str:
+def ocr_pagina(
+    img_path: Path,
+    rotacion: int,
+    psm: int = 6,
+    *,
+    timeout_events: Optional[list[str]] = None,
+    page_number: Optional[int] = None,
+) -> str:
     tmp_path: Optional[Path] = None
     retry_path: Optional[Path] = None
     imagen_ocr = img_path
@@ -1033,6 +1294,11 @@ def ocr_pagina(img_path: Path, rotacion: int, psm: int = 6) -> str:
             with Image.open(imagen_ocr) as img:
                 pixeles = img.width * img.height
                 if pixeles <= OCR_RETRY_MAX_PIXELS:
+                    if timeout_events is not None:
+                        timeout_events.append(
+                            f"Página {page_number or '?'}: Tesseract excedió "
+                            f"{OCR_PAGE_TIMEOUT_SECONDS} segundos."
+                        )
                     return ""
                 escala = (OCR_RETRY_MAX_PIXELS / pixeles) ** 0.5
                 reducida = img.resize(
@@ -1058,6 +1324,11 @@ def ocr_pagina(img_path: Path, rotacion: int, psm: int = 6) -> str:
                     OCR_RETRY_TIMEOUT_SECONDS,
                     img_path.name,
                 )
+                if timeout_events is not None:
+                    timeout_events.append(
+                        f"Página {page_number or '?'}: Tesseract excedió los "
+                        "presupuestos principal y reducido."
+                    )
                 return ""
         if result.returncode != 0:
             logger.warning(
@@ -1171,6 +1442,28 @@ def verificar_cuadre_balance(cuentas: list[CuentaRaw]) -> tuple[bool, dict, list
     return cuadra, totales_calculados, alertas
 
 
+def es_ruido_ocr_no_contable(cuenta: Optional[CuentaRaw]) -> bool:
+    """Detecta texto documental no contable (firmas, notas, metadatos, etc.)."""
+    if cuenta is None:
+        return True
+    if cuenta.codigo:
+        return False
+    nombre_norm = re.sub(r"\s+", " ", _sin_acentos(cuenta.nombre or "").lower()).strip()
+    if not nombre_norm:
+        return True
+    # Una palabra dentro de una cuenta no acredita ruido documental.
+    # Conservar importes no nulos para revisión, incluso en etiquetas ambiguas.
+    values = [cuenta.monto, *cuenta.montos_columnas.values()]
+    if any(value is not None and value != 0 for value in values):
+        return False
+    return bool(re.fullmatch(
+        r"(?:(?:firma|firmas)(?:\s+(?:representante legal|contador general))?"
+        r"|representante legal|contador general|auditor(?:es)?"
+        r"|rut\s*:?\s*[\d.k-]+|nota\s+\d+|pagina\s+\d+(?:\s+de\s+\d+)?"
+        r"|fecha\s*:?\s*[\d/.-]+|timbre|visacion)", nombre_norm,
+    ))
+
+
 def _validar_columnas_finales(
     cuentas, detalle, subtotal, calculados, finales, puentes, tolerancia,
 ) -> bool:
@@ -1185,7 +1478,7 @@ def _validar_columnas_finales(
         return False
     incluidos = {id(c) for c in detalle}
     for c in cuentas:
-        if not c.es_total and id(c) not in incluidos and (
+        if not c.es_total and not es_ruido_ocr_no_contable(c) and id(c) not in incluidos and (
             c.codigo or (c.monto is not None and c.monto != 0)
             or any(c.montos_columnas.values())
         ):
@@ -1196,10 +1489,14 @@ def _validar_columnas_finales(
         for col in columnas
     ):
         return False
-    if any(abs(calculados[col] - subtotal[col]) > tolerancia for col in columnas):
+    # Respetar el contrato del llamador, incluido cero exacto.
+    if not math.isfinite(tolerancia) or tolerancia < 0:
+        return False
+    tol_finales = tolerancia
+    if any(abs(calculados[col] - subtotal[col]) > tol_finales for col in columnas):
         return False
     resultado = subtotal["activo"] - subtotal["pasivo"]
-    if abs(resultado - (subtotal["ganancia"] - subtotal["perdida"])) > tolerancia:
+    if abs(resultado - (subtotal["ganancia"] - subtotal["perdida"])) > tol_finales:
         return False
     for c in detalle:
         v = c.montos_columnas
@@ -1259,26 +1556,9 @@ def certificar_extraccion_columnas(
             and set(RAW_MONETARY_COLUMNS).issubset(cuenta.montos_columnas)
         )
     ]
-    # En balances con plan de cuentas explicito, encabezados, firmas y notas
-    # OCR sin codigo no son filas contables y no deben afectar la cuadratura.
-    filas_codificadas = [cuenta for cuenta in filas_detalle if cuenta.codigo]
-    if len(filas_codificadas) >= 3:
-        filas_detalle = filas_codificadas
-    filas_inconsistentes: list[int] = []
-    for cuenta in filas_detalle:
-        values = cuenta.montos_columnas
-        movement = values["debitos"] - values["creditos"]
-        balance = values["saldo_deudor"] - values["saldo_acreedor"]
-        classified = (
-            values["activo"] + values["pasivo"]
-            + values["perdida"] + values["ganancia"]
-        )
-        if (
-            abs(movement - balance) > tolerancia_absoluta
-            or abs(values["saldo_deudor"] + values["saldo_acreedor"] - classified)
-            > tolerancia_absoluta
-        ):
-            filas_inconsistentes.append(cuenta.linea)
+    # Descartar texto de encabezados, firmas o notas OCR sin código,
+    # preservando cuentas legítimas aunque carezcan de código.
+    filas_detalle = [c for c in filas_detalle if not es_ruido_ocr_no_contable(c)]
 
     def normalized_name(cuenta: CuentaRaw) -> str:
         return re.sub(r"\s+", " ", _sin_acentos(cuenta.nombre).lower()).strip()
@@ -1290,6 +1570,7 @@ def certificar_extraccion_columnas(
         cuenta for cuenta in cuentas
         if (
             cuenta.es_total
+            and not getattr(cuenta, "es_subtotal_manual", False)
             and set(RAW_MONETARY_COLUMNS).issubset(cuenta.montos_columnas)
         )
         and (
@@ -1298,6 +1579,33 @@ def certificar_extraccion_columnas(
             or control_key(cuenta) in {"totales", "totalgeneral", "sumastotales"}
         )
     ]
+
+    def inconsistent_rows(rows: list[CuentaRaw], finales_validadas: bool = False) -> list[int]:
+        inconsistent: list[int] = []
+        for cuenta in rows:
+            values = cuenta.montos_columnas
+            movement = values["debitos"] - values["creditos"]
+            balance = values["saldo_deudor"] - values["saldo_acreedor"]
+            classified = (
+                values["activo"] + values["pasivo"]
+                + values["perdida"] + values["ganancia"]
+            )
+            saldo_cuadra_clasificado = (
+                abs(values["saldo_deudor"] + values["saldo_acreedor"] - classified) <= tolerancia_absoluta
+            )
+            movimiento_cuadra_saldo = (
+                abs(movement - balance) <= tolerancia_absoluta
+            )
+            if finales_validadas:
+                if not saldo_cuadra_clasificado:
+                    inconsistent.append(cuenta.linea)
+            else:
+                if not movimiento_cuadra_saldo or not saldo_cuadra_clasificado:
+                    inconsistent.append(cuenta.linea)
+        return inconsistent
+
+    filas_inconsistentes = inconsistent_rows(filas_detalle, finales_validadas=False)
+
     totales_finales_validos: Optional[bool] = None
     fila_final_incompleta = False
     if finales:
@@ -1322,6 +1630,7 @@ def certificar_extraccion_columnas(
         cuenta for cuenta in cuentas
         if (
             cuenta.es_total
+            and not getattr(cuenta, "es_subtotal_manual", False)
             and set(RAW_MONETARY_COLUMNS).issubset(cuenta.montos_columnas)
         )
         and (
@@ -1377,7 +1686,8 @@ def certificar_extraccion_columnas(
         cuenta for cuenta in cuentas
         if cuenta.es_total and cuenta.montos_columnas
         and re.match(
-            r"^(?:perdida o ganancia|resultado|utilidad|perdida(?: net[ao]| del ejercicio)?)\b",
+            r"^(?:perdidas?\s*(?:/|y|o)\s*ganancias?|resultado|utilidad|"
+            r"perdida(?: net[ao]| del ejercicio)?)\b",
             normalized_name(cuenta),
         )
     ]
@@ -1448,6 +1758,69 @@ def certificar_extraccion_columnas(
                 for left, right in pairs
             )
 
+    # Se permite reparar una lectura OCR sólo si el subtotal impreso determina
+    # una única fila y una única columna de movimiento. El ajuste debe cerrar
+    # exactamente el subtotal y dejar la identidad de la fila dentro de la
+    # tolerancia contable. El valor original queda en trazabilidad y la fila
+    # continúa marcada para revisión humana.
+    reconciliaciones_ocr: list[dict[str, Any]] = []
+    if "ocr" in metodo.lower() and len(filas_inconsistentes) == 1:
+        posibles: list[tuple[CuentaRaw, str, float, float]] = []
+        for cuenta in filas_detalle:
+            if cuenta.linea not in filas_inconsistentes:
+                continue
+            for column in ("debitos", "creditos"):
+                calculated = float(calculados.get(column, 0.0) or 0.0)
+                printed = float(total_impreso.get(column, 0.0) or 0.0)
+                adjustment = printed - calculated
+                if (
+                    abs(adjustment) <= tolerancia_absoluta
+                    or abs(adjustment) > 1_000
+                    or column in subtotal_referencia.columnas_derivadas
+                ):
+                    continue
+                candidate = copy.deepcopy(cuenta)
+                original = float(candidate.montos_columnas[column])
+                candidate.montos_columnas[column] = original + adjustment
+                subtotal_closes = abs(
+                    calculated + adjustment - printed
+                ) <= 1e-9
+                if (
+                    subtotal_closes
+                    and _error_identidades_cuenta(cuenta) > tolerancia_absoluta
+                    and _error_identidades_cuenta(candidate) <= tolerancia_absoluta
+                ):
+                    posibles.append((cuenta, column, original, adjustment))
+        if len(posibles) == 1:
+            cuenta, column, original, adjustment = posibles[0]
+            reconciled = original + adjustment
+            cuenta.montos_columnas[column] = reconciled
+            if column not in cuenta.columnas_derivadas:
+                cuenta.columnas_derivadas.append(column)
+            calculados[column] += adjustment
+            reconciliaciones_ocr.append({
+                "linea": cuenta.linea,
+                "cuenta": cuenta.nombre,
+                "columna": column,
+                "original": original,
+                "reconciliado": reconciled,
+            })
+
+    columnas_finales_validadas = (
+        not set(subtotal_referencia.columnas_derivadas).intersection(RAW_MONETARY_COLUMNS[4:])
+        and _validar_columnas_finales(
+            cuentas, filas_detalle, total_impreso, calculados, finales,
+            puentes_resultado, tolerancia_absoluta,
+        )
+    )
+    filas_inconsistentes_bloqueantes = inconsistent_rows(
+        filas_detalle, finales_validadas=columnas_finales_validadas
+    )
+    filas_inconsistentes = sorted(set(
+        filas_inconsistentes
+        + [item["linea"] for item in reconciliaciones_ocr]
+    ))
+
     columnas_total_reconstruidas: list[str] = []
     for column in ("debitos", "creditos"):
         calculated = float(calculados.get(column, 0.0) or 0.0)
@@ -1481,10 +1854,17 @@ def certificar_extraccion_columnas(
     if fallidas:
         detalle = ", ".join(f"{column}={diff:,.0f}" for column, diff in fallidas.items())
         razones.append(f"Las sumas extraídas no reproducen el subtotal impreso: {detalle}.")
-    if filas_inconsistentes:
+    if filas_inconsistentes_bloqueantes:
         razones.append(
-            f"{len(filas_inconsistentes)} filas no cumplen sus identidades "
+            f"{len(filas_inconsistentes_bloqueantes)} filas no cumplen sus identidades "
             "Debe/Haber, saldo o columna de clasificación."
+        )
+    for item in reconciliaciones_ocr:
+        razones.append(
+            "Reconciliación OCR única en fila "
+            f"{item['linea']} ({item['cuenta']}), {item['columna']}: "
+            f"valor leído {item['original']:,.0f}; valor reconciliado "
+            f"{item['reconciliado']:,.0f}. La fila permanece en revisión humana."
         )
     if totales_finales_validos is False:
         razones.append("La fila TOTALES IGUALES no está cuadrada en sus pares de columnas.")
@@ -1565,7 +1945,7 @@ def certificar_extraccion_columnas(
                 )
 
     failed = bool(
-        fallidas or filas_inconsistentes
+        fallidas or filas_inconsistentes_bloqueantes
         or totales_finales_validos is False or puente_invalido
         or ecuacion_subtotal_invalida
     )
@@ -1580,13 +1960,39 @@ def certificar_extraccion_columnas(
             + (" y el subtotal fue completado" if total_derivado else "")
             + "; requieren revisión humana."
         )
-    columnas_finales_validadas = (
-        not set(subtotal_referencia.columnas_derivadas).intersection(RAW_MONETARY_COLUMNS[4:])
-        and _validar_columnas_finales(
-            cuentas, filas_detalle, total_impreso, calculados, finales,
-            puentes_resultado, tolerancia_absoluta,
-        )
+    movimientos_no_exhaustivos = bool(
+        fallidas
+        and set(fallidas).issubset({"debitos", "creditos"})
+        and columnas_finales_validadas
+        and not filas_inconsistentes_bloqueantes
+        and totales_finales_validos is True
+        and not puente_invalido
+        and not ecuacion_subtotal_invalida
     )
+    if movimientos_no_exhaustivos:
+        failed = False
+        razones = [r for r in razones if not r.startswith("Las sumas extraídas no reproducen el subtotal")]
+        razones.append(
+            "Debe y Haber contienen movimientos cerrados no reproducidos por "
+            "el detalle impreso; las columnas finales, el resultado y el cierre "
+            "sí quedaron certificados para homologación."
+        )
+
+    reconciliacion_ocr_requiere_revision = bool(
+        reconciliaciones_ocr
+        and finales
+        and all(
+            item["columna"] not in subtotal_referencia.columnas_derivadas
+            and item["columna"] not in finales[-1].columnas_derivadas
+            for item in reconciliaciones_ocr
+        )
+        and totales_finales_validos is True
+        and not filas_inconsistentes_bloqueantes
+        and not fallidas
+        and not puente_invalido
+        and not ecuacion_subtotal_invalida
+    )
+
     observaciones_auxiliares = []
     if columnas_finales_validadas:
         for cuenta in filas_detalle:
@@ -1611,9 +2017,36 @@ def certificar_extraccion_columnas(
                     "El saldo respalda el importe final; no cambie la columna de clasificación."
                 ),
             })
+    for c in filas_detalle:
+        if not c.codigo:
+            c.requiere_revision_extraccion = True
+            if "cuenta_sin_codigo" not in c.razones_revision_extraccion:
+                c.razones_revision_extraccion.append("cuenta_sin_codigo")
+            observaciones_auxiliares.append({
+                "Fila": c.linea,
+                "Cuenta": c.nombre,
+                "Revisar": "Código ausente",
+                "Detalle": f"Cuenta '{c.nombre}' sin código; conservada para homologación pero requiere revisión manual.",
+            })
+    for item in reconciliaciones_ocr:
+        observaciones_auxiliares.append({
+            "Fila": item["linea"],
+            "Cuenta": item["cuenta"],
+            "Revisar": item["columna"].capitalize(),
+            "Detalle": (
+                f"Valor OCR original: {item['original']:,.0f}; valor derivado "
+                f"del subtotal: {item['reconciliado']:,.0f}. Confirme contra "
+                "el documento antes de emitir el entregable."
+            ),
+        })
     return CertificacionExtraccion(
         estado="fallida" if failed else (
-            "parcial" if filas_derivadas or total_derivado else "certificada"
+            "certificada" if movimientos_no_exhaustivos else (
+                "parcial" if (
+                    filas_derivadas or total_derivado
+                    or reconciliacion_ocr_requiere_revision
+                ) else "certificada"
+            )
         ),
         metodo=metodo,
         totales_impresos={k: float(total_impreso.get(k, 0.0) or 0.0) for k in RAW_MONETARY_COLUMNS},
@@ -1629,6 +2062,294 @@ def certificar_extraccion_columnas(
         columnas_finales_validadas=columnas_finales_validadas,
         observaciones_auxiliares=observaciones_auxiliares,
     )
+
+
+def certificar_clasificado_final(
+    cuentas: list[CuentaRaw], clasificaciones: list[dict],
+    periodos: list[str], monedas: list[str], tolerancia_absoluta: float = 0.0,
+    *, codigos_validos: Optional[set[str]] = None, periodo_actual: Optional[str] = None,
+) -> CertificacionExtraccion:
+    """Certifica detalle de balance por sección y año después de clasificar.
+
+    Contrasta balance y resultados por función contra controles independientes.
+    Controles desconocidos y atribuciones sin detalle conservan estado parcial.
+    """
+    import math
+
+    result = CertificacionExtraccion(metodo="classified_final_detail", estado="parcial")
+    reasons = result.razones
+    if not math.isfinite(tolerancia_absoluta) or tolerancia_absoluta < 0:
+        raise ValueError("La tolerancia debe ser finita y no negativa.")
+    years = sorted(set(str(p) for p in periodos if re.fullmatch(r"\d{4}", str(p))))
+    represented_years = {
+        str(key) for account in cuentas for key in account.montos_periodos
+        if re.fullmatch(r"\d{4}", str(key))
+    }
+    years = sorted(set(years) | represented_years)
+    moneda_set = {str(m).strip().upper() for m in monedas}
+    if not years or len(moneda_set) != 1 or moneda_set & {"", "UNKNOWN", "DESCONOCIDO", "NONE"}:
+        reasons.append("Faltan años explícitos o una moneda única para certificar el detalle.")
+        return result
+    if not codigos_validos or periodo_actual not in years:
+        reasons.append("Falta catálogo válido o el período principal explícito.")
+        return result
+
+    def section(text):
+        raw = (text or "").strip().upper()
+        if raw in {"AC", "ANC", "PC", "PNC", "PAT", "A", "P", "PP"}:
+            return raw
+        name = re.sub(r"\s+", " ", _sin_acentos(text or "").lower()).strip()
+        name = re.sub(r"^(?:total(?:es)?\s+(?:de\s+)?)", "", name)
+        name = re.sub(r"\s+(?:total|totales)$", "", name)
+        name = name.replace("activos", "activo").replace("pasivos", "pasivo")
+        name = name.replace("corrientes", "corriente")
+        return {
+            "ac": "AC", "anc": "ANC", "pc": "PC", "pnc": "PNC", "pat": "PAT",
+            "activo corriente": "AC", "activo no corriente": "ANC",
+            "pasivo corriente": "PC", "pasivo no corriente": "PNC",
+            "patrimonio": "PAT", "patrimonio neto": "PAT",
+            "activo": "A", "pasivo": "P",
+            "patrimonio y pasivo": "PP", "pasivo y patrimonio": "PP",
+        }.get(name)
+
+    def income_control(text):
+        name = re.sub(r"[^a-z ]", " ", _sin_acentos(text or "").lower())
+        name = re.sub(r"\s+", " ", name).strip()
+        if name in {"ganancia bruta", "ganancia perdida bruta", "utilidad bruta"}:
+            return "ER_GROSS"
+        if re.fullmatch(r"(?:ganancia(?: perdida)?|resultado|utilidad) antes de impuestos?", name):
+            return "ER_PRETAX"
+        if name in {
+            "ganancia", "ganancia perdida", "ganancia perdida del ejercicio",
+            "utilidad del ejercicio", "ganancia del ejercicio", "resultado del ejercicio",
+            "ganancia neta", "utilidad neta", "resultado neto",
+        }:
+            return "ER_NET"
+        if name in {"ganancia perdida procedente de operaciones continuadas", "ganancia procedente de operaciones continuadas"}:
+            return "ER_CONTINUING"
+        if name in {"ganancia perdida procedente de operaciones discontinuadas", "ganancia procedente de operaciones discontinuadas", "resultado de operaciones discontinuadas"}:
+            return "ER_DISCONTINUED"
+        if re.fullmatch(r"(?:otro )?resultado integral(?: total)?", name) or name in {"otros resultados integrales", "otro resultado integral"}:
+            return "ER_OCI" if "otro" in name else "ER_COMPREHENSIVE"
+        if "atribuible a" in name:
+            is_nci = any(k in name for k in ("no controlad", "minoritari"))
+            is_parent = any(k in name for k in ("controlad", "matriz", "propietari")) and not is_nci
+            if is_nci:
+                return "ER_ATTRIB_COMP_NCI" if "integral" in name else "ER_ATTRIB_NET_NCI"
+            if is_parent:
+                return "ER_ATTRIB_COMP_PARENT" if "integral" in name else "ER_ATTRIB_NET_PARENT"
+        return None
+
+
+    by_line = {}
+    for row in clasificaciones:
+        if row.get("line") in by_line:
+            reasons.append("La clasificación contiene identidades de fila duplicadas.")
+            return result
+        by_line[row.get("line")] = row
+    if len({c.linea for c in cuentas}) != len(cuentas):
+        reasons.append("El detalle contiene identidades de fila duplicadas.")
+        return result
+    details = {key: [] for key in ("AC", "ANC", "PC", "PNC", "PAT")}
+    controls = {}
+    income_rows = []
+    attrib_net_rows = []
+    income_controls = {}
+    for account in cuentas:
+        if account.monto is None:
+            if not section(account.nombre):
+                reasons.append(f"Fila {account.linea}: importe ausente en una fila que no es encabezado reconocido.")
+            continue
+        if (
+            account.columnas_derivadas or account.requiere_revision_extraccion
+            or not math.isfinite(account.confianza_extraccion)
+            or account.confianza_extraccion < 0.9
+            or not math.isfinite(float(account.monto))
+        ):
+            reasons.append(f"Fila {account.linea}: evidencia de extracción pendiente de revisión.")
+        if account.monto != account.montos_periodos.get(periodo_actual):
+            reasons.append(f"Fila {account.linea}: monto principal distinto del período declarado.")
+        if account.es_total:
+            income_key = income_control(account.nombre)
+            if income_key:
+                if income_key in income_controls:
+                    reasons.append(f"Control de resultados duplicado: {income_key}.")
+                income_controls[income_key] = account
+                continue
+            key = section(account.nombre)
+            if not key:
+                reasons.append(f"Fila {account.linea}: control fuera del alcance de balance por secciones.")
+                continue
+            if key in controls:
+                reasons.append(f"Control duplicado para sección {key}.")
+            controls[key] = account
+        else:
+            row = by_line.get(account.linea)
+            key = section(account.seccion_contable)
+            if row and str(row.get("code", "")).startswith("ER.") and not key:
+                code = str(row.get("code", ""))
+                is_net_attrib = code in {"ER.20", "ER.21"}
+                if (
+                    code not in codigos_validos or row.get("review")
+                    or row.get("name") != account.nombre or row.get("amount") != account.monto
+                    or income_control(account.nombre)
+                    or (code in {"ER.03", "ER.11", "ER.19"} and not is_net_attrib)
+                ):
+                    reasons.append(f"Fila {account.linea}: detalle de resultados no acreditado o subtotal tratado como cuenta.")
+                if is_net_attrib:
+                    attrib_net_rows.append(account)
+                else:
+                    income_rows.append(account)
+                continue
+            if not key or key not in details:
+                reasons.append(f"Fila {account.linea}: sección detallada no acreditada o estado de resultados pendiente.")
+                continue
+            if (
+                not row or row.get("review") or not row.get("code")
+                or row.get("code") not in codigos_validos
+                or str(row["code"]).split(".")[0] != key
+                or row.get("name") != account.nombre
+                or row.get("amount") != account.monto
+            ):
+                reasons.append(f"Fila {account.linea}: clasificación final incompleta o incompatible con su sección.")
+            details[key].append(account)
+    result.filas_evaluadas = sum(map(len, details.values())) + len(income_rows) + len(attrib_net_rows)
+    required = {key for key, rows in details.items() if rows} | {"A", "PP", "PAT"}
+    if not details["AC"] and not details["ANC"]:
+        reasons.append("No hay detalle de activos acreditado.")
+    if not required.issubset(controls):
+        reasons.append("Faltan controles impresos: " + ", ".join(sorted(required - controls.keys())))
+    if income_rows or income_controls:
+        required_income = {"ER_GROSS", "ER_PRETAX", "ER_NET"}
+        if not income_rows or not required_income.issubset(income_controls):
+            reasons.append("Falta detalle o controles de resultado bruto, antes de impuestos y neto.")
+        else:
+            gross, pretax, net = [income_controls[k].linea for k in ("ER_GROSS", "ER_PRETAX", "ER_NET")]
+            if not gross < pretax < net:
+                reasons.append("El orden de los controles de resultados no está acreditado.")
+            continuation = income_controls.get("ER_CONTINUING")
+            discontinued = income_controls.get("ER_DISCONTINUED")
+            for optional_control in (continuation, discontinued):
+                if optional_control and not pretax < optional_control.linea < net:
+                    reasons.append("Control de operaciones continuadas/discontinuadas fuera de orden.")
+            if continuation and discontinued and continuation.linea >= discontinued.linea:
+                reasons.append("El control de operaciones discontinuadas precede al de continuadas.")
+            all_eval_income = income_rows + attrib_net_rows
+            for account in all_eval_income:
+                code = by_line[account.linea]["code"]
+                name = re.sub(r"\s+", " ", _sin_acentos(account.nombre).lower()).strip()
+                if (
+                    code == "ER.01" and not re.fullmatch(r"ingresos de (?:actividades ordinarias|explotacion)", name)
+                    or code == "ER.02" and not re.fullmatch(r"costos? de (?:ventas|explotacion)", name)
+                ):
+                    reasons.append(f"Fila {account.linea}: no se acredita el rol individual de ingreso o costo de ventas.")
+                if continuation and account.linea >= continuation.linea:
+                    reasons.append(f"Fila {account.linea}: detalle posterior al control de operaciones continuadas.")
+                valid_position = (
+                    account.linea < gross if code in {"ER.01", "ER.02"}
+                    else pretax < account.linea < net if code == "ER.10"
+                    else account.linea > net if code in {"ER.20", "ER.21"}
+                    else gross < account.linea < pretax
+                )
+                if not valid_position:
+                    reasons.append(f"Fila {account.linea}: ubicación incompatible con controles de resultados.")
+            if not {"ER.01", "ER.02"}.issubset({by_line[a.linea]["code"] for a in income_rows}):
+                reasons.append("Falta detalle de ingresos o costo de ventas para verificar resultado bruto.")
+    unknown_classifications = set(by_line) - {c.linea for c in cuentas if not c.es_total}
+    if unknown_classifications:
+        reasons.append("Existen clasificaciones sin una cuenta de detalle fuente.")
+    if reasons:
+        # La cobertura ausente no es una diferencia monetaria comprobada.
+        # No compare sumas incompletas contra controles impresos como si lo fuera.
+        return result
+
+    def value(account, year):
+        amount = account.montos_periodos.get(year)
+        if amount is None or not math.isfinite(float(amount)):
+            raise ValueError(f"Fila {account.linea}: falta importe finito del período {year}.")
+        return float(amount)
+
+    failed = False
+    for year in years:
+        try:
+            sums = {key: sum(value(c, year) for c in rows) for key, rows in details.items()}
+            sums.update(A=sums["AC"] + sums["ANC"], P=sums["PC"] + sums["PNC"])
+            sums["PP"] = sums["P"] + sums["PAT"]
+            if not all(math.isfinite(amount) for amount in sums.values()):
+                raise ValueError(f"Período {year}: suma no finita, requiere revisión de importes.")
+            for key, control in controls.items():
+                printed = value(control, year)
+                delta = sums[key] - printed
+                result.totales_impresos[f"{year}:{key}"] = printed
+                result.totales_calculados[f"{year}:{key}"] = sums[key]
+                result.diferencias[f"{year}:{key}"] = delta
+                failed |= abs(delta) > tolerancia_absoluta
+            delta = sums["A"] - sums["PP"]
+            result.diferencias[f"{year}:ecuacion"] = delta
+            failed |= abs(delta) > tolerancia_absoluta
+            if income_controls:
+                pre = income_controls["ER_PRETAX"].linea
+                income_sums = {
+                    "ER_GROSS": sum(value(a, year) for a in income_rows if by_line[a.linea]["code"] in {"ER.01", "ER.02"}),
+                    "ER_PRETAX": sum(value(a, year) for a in income_rows if a.linea < pre),
+                    "ER_CONTINUING": sum(value(a, year) for a in income_rows),
+                    # Nonzero discontinued results require their own detail; never
+                    # copy an unverified printed subtotal into the calculated sum.
+                    "ER_DISCONTINUED": 0.0,
+                    "ER_NET": sum(value(a, year) for a in income_rows),
+                }
+                if not all(math.isfinite(amount) for amount in income_sums.values()):
+                    raise ValueError(f"Período {year}: suma de resultados no finita.")
+                for key, control in income_controls.items():
+                    printed = value(control, year)
+                    if key in income_sums:
+                        delta = income_sums[key] - printed
+                        result.totales_impresos[f"{year}:{key}"] = printed
+                        result.totales_calculados[f"{year}:{key}"] = income_sums[key]
+                        result.diferencias[f"{year}:{key}"] = delta
+                        if key == "ER_DISCONTINUED" and printed != 0:
+                            reasons.append("Operaciones discontinuadas sin detalle independiente para certificar.")
+                        else:
+                            failed |= abs(delta) > tolerancia_absoluta
+                    else:
+                        result.totales_impresos[f"{year}:{key}"] = printed
+                # Conciliación independiente de atribuciones del resultado neto
+                net_attrib_controls = [c for k, c in income_controls.items() if k in {"ER_ATTRIB_NET_PARENT", "ER_ATTRIB_NET_NCI"}]
+                if attrib_net_rows or net_attrib_controls:
+                    total_net_attrib = sum(value(a, year) for a in attrib_net_rows) + sum(value(c, year) for c in net_attrib_controls)
+                    delta_net_attrib = round(total_net_attrib - income_sums["ER_NET"], 2)
+                    result.diferencias[f"{year}:ER_ATTRIB_NET"] = delta_net_attrib
+                    failed |= abs(delta_net_attrib) > tolerancia_absoluta
+                # Conciliación independiente de atribuciones del resultado integral total
+                comp_attrib_controls = [c for k, c in income_controls.items() if k in {"ER_ATTRIB_COMP_PARENT", "ER_ATTRIB_COMP_NCI"}]
+                if comp_attrib_controls and "ER_COMPREHENSIVE" in income_controls:
+                    total_comp_attrib = sum(value(c, year) for c in comp_attrib_controls)
+                    tci_printed = value(income_controls["ER_COMPREHENSIVE"], year)
+                    delta_comp_attrib = round(total_comp_attrib - tci_printed, 2)
+                    result.diferencias[f"{year}:ER_ATTRIB_COMP"] = delta_comp_attrib
+                    failed |= abs(delta_comp_attrib) > tolerancia_absoluta
+                # Conciliación de la ecuación de resultado integral (Neto + ORI = TCI)
+                if "ER_OCI" in income_controls and "ER_COMPREHENSIVE" in income_controls:
+                    oci_val = value(income_controls["ER_OCI"], year)
+                    tci_val = value(income_controls["ER_COMPREHENSIVE"], year)
+                    delta_tci = round(income_sums["ER_NET"] + oci_val - tci_val, 2)
+                    result.diferencias[f"{year}:ER_TCI_EQUATION"] = delta_tci
+                    failed |= abs(delta_tci) > tolerancia_absoluta
+
+        except (ValueError, TypeError) as exc:
+            reasons.append(str(exc))
+    if failed:
+        result.estado = "fallida"
+        reasons.append("El detalle no reproduce los controles por sección y período.")
+        result.totales_finales_validos = False
+    elif not reasons:
+        result.estado = "certificada"
+        result.totales_finales_validos = True
+        if income_controls:
+            result.resultado_ejercicio = result.totales_calculados[f"{periodo_actual}:ER_NET"]
+            result.tipo_resultado = "utilidad" if result.resultado_ejercicio >= 0 else "perdida"
+        reasons.append("Detalle, clasificación, secciones y ecuación acreditados en todos los períodos explícitos.")
+    return result
 
 
 def certificar_totales_clasificados(
@@ -2025,6 +2746,7 @@ PATRON_TOTAL = re.compile(
     r'^patrimonio\s+atribuible\s+a\b.*$|'
     r'^(?:resultado(?: del ejercicio| [\x22\x27]?(?:positivo|negativo))?|utilidad(?: neta| del ejercicio)?|'
     r'perdida(?: o ganancia| neta| neto| del ejercicio)?)$|'
+    r'^p[eé]rdidas?\s*(?:/|y|o)\s*ganancias?$|'
     r'^ganancia(?:\s*\(p[eé]rdida\))?$|'
     r'^ganancia\s*\(p[eé]rdida\)\s*,?\s*antes\s+de\s+impuestos?$|'
     r'^ganancia(?:\s*\(p[eé]rdida\))?\s+(?:bruta|antes\s+de\s+impuestos?|'
@@ -2438,16 +3160,13 @@ def parsear_linea(
         and len(montos_tokens) >= len(active_years) + 1
     ):
         note_token = montos_tokens[0]
-        note_value = parsear_monto(note_token, separador_miles)
         if (
             re.fullmatch(
-                r"(?:\d{1,2}(?:\.\d{1,2}){0,2}|"
-                r"\(\d{1,2}(?:\.\d{1,2}){0,2}\)|"
-                r"\[\d{1,2}(?:\.\d{1,2}){0,2}\])",
+                r"(?:\d{1,4}(?:\.\d{1,3}){0,3}|"
+                r"\(\d{1,4}(?:\.\d{1,3}){0,3}\)|"
+                r"\[\d{1,4}(?:\.\d{1,3}){0,3}\])",
                 note_token,
             )
-            and note_value is not None
-            and abs(float(note_value)) <= 99
         ):
             montos_tokens = montos_tokens[1:]
 
@@ -2467,6 +3186,12 @@ def parsear_linea(
             and valores[2] not in (None, 0)
         ):
             montos_tokens.pop(1)
+
+    if periodo_comparativo and len(montos_tokens) >= 3 and re.fullmatch(
+        r"\d{1,2}(?:\.\d{1,2}){2,}", montos_tokens[-1],
+    ):
+        # Referencia de nota (6.1.2, 12.3.1), no un tercer período monetario.
+        montos_tokens.pop()
 
     # Dynamic year/currency mapping
     if (years or currencies) and montos_tokens:
@@ -2514,12 +3239,6 @@ def parsear_linea(
                     montos_periodos[f"anterior_{curr}"] = montos_periodos["anterior"]
                 if monto_principal is not None:
                     montos_periodos[curr] = monto_principal
-
-    if periodo_comparativo and len(montos_tokens) >= 3 and re.fullmatch(
-        r"\d{1,2}(?:\.\d{1,2}){2,}", montos_tokens[-1],
-    ):
-        # Referencia de nota (6.1.2, 12.3.1), no un tercer período monetario.
-        montos_tokens.pop()
 
     if not montos_periodos and periodo_comparativo and len(montos_tokens) >= 2:
         actual_token, anterior_token = montos_tokens[-2:]
@@ -2936,16 +3655,29 @@ def marcar_subtotales_jerarquicos(cuentas: list[CuentaRaw]) -> int:
     # De abajo hacia arriba: los padres internos no se vuelven a sumar.
     for i in range(len(cuentas) - 1, -1, -1):
         parent = cuentas[i]
-        prefix = codes[i]
-        if parent.es_total or not prefix or not parent.montos_columnas:
+        raw_prefix = codes[i]
+        if parent.es_total or not raw_prefix or not parent.montos_columnas:
             continue
+        sig_prefix = raw_prefix.rstrip("0")
+        prefix = sig_prefix if len(sig_prefix) >= 1 and len(raw_prefix) > len(sig_prefix) else raw_prefix
         children = []
+        # Buscar hacia adelante (padre antes de hijos)
         for j in range(i + 1, len(cuentas)):
             child_code = codes[j]
             if not child_code or not child_code.startswith(prefix) or len(child_code) <= len(prefix):
                 break
             if not cuentas[j].es_total:
                 children.append(cuentas[j])
+        # Si no hay hijos adelante y el padre tiene evidencia estructural de total o grupo,
+        # buscar hacia atrás (padre después de hijos)
+        es_nombre_total = bool(PATRON_TOTAL.match(parent.nombre)) or parent.nombre.strip().upper().startswith(("TOTAL", "SUBTOTAL"))
+        if not children and (es_nombre_total or len(raw_prefix) > len(prefix)):
+            for j in range(i - 1, -1, -1):
+                child_code = codes[j]
+                if not child_code or not child_code.startswith(prefix) or len(child_code) <= len(prefix):
+                    break
+                if not cuentas[j].es_total:
+                    children.append(cuentas[j])
         if not children or any(not c.montos_columnas for c in children):
             continue
         sums = {k: sum(c.montos_columnas.get(k, 0) for c in children) for k in RAW_MONETARY_COLUMNS}
@@ -2970,6 +3702,44 @@ def marcar_subtotales_jerarquicos(cuentas: list[CuentaRaw]) -> int:
             parent.columnas_derivadas = [*parent.columnas_derivadas, "subtotal_jerarquico"]
             marked += 1
     return marked
+
+
+
+def anotar_jerarquia_contable(cuentas: list[CuentaRaw]) -> int:
+    """Asocia cada detalle con su subtotal padre más cercano por código.
+
+    La anotación aporta contexto a la clasificación, pero no cambia nombres,
+    importes ni la condición de control de los subtotales.
+    """
+    def code(cuenta: CuentaRaw) -> str:
+        if cuenta.codigo:
+            return re.sub(r"[^0-9]", "", str(cuenta.codigo))
+        match = re.match(r"^(\d+)\s*[-–—]\s*\D", cuenta.nombre)
+        return match.group(1) if match else ""
+
+    parent_stack: list[tuple[str, CuentaRaw]] = []
+    annotated = 0
+    for cuenta in cuentas:
+        current_code = code(cuenta)
+        if not current_code:
+            continue
+        parent_stack = [
+            (prefix, parent) for prefix, parent in parent_stack
+            if current_code.startswith(prefix)
+        ]
+        if cuenta.es_total:
+            parent_stack.append((current_code, cuenta))
+            continue
+        candidates = [
+            (prefix, parent) for prefix, parent in parent_stack
+            if len(current_code) > len(prefix) and current_code.startswith(prefix)
+        ]
+        if not candidates:
+            continue
+        _, parent = max(candidates, key=lambda item: len(item[0]))
+        cuenta.jerarquia_contable = parent.nombre
+        annotated += 1
+    return annotated
 
 
 def _error_identidades_cuenta(cuenta: CuentaRaw) -> float:
@@ -3282,6 +4052,11 @@ class ParserPDF:
                 advertencias=[f"VALIDACIÓN FALLIDA: {msg}"]
             )
 
+        # El preflight se ejecuta al inicio, pero sólo bloquea documentos cuya
+        # extracción realmente requiere OCR. Un PDF con texto nativo no debe
+        # depender de Tesseract.
+        ocr_runtime = verificar_runtime_ocr()
+
         # Sprint 31 — Análisis documental ANTES del parseo.
         # Lee solo las primeras páginas, produce un FormatSignature y decide
         # extractor vía ExtractorFactory. NO cambia la extracción: si el
@@ -3303,11 +4078,22 @@ class ParserPDF:
                     advertencias_iniciales.append(w)
 
         self._ocr_advertencias: list[str] = []
+        self._ocr_timeout_pages: set[int] = set()
         self._extraction_method = "text"
         self._extraction_confidence = 1.0
+        header_lines = extraer_encabezados_documento_pdf(path)
         lineas, requirio_ocr, rotacion = self._extraer_lineas(path, context)
 
         if not lineas:
+            razones_ocr = []
+            if requirio_ocr:
+                razones_ocr.append(
+                    "OCR requerido, pero la extracción produjo 0 cuentas editables."
+                )
+                if not ocr_runtime.get("available"):
+                    razones_ocr.append(
+                        str(ocr_runtime.get("error") or "Runtime OCR no disponible.")
+                    )
             return ResultadoParseo(
                 archivo=path.name, formato_codigo=FormatoCodigo.SIN_CODIGO,
                 separador_miles='.', requirio_ocr=requirio_ocr,
@@ -3317,6 +4103,11 @@ class ParserPDF:
                     + ["No se pudo extraer texto (ni nativo ni OCR)"]
                 ),
                 document_context=documento_ctx,
+                certificacion_extraccion=CertificacionExtraccion(
+                    estado="fallida" if razones_ocr else "no_evaluable",
+                    metodo="ocr_runtime_gate" if razones_ocr else "",
+                    razones=razones_ocr,
+                ),
             )
 
         pre_years, _ = detectar_años_y_monedas(lineas)
@@ -3475,7 +4266,18 @@ class ParserPDF:
                 )
 
         # Scan years and currencies dynamically
-        years, currencies = detectar_años_y_monedas(lineas)
+        parsed_years, parsed_currencies = detectar_años_y_monedas(lineas)
+        header_years, header_currencies = detectar_años_y_monedas(header_lines)
+        # No unir años encontrados por rutas distintas: una mención histórica
+        # en texto auxiliar no puede convertirse en un tercer período.
+        years = (parsed_years or header_years)[:2]
+        currencies = list(dict.fromkeys(
+            parsed_currencies or header_currencies
+        ))
+        monetary_units = list(dict.fromkeys(
+            detectar_unidades_monetarias(lineas)
+            + detectar_unidades_monetarias(header_lines)
+        ))
         leading_note_column = detectar_columna_nota_comparativa(lineas, years)
 
         # Pre-process lines to associate vertical labels and amounts
@@ -3487,9 +4289,17 @@ class ParserPDF:
             self._extraction_confidence,
         )
         cuentas = []
+        longitudes = sorted(len(re.sub(r"\s+", " ", line).strip()) for line in lineas if line.strip())
+        mediana_longitud = (
+            float(longitudes[len(longitudes) // 2]) if longitudes else 0.0
+        )
+        lineas_sospechosas = 0
         for i, l in enumerate(lineas):
             sub_lines = split_side_by_side(l)
             for sub_l in sub_lines:
+                razones_sospecha = detectar_linea_sospechosa(
+                    sub_l, mediana_longitud=mediana_longitud,
+                )
                 c = parsear_linea(sub_l, i, formato_codigo, separador, confianza,
                                   column_order=column_order,
                                   periodo_comparativo=periodo_comparativo,
@@ -3497,14 +4307,41 @@ class ParserPDF:
                                   currencies=currencies,
                                   leading_note_column=leading_note_column)
                 if c:
+                    marcar_cuenta_sospechosa(c, sub_l, razones_sospecha)
+                    lineas_sospechosas += int(c.requiere_revision_extraccion)
                     cuentas.append(c)
+                elif "multiples_glosas_separadas_por_monto" in razones_sospecha:
+                    # La línea fusionada no se divide ni se adivina. Se conserva
+                    # como evidencia revisable, sin monto clasificable.
+                    cuentas.append(CuentaRaw(
+                        linea=i,
+                        codigo=None,
+                        nombre=re.sub(r"\s+", " ", sub_l).strip(),
+                        monto=None,
+                        confianza_extraccion=min(confianza, 0.25),
+                        requiere_revision_extraccion=True,
+                        razones_revision_extraccion=razones_sospecha,
+                    ))
+                    lineas_sospechosas += 1
+
+        if lineas_sospechosas:
+            advertencias.append(
+                f"Se detectaron {lineas_sospechosas} línea(s) sospechosa(s) o "
+                "fusionada(s). Se bloqueó su clasificación automática y requieren revisión."
+            )
 
         cuentas, cuentas_partidas = fusionar_cuentas_partidas(cuentas)
         jerarquicos = marcar_subtotales_jerarquicos(cuentas)
+        detalles_jerarquicos = anotar_jerarquia_contable(cuentas)
         if jerarquicos:
             advertencias.append(
                 f"Se reconocieron {jerarquicos} subtotales jerárquicos por código y "
                 "sumas de sus cuentas. Se conservan como controles, sin duplicar el detalle."
+            )
+        if detalles_jerarquicos:
+            advertencias.append(
+                f"Se asociaron {detalles_jerarquicos} cuentas de detalle con su "
+                "subtotal jerárquico para aportar contexto a la clasificación."
             )
         if cuentas_partidas:
             advertencias.append(
@@ -3529,6 +4366,7 @@ class ParserPDF:
                 cuenta.codigo
                 or cuenta.monto is not None
                 or bool(cuenta.montos_periodos)
+                or cuenta.requiere_revision_extraccion
                 or any(
                     float(value or 0.0) != 0.0
                     for value in cuenta.montos_columnas.values()
@@ -3569,6 +4407,31 @@ class ParserPDF:
             if certificacion_clasificada.estado != "no_evaluable":
                 certificacion = certificacion_clasificada
 
+        if requirio_ocr and not ocr_runtime.get("available"):
+            certificacion.estado = "fallida"
+            certificacion.metodo = "ocr_runtime_gate"
+            certificacion.razones.append(
+                str(ocr_runtime.get("error") or "Runtime OCR no disponible.")
+            )
+        if requirio_ocr and not any(
+            cuenta.monto is not None or cuenta.montos_columnas
+            for cuenta in cuentas if not cuenta.es_total
+        ):
+            certificacion.estado = "fallida"
+            certificacion.metodo = "ocr_runtime_gate"
+            certificacion.razones.append(
+                "OCR requerido, pero la extracción produjo 0 cuentas editables."
+            )
+        if self._ocr_timeout_pages:
+            paginas = ", ".join(
+                str(page) for page in sorted(self._ocr_timeout_pages)
+            )
+            certificacion.estado = "timeout"
+            certificacion.metodo = "ocr_page_timeout"
+            certificacion.razones.append(
+                "Procesamiento OCR incompleto por timeout en página(s): " + paginas
+            )
+
         resultado = ResultadoParseo(
             archivo=path.name,
             formato_codigo=formato_codigo,
@@ -3578,9 +4441,12 @@ class ParserPDF:
             cuentas=cuentas,
             advertencias=advertencias,
             document_context=documento_ctx,
+            periodos_detectados=years,
+            monedas_detectadas=currencies,
+            unidades_monetarias=monetary_units,
             certificacion_extraccion=certificacion,
         )
-        if resultado.certificacion_extraccion.estado == "fallida":
+        if resultado.certificacion_extraccion.estado in {"fallida", "timeout"}:
             resultado.advertencias.extend(resultado.certificacion_extraccion.razones)
         self._anotar_extractor(resultado, detectado_extractor)
         return resultado
@@ -3660,45 +4526,56 @@ class ParserPDF:
                 if not texto.strip():
                     continue
                 if _pagina_comparativa_con_texto_nativo_corrupto(page, texto):
-                    tabla_coordenadas, detected_centers = (
-                        _extraer_tabla_balance_por_coordenadas(
-                            page, coordinate_centers,
+                    cid_corrupto = len(re.findall(
+                        r"\(cid:\d+\)", texto, flags=re.I,
+                    )) >= 20
+                    # Los marcadores CID no contienen letras recuperables por
+                    # coordenadas. Se omite esa reconstrucción para no aceptar
+                    # glosas ilegibles como si fueran texto contable válido.
+                    if not cid_corrupto:
+                        tabla_coordenadas, detected_centers = (
+                            _extraer_tabla_balance_por_coordenadas(
+                                page, coordinate_centers,
+                            )
                         )
-                    )
-                    if len(tabla_coordenadas) >= 5 and detected_centers:
-                        lineas.extend(tabla_coordenadas)
-                        coordinate_centers = detected_centers
-                        self._extraction_method = "native_corrupt_coordinates"
-                        self._extraction_confidence = min(
-                            self._extraction_confidence, 0.75,
-                        )
-                        self._ocr_advertencias.append(
-                            f"Página {page_number}: el texto nativo estaba "
-                            "fragmentado y la tabla se reconstruyó desde sus "
-                            "coordenadas."
-                        )
-                        continue
-                    reconstructed = _reconstruir_lineas_nativas_fragmentadas(page)
-                    if len(reconstructed) >= 5:
-                        lineas.extend(reconstructed)
-                        self._extraction_method = "native_fragment_reconstruction"
-                        self._extraction_confidence = min(
-                            self._extraction_confidence, 0.75,
-                        )
-                        self._ocr_advertencias.append(
-                            f"Página {page_number}: se reconstruyó el texto "
-                            "comparativo desde las coordenadas nativas del PDF."
-                        )
-                        coordinate_centers = None
-                        continue
+                        if len(tabla_coordenadas) >= 5 and detected_centers:
+                            lineas.extend(tabla_coordenadas)
+                            coordinate_centers = detected_centers
+                            self._extraction_method = "native_corrupt_coordinates"
+                            self._extraction_confidence = min(
+                                self._extraction_confidence, 0.75,
+                            )
+                            self._ocr_advertencias.append(
+                                f"Página {page_number}: el texto nativo estaba "
+                                "fragmentado y la tabla se reconstruyó desde sus "
+                                "coordenadas."
+                            )
+                            continue
+                        reconstructed = _reconstruir_lineas_nativas_fragmentadas(page)
+                        if len(reconstructed) >= 5:
+                            lineas.extend(reconstructed)
+                            self._extraction_method = "native_fragment_reconstruction"
+                            self._extraction_confidence = min(
+                                self._extraction_confidence, 0.75,
+                            )
+                            self._ocr_advertencias.append(
+                                f"Página {page_number}: se reconstruyó el texto "
+                                "comparativo desde las coordenadas nativas del PDF."
+                            )
+                            coordinate_centers = None
+                            continue
                     recovered = self._ocr_pagina_tabular(path, page_number)
                     if len(recovered) >= 5:
                         lineas.extend(recovered)
                         uso_ocr_parcial = True
-                        self._extraction_method = "partial_ocr_comparative"
+                        self._extraction_method = (
+                            "partial_ocr_cid_mapping"
+                            if cid_corrupto else "partial_ocr_comparative"
+                        )
                         self._ocr_advertencias.append(
-                            f"Página {page_number}: el texto nativo comparativo "
-                            "estaba fragmentado y se recuperó mediante OCR tabular."
+                            f"Página {page_number}: el texto nativo "
+                            f"{'usaba un mapa CID ilegible' if cid_corrupto else 'comparativo estaba fragmentado'} "
+                            "y se recuperó mediante OCR tabular."
                         )
                         coordinate_centers = None
                         continue
@@ -3765,6 +4642,7 @@ class ParserPDF:
                     timeout=OCR_PAGE_TIMEOUT_SECONDS,
                 )
             except subprocess.TimeoutExpired:
+                self._ocr_timeout_pages.add(page_number)
                 self._ocr_advertencias.append(
                     f"Página {page_number}: la recuperación OCR selectiva excedió "
                     f"{OCR_PAGE_TIMEOUT_SECONDS} segundos."
@@ -3780,7 +4658,14 @@ class ParserPDF:
             images = sorted(tmpdir_path.glob(f"pg{page_number}*.png"))
             if not images:
                 return []
-            texto = ocr_pagina(images[0], 0, psm=4)
+            timeout_events: list[str] = []
+            texto = ocr_pagina(
+                images[0], 0, psm=4,
+                timeout_events=timeout_events, page_number=page_number,
+            )
+            if not texto.strip() and timeout_events:
+                self._ocr_timeout_pages.add(page_number)
+                self._ocr_advertencias.extend(timeout_events)
             return [
                 normalizar_linea_ocr_tabla(line)
                 for line in texto.splitlines()
@@ -3822,6 +4707,7 @@ class ParserPDF:
                         capture_output=True, timeout=OCR_PAGE_TIMEOUT_SECONDS
                     )
                 except subprocess.TimeoutExpired:
+                    self._ocr_timeout_pages.add(pagina)
                     self._ocr_advertencias.append(
                         f"Página {pagina}: no pudo rasterizarse dentro de "
                         f"{OCR_PAGE_TIMEOUT_SECONDS} segundos y fue omitida."
@@ -3854,7 +4740,11 @@ class ParserPDF:
                         rot = detectar_rotacion_heuristica(img_path)
                     rotacion_global = rot
 
-                texto = ocr_pagina(img_path, rotacion_global)
+                page_timeout_events: list[str] = []
+                texto = ocr_pagina(
+                    img_path, rotacion_global,
+                    timeout_events=page_timeout_events, page_number=pagina,
+                )
                 texto_principal = texto
                 words_tsv = ocr_pagina_tsv(img_path, rotacion_global)
                 tabla_coordenadas_usada = False
@@ -3880,7 +4770,10 @@ class ParserPDF:
                 if tabla_coordenadas_usada and _tabla_ocr_necesita_recuperacion(
                     texto.splitlines(),
                 ):
-                    texto_tabla = ocr_pagina(img_path, rotacion_global, psm=4)
+                    texto_tabla = ocr_pagina(
+                        img_path, rotacion_global, psm=4,
+                        timeout_events=page_timeout_events, page_number=pagina,
+                    )
                     recovered, replacements = recuperar_filas_tabla_ocr(
                         texto.splitlines(), texto_tabla,
                     )
@@ -3896,7 +4789,10 @@ class ParserPDF:
                     not tabla_coordenadas_usada
                     and _ocr_requiere_alternativa(texto, pagina == n_paginas)
                 ):
-                    texto_tabla = ocr_pagina(img_path, rotacion_global, psm=4)
+                    texto_tabla = ocr_pagina(
+                        img_path, rotacion_global, psm=4,
+                        timeout_events=page_timeout_events, page_number=pagina,
+                    )
                     recovered, replacements = recuperar_filas_tabla_ocr(
                         texto.splitlines(), texto_tabla,
                     )
@@ -3920,6 +4816,9 @@ class ParserPDF:
                         f"Página {pagina}: OCR sin texto utilizable; revise que el "
                         "documento procesado esté completo."
                     )
+                if not texto.strip() and page_timeout_events:
+                    self._ocr_timeout_pages.add(pagina)
+                    self._ocr_advertencias.extend(page_timeout_events)
                 lineas.extend(texto.split('\n'))
 
         return lineas, True, rotacion_global or 0
@@ -4014,8 +4913,28 @@ def parsear_excel(file) -> list[CuentaRaw]:
             ))
         return accounts
 
-    # Helper to detect year and currency for a column
-    # Scan the top 15 rows of this column and its immediate left neighbor
+    # El conjunto global proviene sólo de cabeceras relevantes y limita el
+    # libro a dos períodos. Así una fecha histórica de una nota no crea una
+    # tercera columna contable.
+    header_lines = [
+        " ".join(
+            str(value).strip() for value in df.iloc[row_idx].tolist()
+            if pd.notna(value) and str(value).strip()
+        )
+        for row_idx in range(min(15, df.shape[0]))
+    ]
+    valid_years, _ = detectar_años_y_monedas(header_lines)
+    note_columns: set[int] = set()
+    for col_idx in range(df.shape[1]):
+        for row_idx in range(min(15, df.shape[0])):
+            value = df.iloc[row_idx, col_idx]
+            if pd.notna(value) and re.fullmatch(
+                r"\s*(?:nota|note|n[°ºo.]*)\s*", _sin_acentos(str(value)), re.I,
+            ):
+                note_columns.add(col_idx)
+
+    # Helper to detect year and currency for a column.
+    # Scan the top 15 rows of this column and its immediate left neighbor.
     col_meta = {}
     for col_idx in range(df.shape[1]):
         year = None
@@ -4031,18 +4950,18 @@ def parsear_excel(file) -> list[CuentaRaw]:
                 val_str = str(val).strip().lower()
 
                 # Check year
-                year_match = re.search(r'\b(20\d{2})\b', val_str)
-                if year_match and not year:
+                year_match = re.search(r'\b((?:19|20)\d{2})\b', val_str)
+                if (
+                    year_match and year_match.group(1) in valid_years
+                    and not year
+                ):
                     year = year_match.group(1)
-                elif 'actual' in val_str and not year:
-                    year = 'actual'
-                elif 'anterior' in val_str and not year:
-                    year = 'anterior'
-                elif 'acumulado' in val_str and not year:
-                    year = 'acumulado'
 
                 # Check currency
-                if ('usd' in val_str or 'dolar' in val_str or 'us$' in val_str) and not currency:
+                if (
+                    'usd' in val_str or 'dolar' in val_str or 'dólar' in val_str
+                    or 'us$' in val_str
+                ) and not currency:
                     currency = 'USD'
                 elif ('clp' in val_str or 'peso' in val_str or 'clp$' in val_str) and not currency:
                     currency = 'CLP'
@@ -4094,6 +5013,8 @@ def parsear_excel(file) -> list[CuentaRaw]:
         for col_idx, val in enumerate(vals):
             if pd.isna(val) or not isinstance(val, (int, float)) or isinstance(val, bool):
                 continue
+            if col_idx in note_columns:
+                continue
             if codigo and str(val) == codigo:
                 continue
             if col_idx == 0 and isinstance(val, int) and val < 500:
@@ -4120,7 +5041,10 @@ def parsear_excel(file) -> list[CuentaRaw]:
                 col_name += f"_{currency}"
             montos_columnas[col_name] = val_f
 
-        detected_years = sorted(list({col_meta[c][0] for c in col_meta if col_meta[c][0] is not None}), reverse=True)
+        detected_years = sorted(
+            {col_meta[c][0] for c in col_meta if col_meta[c][0] is not None},
+            reverse=True,
+        )[:2]
         if detected_years:
             if "actual" not in montos_periodos and len(detected_years) >= 1:
                 montos_periodos["actual"] = montos_periodos.get(detected_years[0], 0.0)

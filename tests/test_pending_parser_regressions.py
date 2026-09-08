@@ -77,8 +77,13 @@ def test_documento_real_opcional(filename, pages, finals_valid, tmp_path):
         assert cert.resultado_ejercicio == 9910945
         assert any(c.codigo == "2301001" and c.monto == 15201792 for c in result.cuentas)
     else:
-        assert cert.estado == "fallida"
-        assert cert.filas_inconsistentes
+        assert cert.estado == "parcial"
+        assert cert.filas_inconsistentes == [19]
+        assert cert.totales_finales_validos is True
+        assert any(
+            row["Fila"] == 19 and row["Revisar"] == "Creditos"
+            for row in cert.observaciones_auxiliares
+        )
     assert source.read_bytes() == content
 
 

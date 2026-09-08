@@ -57,7 +57,12 @@ def test_metadata_empresa_conserva_moneda_y_periodo_confirmados():
 
 def test_detectar_periodos_comparativos_ignora_etiquetas_narrativas():
     assert app_validacion._detectar_periodos_comparativos(
-        ["Estado de situación financiera", "Nota 2019 2018 acumulado"],
+        [
+            "Sociedad constituida en 1987 y reorganizada en 2010",
+            "Estado de situación financiera",
+            "Al 31 de diciembre de 2019 y 2018",
+            "Nota M$ M$",
+        ],
         2026,
     ) == ("2019", "2018")
 
@@ -85,7 +90,8 @@ def test_encabezado_pdf_escaneado_usa_ocr_para_detectar_periodos(monkeypatch):
     monkeypatch.setattr(
         app_validacion, "ocr_pagina",
         lambda _imagen, _rotacion, psm=6: (
-            "Estado de Situación Financiera\nNota 2018 2017\nM$ M$"
+            "Estado de Situación Financiera\n"
+            "Al 31 de diciembre de 2018 y 2017\nNota M$ M$"
         ),
     )
 

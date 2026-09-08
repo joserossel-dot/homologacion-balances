@@ -27,11 +27,13 @@ import math
 import os
 import re
 import time
+from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
 from datetime import date, datetime
 from io import BytesIO
 from html import escape
+from uuid import uuid4
 from document_scope import page_count, parse_pages, select_pdf, render_page
 from report_presentation import (
     complete_catalog, add_report_sheets, apply_depreciation_reclassification,
@@ -48,8 +50,6 @@ from catalog_aliases import (
     canonical_catalog_code, canonicalize_catalog, canonicalize_dictionary,
 )
 from gold_standard.builder import GoldBuilder
-from gold_standard.promotion import promote as promover_revisiones
-from gold_standard.runtime import RuntimeGoldStorage
 from gold_standard.runtime_manager import RuntimeManager
 from gold_standard.runtime_stats import RuntimeStatistics
 from reglas_especiales import (
@@ -60,7 +60,7 @@ from reglas_especiales import (
 from config.regex_rules import REGLAS_REGEX, REGLAS_COMPILADAS
 from parser_universal import (
     ParserPDF, CuentaRaw, OrigenColumna, RAW_MONETARY_COLUMNS,
-    FormatoCodigo, ResultadoParseo,
+    FormatoCodigo, ResultadoParseo, CertificacionExtraccion, certificar_clasificado_final,
     certificar_extraccion_columnas, detectar_años_y_monedas, ocr_pagina,
     parsear_excel,
 )
@@ -75,9 +75,31 @@ from extractor_metadata import extraer_metadata, MetadataEmpresa
 from account_qualification import qualify_cuentas as _safe_qualify_cuentas, \
     safe_mode_enabled as _safe_mode_enabled
 from persistence.neon_store import NeonKnowledgeStore
+from persistence import PersistenceSettings, build_persistence
+from persistence.contracts.knowledge import ValidationDecision
+from persistence.contracts.identity import (
+    AuthenticatedActor,
+    AuthenticationRequired,
+    AuthorizationDenied,
+    IdentityRole,
+    require_role,
+)
+from persistence.contracts.promotions import (
+    PromotionOutcomeRecord, PromotionPolicyRecord, PromotionPolicyRepository,
+)
+from persistence.contracts.processes import (
+    LocalProcessPersistence, PersistedProcess, ProcessPersistenceError,
+    ProcessScope,
+)
+from persistence.promotion_metadata import build_promotion_policy_record
 from reporting_integrity import (
     resultado_compatible, importe_resultado_homologado, conciliar_resultados,
     validar_reclasificacion_depreciacion,
+)
+from validation.classification_metrics import account_metrics, document_family, method_provenance
+from validation.prepost_balance import compare_pre_post
+from validation.promotion_policy import (
+    DEFAULT_EXPIRATION_DAYS,
 )
 
 
@@ -85,6 +107,1583 @@ MESES_SELECCION = [
     "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
     "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
 ]
+
+CERTIFIABLE_CONTENT_VERSION = "certifiable_rows.v1"
+AUTH_STAGING_VALUES = frozenset({"", "0", "false", "off", "disabled", "staging"})
+
+
+def _auth_enforced() -> bool:
+    """Indica si el despliegue exige una identidad entregada por un adaptador confiable."""
+    return os.getenv("AUTH_ENFORCEMENT", "staging").strip().lower() not in AUTH_STAGING_VALUES
+
+
+def _authenticated_actor() -> AuthenticatedActor | None:
+    """Lee sólo el contrato autenticado; no deriva identidades desde cabeceras o texto UI."""
+    actor = st.session_state.get("authenticated_actor")
+    return actor if isinstance(actor, AuthenticatedActor) else None
+
+
+def _normalize_required_role(role: str) -> IdentityRole:
+    """Compatibilidad transitoria: ``administrator`` pasa al rol canónico ``admin``."""
+    normalized = "admin" if str(role).strip().lower() == "administrator" else str(role).strip().lower()
+    if normalized not in {"analyst", "supervisor", "admin"}:
+        raise ValueError(f"Rol no soportado: {role}")
+    return normalized  # type: ignore[return-value]
+
+
+def _require_app_role(minimum: str) -> AuthenticatedActor | None:
+    """Default deny en modo autenticado; staging permanece explícitamente anónimo."""
+    actor = _authenticated_actor()
+    if _auth_enforced():
+        require_role(actor, _normalize_required_role(minimum))
+    return actor
+
+
+def _actor_audit_fields() -> dict[str, object]:
+    actor = _authenticated_actor()
+    if _auth_enforced() and actor is None:
+        raise AuthenticationRequired("Identidad autenticada obligatoria para registrar auditoría")
+    if actor is None:
+        return {"Actor": "", "Organización": "", "Roles": []}
+    return {
+        "Actor": actor.actor_id,
+        "Organización": actor.organization_id,
+        "Roles": sorted(actor.roles),
+    }
+
+
+def _promotion_source_reference(source_path: str | Path) -> str:
+    path = Path(source_path)
+    if not path.is_file():
+        raise FileNotFoundError(f"Fuente de promoción no encontrada: {path}")
+    return f"sha256:{hashlib.sha256(path.read_bytes()).hexdigest()}"
+
+
+def _promotion_subject_id(preview, source_reference: str) -> str:
+    """Identifica de forma estable el conjunto evaluado, sin usar texto libre."""
+    payload = preview.to_dict() if hasattr(preview, "to_dict") else dict(preview)
+    digest = hashlib.sha256(json.dumps(
+        {"preview": payload, "source_reference": source_reference},
+        ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")).hexdigest()
+    return f"gold-runtime-batch:{digest}"
+
+
+def _persistir_evaluacion_promocion(
+    *, preview, actor: AuthenticatedActor | None, evidence_confirmed: bool,
+    approved: bool, expiration_days: int,
+    repository: PromotionPolicyRepository, source_path: str | Path,
+) -> PromotionPolicyRecord:
+    """Evalúa y verifica la escritura durable antes de permitir una promoción."""
+    evaluation_id = str(uuid4())
+    source_reference = _promotion_source_reference(source_path)
+    evidence = ({
+        "source_document": source_reference,
+        "human_decision": f"actor:{actor.actor_id}",
+        "classification_reason": "policy:manual_supervisor",
+    } if evidence_confirmed and actor is not None else {})
+    record = build_promotion_policy_record(
+        subject_id=_promotion_subject_id(preview, source_reference),
+        actor=actor,
+        evidence=evidence,
+        conflicts=int(getattr(preview, "conflicts", 0)),
+        approved=bool(approved),
+        reversal_reference=f"promotion-policy:{evaluation_id}",
+        expires_in_days=int(expiration_days),
+        evaluation_id=evaluation_id,
+    )
+    saved = repository.save_promotion_policy_metadata(record)
+    durable = repository.get_promotion_policy_metadata(
+        record.evaluation_id, organization_id=record.organization_id,
+    )
+    if saved != record or durable != record:
+        raise RuntimeError(
+            "La evaluación de promoción no pudo verificarse en persistencia durable"
+        )
+    return record
+
+
+class PromotionStateInconsistent(RuntimeError):
+    """La aplicación Gold y su resultado durable no pueden reconciliarse."""
+
+
+def _promotion_error_text(error: BaseException | str) -> str:
+    """Normaliza el diagnóstico sin incluir trazas ni texto ilimitado."""
+    if isinstance(error, BaseException):
+        value = f"{type(error).__name__}: {str(error)}"
+    else:
+        value = str(error)
+    return " ".join(value.split())[:500] or "error de promoción no especificado"
+
+
+def _promotion_ids_from_result(result) -> tuple[str, ...]:
+    """Obtiene identificadores explícitos sin inferirlos desde montos o contadores."""
+    raw_ids = getattr(result, "promotion_ids", ())
+    if not raw_ids:
+        raw_id = getattr(result, "promotion_id", "")
+        raw_ids = (raw_id,) if raw_id else ()
+    return tuple(dict.fromkeys(
+        str(value).strip() for value in raw_ids if str(value).strip()
+    ))
+
+
+def _runtime_promotion_ids(
+    manager: RuntimeManager, policy: PromotionPolicyRecord,
+) -> tuple[str, ...]:
+    """Vincula el batch con los eventos PROMOTE escritos por RuntimeManager."""
+    return tuple(dict.fromkeys(
+        str(event.get("promotion_id") or "").strip()
+        for event in manager.get_history(limit=10000)
+        if event.get("accion") == "PROMOTE"
+        and event.get("origen") == policy.reversal_reference
+        and str(event.get("promotion_id") or "").strip()
+    ))
+
+
+def _persistir_outcome_promocion(
+    *, repository: PromotionPolicyRepository, policy: PromotionPolicyRecord,
+    status: str, promotion_ids: tuple[str, ...] = (), error: str | None = None,
+) -> PromotionOutcomeRecord:
+    """Anexa y relee el outcome terminal; nunca modifica la evaluación original."""
+    outcome = PromotionOutcomeRecord(
+        evaluation_id=policy.evaluation_id,
+        subject_id=policy.subject_id,
+        organization_id=policy.organization_id,
+        actor_id=policy.supervisor_actor_id,
+        status=status,  # type: ignore[arg-type]
+        occurred_at=datetime.now().astimezone(),
+        promotion_ids=tuple(promotion_ids),
+        error=error,
+    )
+    saved = repository.save_promotion_outcome(outcome)
+    durable = repository.get_promotion_outcome(
+        policy.evaluation_id, organization_id=policy.organization_id,
+    )
+    if saved != outcome or durable != outcome:
+        raise PromotionStateInconsistent(
+            "El resultado de la promoción no pudo verificarse en persistencia "
+            "durable. El subject queda bloqueado hasta reconciliación."
+        )
+    return outcome
+
+
+def _assert_promotion_subject_reconciled(
+    *, repository: PromotionPolicyRepository, subject_id: str,
+    organization_id: str,
+) -> None:
+    unresolved = repository.list_unresolved_promotion_evaluations(
+        subject_id, organization_id=organization_id,
+    )
+    if unresolved:
+        identifiers = ", ".join(record.evaluation_id for record in unresolved[:3])
+        raise PromotionStateInconsistent(
+            "Existe una promoción anterior sin outcome terminal durable para este "
+            f"subject ({identifiers}). Debe reconciliarse antes de reintentar."
+        )
+
+
+def _aplicar_promocion_durable(
+    *, preview, actor: AuthenticatedActor | None, evidence_confirmed: bool,
+    approved: bool, expiration_days: int,
+    repository: PromotionPolicyRepository | None, apply_callback,
+    promotion_ids_resolver=None,
+    source_path: str | Path | None = None,
+):
+    """Ejecuta la saga evaluación/aplicación/outcome con bloqueo fail-closed."""
+    if repository is None:
+        raise RuntimeError(
+            "La persistencia durable de promociones no está configurada"
+        )
+    if actor is None:
+        raise AuthenticationRequired(
+            "Se requiere un supervisor autenticado para aplicar una promoción"
+        )
+    resolved_source = source_path or _gold_benchmark_path()
+    source_reference = _promotion_source_reference(resolved_source)
+    subject_id = _promotion_subject_id(preview, source_reference)
+    _assert_promotion_subject_reconciled(
+        repository=repository, subject_id=subject_id,
+        organization_id=actor.organization_id,
+    )
+    record = _persistir_evaluacion_promocion(
+        preview=preview, actor=actor,
+        evidence_confirmed=evidence_confirmed, approved=approved,
+        expiration_days=expiration_days, repository=repository,
+        source_path=resolved_source,
+    )
+    if not record.allowed:
+        return record, None
+    try:
+        result = apply_callback(record)
+    except Exception as apply_error:
+        try:
+            _persistir_outcome_promocion(
+                repository=repository, policy=record, status="FAILED",
+                error=_promotion_error_text(apply_error),
+            )
+        except Exception as outcome_error:
+            raise PromotionStateInconsistent(
+                "La aplicación falló y tampoco fue posible persistir/releer su "
+                "outcome FAILED. El subject queda bloqueado hasta reconciliación."
+            ) from outcome_error
+        raise
+
+    resolver = promotion_ids_resolver or (
+        lambda applied_result, _policy: _promotion_ids_from_result(applied_result)
+    )
+    try:
+        promotion_ids = tuple(resolver(result, record))
+        if not promotion_ids:
+            raise ValueError("la aplicación no expuso promotion_id durable")
+    except Exception as resolution_error:
+        try:
+            _persistir_outcome_promocion(
+                repository=repository, policy=record, status="INCONSISTENT",
+                error=_promotion_error_text(
+                    "No fue posible vincular la aplicación con promotion_id: "
+                    f"{type(resolution_error).__name__}: {str(resolution_error)}"
+                ),
+            )
+        finally:
+            raise PromotionStateInconsistent(
+                "La promoción pudo aplicarse, pero no se pudo vincular con un "
+                "promotion_id. El subject queda bloqueado hasta reconciliación."
+            ) from resolution_error
+
+    try:
+        _persistir_outcome_promocion(
+            repository=repository, policy=record, status="APPLIED",
+            promotion_ids=promotion_ids,
+        )
+    except Exception as outcome_error:
+        raise PromotionStateInconsistent(
+            "La promoción pudo aplicarse, pero su outcome APPLIED no quedó "
+            "verificado. El subject queda bloqueado hasta reconciliación."
+        ) from outcome_error
+    return record, result
+
+
+def _valor_digest_certificable(valor):
+    if isinstance(valor, (list, tuple)):
+        return [_valor_digest_certificable(item) for item in valor]
+    if isinstance(valor, dict):
+        return {str(key): _valor_digest_certificable(item)
+                for key, item in sorted(valor.items(), key=lambda pair: str(pair[0]))}
+    if valor is None:
+        return None
+    if hasattr(valor, "item"):
+        valor = valor.item()
+    try:
+        return None if bool(pd.isna(valor)) else valor
+    except (TypeError, ValueError):
+        return str(valor)
+
+
+def _digest_filas_certificables(df: pd.DataFrame, *, clasificacion: bool = False) -> str:
+    campos = ["linea", "codigo_original", "nombre_original", "monto",
+              "origen_columna", "es_total", "columnas_derivadas", "jerarquia_contable"]
+    for p_col in ("pagina", "page", "ubicacion"):
+        if p_col in df.columns and p_col not in campos:
+            campos.append(p_col)
+    for r_col in ("respaldo_documental", "decision_exclusion", "excluida", "origen"):
+        if r_col in df.columns and r_col not in campos:
+            campos.append(r_col)
+    campos += sorted(c for c in df.columns if str(c).startswith("monto_periodo_"))
+    campos += [c for c in RAW_MONETARY_COLUMNS if c in df.columns]
+    if clasificacion:
+        if "codigo_clasificado" in df.columns and "codigo_clasificado" not in campos:
+            campos.append("codigo_clasificado")
+        if "requiere_revision" in df.columns and "requiere_revision" not in campos:
+            campos.append("requiere_revision")
+    filas = []
+    for _, row in df.iterrows():
+        item = {}
+        for campo in campos:
+            item[campo] = _valor_digest_certificable(row.get(campo))
+        filas.append(item)
+    filas.sort(key=lambda item: json.dumps(item, ensure_ascii=False, sort_keys=True, default=str))
+    payload = {"version": CERTIFIABLE_CONTENT_VERSION, "rows": filas}
+    return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True,
+        separators=(",", ":"), default=str).encode("utf-8")).hexdigest()
+
+
+
+def _safe_session_get(key: str, default=None):
+    """Obtiene un valor de st.session_state de forma segura, incluso si está mockeado como SimpleNamespace."""
+    state = getattr(st, "session_state", None)
+    if state is None:
+        return default
+    if hasattr(state, "get"):
+        val = state.get(key, default)
+        return val if val is not None else default
+    return getattr(state, key, default)
+
+
+def _detectar_bloquear_colision_homonimo(
+    filename: str,
+    file_digest: str,
+    organization_id: str | None = None,
+) -> None:
+    """Detecta y bloquea colisiones de archivos homónimos con distinto contenido
+    dentro de la misma organización antes de sobrescribir registros consumidores
+    (resultados, snapshots, certificaciones y file_metadata)."""
+    if not filename or not file_digest:
+        return
+    existing_meta = (_safe_session_get("file_metadata") or {}).get(filename)
+    if existing_meta:
+        prev_digest = existing_meta.get("file_digest")
+        prev_org = existing_meta.get("organization_id")
+        if prev_digest and prev_digest != file_digest:
+            if not organization_id or not prev_org or prev_org == organization_id:
+                msg = (
+                    f"Colisión de archivo homónimo detectada para '{filename}': "
+                    f"existe un documento previo con distinta huella ({prev_digest[:8]}... vs {file_digest[:8]}...) "
+                    f"en la organización '{prev_org or organization_id}'. "
+                    f"Operación bloqueada para evitar sobrescritura de registros y evidencia."
+                )
+                if hasattr(st, "error"):
+                    st.error(msg)
+                raise ValueError(msg)
+
+    existing_snap = (_safe_session_get("classified_source_snapshots") or {}).get(filename)
+    if existing_snap and existing_snap.get("file_digest"):
+        prev_digest = existing_snap.get("file_digest")
+        if prev_digest != file_digest:
+            msg = (
+                f"Colisión de snapshot homónimo detectada para '{filename}': "
+                f"la huella del documento actual ({file_digest[:8]}...) difiere del snapshot registrado ({prev_digest[:8]}...). "
+                f"Operación bloqueada para evitar sobrescritura de evidencia."
+            )
+            if hasattr(st, "error"):
+                st.error(msg)
+            raise ValueError(msg)
+
+
+def _obtener_huella_archivo_real(
+    filename: str,
+    *,
+    expected_digest: str | None = None,
+    organization_id: str | None = None,
+    source_path: str | Path | None = None,
+    actor: AuthenticatedActor | None = None,
+) -> tuple[str | None, str]:
+    """Lee exclusivamente una fuente registrada, autorizada y de versión exacta.
+
+    El nombre selecciona un registro de la sesión, nunca una ruta implícita.
+    Toda salida disponible acredita bytes leídos, organización y SHA-256.
+    """
+    if not filename or not str(filename).strip():
+        return None, "no_disponible"
+    fn = str(filename).strip()
+    effective_actor = actor or _authenticated_actor()
+    if not isinstance(effective_actor, AuthenticatedActor):
+        return None, "no_autorizada"
+    require_role(effective_actor, "analyst")
+    org = effective_actor.organization_id
+    if organization_id is not None and organization_id != org:
+        return None, "no_autorizada"
+
+    # Recuperar la ejecución mediante el servicio que comprueba organización.
+    cached = (_safe_session_get("persisted_processes") or {}).get(fn)
+    service = None
+    document = None
+    if cached is not None:
+        service = _streamlit_process_service(effective_actor)
+        if service is None:
+            return None, "no_disponible"
+        recovered = service.get(cached.execution.execution_id, actor=effective_actor)
+        if recovered is None:
+            return None, "no_disponible"
+        document = recovered.document
+        if document.document_id != cached.document.document_id:
+            return None, "rechazada"
+
+    meta = (_safe_session_get("file_metadata") or {}).get(fn) or {}
+    doc_org = document.metadata.get("organization_id") if document else meta.get("organization_id")
+    version = document.sha256 if document else meta.get("file_digest")
+    if not doc_org or doc_org != org:
+        return None, "no_autorizada"
+    if not isinstance(version, str) or not re.fullmatch(r"[0-9a-f]{64}", version):
+        return None, "no_disponible"
+    if expected_digest is not None and expected_digest != version:
+        return None, "rechazada"
+    if document and meta:
+        if meta.get("organization_id", org) != org or meta.get("file_digest", version) != version:
+            return None, "rechazada"
+
+    def verify(content):
+        if not isinstance(content, (bytes, bytearray)):
+            return None, "rechazada"
+        actual = hashlib.sha256(content).hexdigest()
+        return (actual, "disponible") if actual == version else (None, "rechazada")
+
+    # La carga activa prevalece: una sustitución no cae al documento histórico.
+    uploads = []
+    for key in ("archivos", "uploaded_files", "document_scope_preview_file"):
+        value = _safe_session_get(key)
+        values = value if isinstance(value, (list, tuple)) else [value]
+        uploads.extend(obj for obj in values if getattr(obj, "name", None) == fn
+                       and hasattr(obj, "getvalue"))
+    if uploads:
+        try:
+            contents = [obj.getvalue() for obj in uploads]
+            hashes = {hashlib.sha256(content).hexdigest() for content in contents}
+        except (OSError, ValueError, TypeError):
+            return None, "no_disponible"
+        if len(hashes) != 1:
+            if expected_digest is not None:
+                matched = [content for content in contents
+                           if hashlib.sha256(content).hexdigest() == version]
+                if matched:
+                    return verify(matched[0])
+            return None, "ambiguo"
+        return verify(contents[0])
+
+    if document is not None:
+        try:
+            return verify(service.documents.read(document.document_id))
+        except (FileNotFoundError, KeyError, OSError):
+            return None, "no_disponible"
+        except ValueError:
+            return None, "rechazada"
+
+    raw = (_safe_session_get("raw_file_bytes") or {}).get((fn, org, version))
+    if raw is not None:
+        return verify(raw)
+
+    registered_path = meta.get("source_path")
+    if source_path is not None:
+        if not registered_path or Path(source_path).resolve() != Path(registered_path).resolve():
+            return None, "rechazada"
+    if not registered_path:
+        return None, "no_disponible"
+    try:
+        return verify(Path(registered_path).read_bytes())
+    except (OSError, ValueError):
+        return None, "no_disponible"
+
+
+def _vincular_certificacion_contenido(
+    certificacion,
+    df: pd.DataFrame,
+    *,
+    filename: str = "",
+    file_digest: str | None = None,
+    alcance: dict[str, Any] | None = None,
+    filas_evaluadas: int | None = None,
+    incorporaciones: list[dict[str, Any]] | None = None,
+    exclusiones: list[dict[str, Any]] | None = None,
+):
+    if certificacion is not None:
+        certificacion.contenido_certificado_version = CERTIFIABLE_CONTENT_VERSION
+        certificacion.contenido_certificado_digest = _digest_filas_certificables(
+            df, clasificacion=getattr(certificacion, "metodo", "") == "classified_final_detail",
+        )
+        certificacion.contenido_certificado_fecha = datetime.now().astimezone().isoformat()
+        resolved_filename = filename or str(df.attrs.get("filename", ""))
+        resolved_digest = file_digest or str(df.attrs.get("file_digest", ""))
+        source_path = getattr(df, "attrs", {}).get("source_path") or (
+            st.session_state.get("file_metadata", {}).get(resolved_filename, {}).get("source_path")
+        ) or (
+            st.session_state.get("file_sources", {}).get(resolved_filename)
+        )
+        actor = _authenticated_actor()
+        org_id = (
+            getattr(df, "attrs", {}).get("organization_id")
+            or st.session_state.get("file_metadata", {}).get(resolved_filename, {}).get("organization_id")
+            or (actor.organization_id if actor else None)
+        )
+
+        if not resolved_digest and resolved_filename:
+            try:
+                real_dig, _ = _obtener_huella_archivo_real(
+                    resolved_filename,
+                    expected_digest=None,
+                    organization_id=org_id,
+                    source_path=source_path,
+                    actor=actor,
+                )
+                if real_dig:
+                    resolved_digest = real_dig
+            except AuthorizationDenied:
+                pass
+
+        doc_identity = {
+            "filename": resolved_filename,
+            "file_digest": resolved_digest,
+        }
+        if source_path:
+            doc_identity["source_path"] = str(source_path)
+            st.session_state.setdefault("file_sources", {})[resolved_filename] = str(source_path)
+
+        if org_id:
+            doc_identity["organization_id"] = org_id
+
+        binding = {
+            "version": certificacion.contenido_certificado_version,
+            "digest": certificacion.contenido_certificado_digest,
+            "certified_at": certificacion.contenido_certificado_fecha,
+            "document_identity": doc_identity,
+            "scope": alcance or {},
+            "evaluated_rows_count": filas_evaluadas if filas_evaluadas is not None else len(df),
+            "incorporaciones": list(incorporaciones) if incorporaciones is not None else [],
+            "exclusiones": list(exclusiones) if exclusiones is not None else [],
+        }
+        df.attrs["certification_binding"] = binding
+        certificacion.certification_binding = binding
+    return certificacion
+
+
+def _restaurar_vinculo_certificacion(certificacion, df: pd.DataFrame, *, al_restaurar: bool = False):
+    """Restaura el vínculo primitivo conservado por la serialización de DataFrame."""
+    binding = dict(df.attrs.get("certification_binding") or {})
+    if not binding:
+        return certificacion
+
+    doc_id = binding.get("document_identity", {})
+    filename = doc_id.get("filename") or str(df.attrs.get("filename", ""))
+    expected_file_digest = doc_id.get("file_digest")
+    organization_id = (
+        doc_id.get("organization_id")
+        or st.session_state.get("file_metadata", {}).get(filename, {}).get("organization_id")
+    )
+    source_path = (
+        doc_id.get("source_path")
+        or getattr(df, "attrs", {}).get("source_path")
+        or st.session_state.get("file_metadata", {}).get(filename, {}).get("source_path")
+        or st.session_state.get("file_sources", {}).get(filename)
+    )
+
+    # 1. Comprobar que el contenido actual del DataFrame coincida con el digest sellado
+    current_content_digest = _digest_filas_certificables(
+        df, clasificacion=getattr(certificacion, "metodo", "") == "classified_final_detail" if certificacion else False,
+    )
+    if binding.get("digest") != current_content_digest:
+        # Alteración de contenido -> invalidar vínculo
+        if hasattr(df, "attrs"):
+            df.attrs.pop("certification_binding", None)
+        if certificacion is not None:
+            certificacion.certification_binding = None
+            certificacion.contenido_certificado_digest = None
+        return certificacion
+
+    # 2. Comprobar huella del archivo real exclusivamente desde fuente vinculada
+    msg_ausente = "El archivo original no está disponible para verificar su huella documental; certificación pendiente."
+    if filename:
+        try:
+            real_digest, estado_archivo = _obtener_huella_archivo_real(
+                filename,
+                expected_digest=expected_file_digest,
+                organization_id=organization_id,
+                source_path=source_path,
+                actor=_authenticated_actor(),
+            )
+        except AuthorizationDenied:
+            real_digest, estado_archivo = None, "denegado"
+
+        if estado_archivo == "disponible":
+            if expected_file_digest and real_digest != expected_file_digest:
+                # El archivo real en disco/sesión tiene una huella distinta (documento sustituido) -> invalidar
+                if hasattr(df, "attrs"):
+                    df.attrs.pop("certification_binding", None)
+                if certificacion is not None:
+                    certificacion.certification_binding = None
+                    certificacion.contenido_certificado_digest = None
+                    certificacion.estado = "fallida"
+                    certificacion.columnas_finales_validadas = False
+                    certificacion.razones = [f"El archivo real '{filename}' tiene una huella distinta a la certificada; evidencia rechazada."]
+                return certificacion
+
+            # Huella coincide: limpiar marca de pendiente de archivo fuente
+            binding.pop("estado_verificacion", None)
+            df.attrs["certification_binding"] = binding
+
+            if certificacion is not None:
+                if hasattr(certificacion, "razones") and certificacion.razones:
+                    certificacion.razones = [r for r in certificacion.razones if r != msg_ausente]
+
+                # Preservar estado acreditado y razones previas:
+                # - Una certificación fallida conserva su estado 'fallida' y sus razones.
+                # - Una certificación parcial conserva su estado 'parcial'.
+                # - Aportar nuevamente el archivo NO rehabilita por sí solo la emisión:
+                #   columnas_finales_validadas permanece False si no está certificada,
+                #   y al restaurar exige validación explícita para rehabilitar la emisión.
+                if certificacion.estado == "fallida":
+                    certificacion.columnas_finales_validadas = False
+                elif certificacion.estado == "parcial":
+                    certificacion.columnas_finales_validadas = False
+                elif al_restaurar:
+                    certificacion.columnas_finales_validadas = False
+
+        elif estado_archivo in ("rechazada", "rechazado", "alterado", "denegado", "no_autorizada", "ambiguo"):
+            # Evidencia rechazada, alterada o acceso no autorizado: invalidar vínculo y marcar fallida
+            if hasattr(df, "attrs"):
+                df.attrs.pop("certification_binding", None)
+            if certificacion is not None:
+                certificacion.certification_binding = None
+                certificacion.contenido_certificado_digest = None
+                certificacion.estado = "fallida"
+                certificacion.columnas_finales_validadas = False
+                motivo = "evidencia rechazada"
+                if estado_archivo == "denegado":
+                    motivo = "acceso denegado por organización no autorizada"
+                elif estado_archivo in ("rechazada", "rechazado"):
+                    motivo = "fuente no registrada o huella rechazada"
+                elif estado_archivo == "alterado":
+                    motivo = "el archivo fue alterado físicamente"
+                razon = f"Validación documental fallida para '{filename}': {motivo}."
+                certificacion.razones = list(certificacion.razones or [])
+                if razon not in certificacion.razones:
+                    certificacion.razones.append(razon)
+            return certificacion
+
+        else:
+            # Archivo no disponible: conservar evidencia como pendiente de verificación, sin habilitar certificación
+            binding["estado_verificacion"] = "pendiente_archivo_fuente"
+            df.attrs["certification_binding"] = binding
+            if certificacion is not None:
+                certificacion.contenido_certificado_version = binding.get("version")
+                certificacion.contenido_certificado_digest = binding.get("digest")
+                certificacion.contenido_certificado_fecha = binding.get("certified_at")
+                certificacion.certification_binding = binding
+
+                # Una certificación fallida conserva su estado 'fallida' y sus razones.
+                # La ausencia de fuente se registra como condición adicional.
+                # Si no era fallida, pasa a 'parcial'.
+                if certificacion.estado != "fallida":
+                    certificacion.estado = "parcial"
+                certificacion.columnas_finales_validadas = False
+                if hasattr(certificacion, "razones"):
+                    if msg_ausente not in certificacion.razones:
+                        certificacion.razones.append(msg_ausente)
+            return certificacion
+
+    # Restaurar atributos sellados en la certificación
+    if certificacion is not None:
+        certificacion.contenido_certificado_version = binding.get("version")
+        certificacion.contenido_certificado_digest = binding.get("digest")
+        certificacion.contenido_certificado_fecha = binding.get("certified_at")
+        certificacion.certification_binding = binding
+
+    return certificacion
+
+
+def _certificacion_coincide_contenido(certificacion, df: pd.DataFrame) -> bool:
+    _restaurar_vinculo_certificacion(certificacion, df)
+    if certificacion is None:
+        return False
+    if getattr(certificacion, "contenido_certificado_version", None) != CERTIFIABLE_CONTENT_VERSION:
+        return False
+    current_digest = _digest_filas_certificables(
+        df, clasificacion=getattr(certificacion, "metodo", "") == "classified_final_detail",
+    )
+    if getattr(certificacion, "contenido_certificado_digest", None) != current_digest:
+        return False
+    binding = df.attrs.get("certification_binding") or {}
+    if not binding or binding.get("digest") != current_digest:
+        return False
+    # Si la verificación de archivo está pendiente, no habilitar certificación (Condición 2)
+    if binding.get("estado_verificacion") == "pendiente_archivo_fuente":
+        return False
+    if getattr(certificacion, "estado", "") != "certificada" and not getattr(certificacion, "columnas_finales_validadas", False):
+        return False
+    # Validar coincidencia de identidad si está registrada en attrs
+    if df.attrs.get("filename") and binding.get("document_identity", {}).get("filename"):
+        if df.attrs.get("filename") != binding.get("document_identity", {}).get("filename"):
+            return False
+    if df.attrs.get("file_digest") and binding.get("document_identity", {}).get("file_digest"):
+        if df.attrs.get("file_digest") != binding.get("document_identity", {}).get("file_digest"):
+            return False
+    return True
+
+
+def _alcance_snapshot_clasificado(filename):
+    scope_confirmed = getattr(st.session_state, "document_scope_confirmed", None)
+    if scope_confirmed is None and hasattr(st.session_state, "get"):
+        scope_confirmed = st.session_state.get("document_scope_confirmed")
+    doc_pages = getattr(st.session_state, "document_pages", None)
+    if doc_pages is None and hasattr(st.session_state, "get"):
+        doc_pages = st.session_state.get("document_pages")
+    return (
+        dict(scope_confirmed or ()).get(filename),
+        tuple(dict(doc_pages or ()).get(filename) or ()),
+        tuple(_periodos_seleccionados()),
+    )
+
+
+def _es_certificacion_ocho_columnas(cert: Any) -> bool:
+    """Identifica si una certificación corresponde a un método de ocho columnas (PDF o Excel)."""
+    if not cert:
+        return False
+    metodo = str(getattr(cert, "metodo", "") or "").lower()
+    if any(k in metodo for k in ("8_columns", "8_amounts", "10_columns", "columnas", "ocr_coordinates", "coordinates")):
+        return True
+    totales_impresos = getattr(cert, "totales_impresos", {}) or {}
+    if any(k in totales_impresos for k in ("activo", "pasivo", "perdida", "ganancia")):
+        return True
+    totales_calculados = getattr(cert, "totales_calculados", {}) or {}
+    if any(k in totales_calculados for k in ("activo", "pasivo", "perdida", "ganancia")):
+        return True
+    return False
+
+
+def _guardar_snapshot_clasificado(filename, resultado):
+    certification = getattr(resultado, "certificacion_extraccion", None)
+    if certification is None:
+        return
+    metodo = getattr(certification, "metodo", "") or ""
+    f_digest = getattr(resultado, "file_digest", None) or (
+        (_safe_session_get("file_metadata") or {}).get(filename, {}).get("file_digest")
+    )
+    if f_digest:
+        _detectar_bloquear_colision_homonimo(filename, f_digest)
+    if metodo == "classified_totals":
+        st.session_state.setdefault("classified_source_snapshots", {})[filename] = {
+            "file_digest": f_digest,
+            "scope": _alcance_snapshot_clasificado(filename),
+            "accounts": deepcopy(resultado.cuentas),
+            "periods": list(getattr(resultado, "periodos_detectados", []) or []),
+            "currencies": list(getattr(resultado, "monedas_detectadas", []) or []),
+            "metodo": "classified_totals",
+        }
+    elif _es_certificacion_ocho_columnas(certification):
+        st.session_state.setdefault("classified_source_snapshots", {})[filename] = {
+            "file_digest": f_digest,
+            "scope": _alcance_snapshot_clasificado(filename),
+            "accounts": deepcopy(resultado.cuentas),
+            "periods": list(getattr(resultado, "periodos_detectados", []) or []),
+            "currencies": list(getattr(resultado, "monedas_detectadas", []) or []),
+            "metodo": metodo or "excel_8_columns",
+        }
+
+
+def _recertificar_balance_clasificado(filename, df, certification, *, force=False, catalogo=None):
+    """Usa fuente completa; una tabla filtrada no puede acreditar cobertura."""
+    if certification is None or getattr(certification, "metodo", "") not in {
+        "classified_totals", "classified_final_detail",
+    }:
+        return certification
+    if certification.metodo == "classified_final_detail" and not force:
+        return certification
+    snapshot = st.session_state.get("classified_source_snapshots", {}).get(filename)
+
+    def blocked(reason):
+        return CertificacionExtraccion(
+            estado="parcial", metodo="classified_final_detail", razones=[reason],
+        )
+
+    if not snapshot or not snapshot["scope"][0] or snapshot["scope"] != _alcance_snapshot_clasificado(filename):
+        return blocked("Falta el documento completo del alcance actual; vuelva a procesar las páginas seleccionadas.")
+    if "linea" not in df or df["linea"].duplicated().any():
+        return blocked("Las filas editadas no tienen una identidad única.")
+    rows = {row["linea"]: row for row in df.to_dict("records")}
+    accounts = deepcopy(snapshot["accounts"])
+    if set(rows) - {c.linea for c in accounts}:
+        return blocked("Hay cuentas sin vínculo con el documento completo; revise su origen antes de certificar.")
+    classifications = []
+    for account in accounts:
+        if _periodos_seleccionados()[0] in account.montos_periodos:
+            account.monto = account.montos_periodos[_periodos_seleccionados()[0]]
+        row = rows.get(account.linea)
+        if row is None:
+            if not account.es_total and account.monto is not None:
+                return blocked(f"Falta la cuenta fuente de la fila {account.linea}; no puede certificarse una tabla filtrada.")
+            continue
+        if bool(row.get("es_total")) != account.es_total:
+            return blocked(f"La fila {account.linea} cambió de detalle a control o viceversa; requiere revisar la extracción.")
+        try:
+            account.monto = float(row["monto"])
+            account.nombre = str(row["nombre_original"])
+            account.origen_columna = OrigenColumna(row["origen_columna"])
+            for year in snapshot["periods"]:
+                column = f"monto_periodo_{year}"
+                if column in row:
+                    account.montos_periodos[str(year)] = float(row[column])
+            if account.monto != account.montos_periodos.get(_periodos_seleccionados()[0]):
+                return blocked(f"La fila {account.linea} tiene importe principal distinto del período seleccionado.")
+        except (KeyError, ValueError, TypeError):
+            return blocked(f"La fila {account.linea} no tiene importes u origen válidos.")
+        if not account.es_total:
+            classifications.append({
+                "line": account.linea, "name": account.nombre, "amount": account.monto,
+                "code": row.get("codigo_clasificado"),
+                "review": row.get("requiere_revision", True),
+            })
+    result = certificar_clasificado_final(
+        accounts, classifications, snapshot["periods"], snapshot["currencies"],
+        codigos_validos=set(catalogo or ()), periodo_actual=_periodos_seleccionados()[0],
+    )
+    if result.estado == "certificada":
+        f_digest = df.attrs.get("file_digest") or st.session_state.get("file_metadata", {}).get(filename, {}).get("file_digest")
+        if not f_digest:
+            actor = _authenticated_actor()
+            org_id = (
+                getattr(df, "attrs", {}).get("organization_id")
+                or st.session_state.get("file_metadata", {}).get(filename, {}).get("organization_id")
+                or (actor.organization_id if actor else None)
+            )
+            source_path = (
+                getattr(df, "attrs", {}).get("source_path")
+                or st.session_state.get("file_metadata", {}).get(filename, {}).get("source_path")
+                or st.session_state.get("file_sources", {}).get(filename)
+            )
+            try:
+                f_digest, _ = _obtener_huella_archivo_real(
+                    filename,
+                    expected_digest=None,
+                    organization_id=org_id,
+                    source_path=source_path,
+                    actor=actor,
+                )
+            except AuthorizationDenied:
+                f_digest = None
+        _vincular_certificacion_contenido(
+            result, df,
+            filename=filename,
+            file_digest=f_digest,
+            alcance={
+                "pages": list(snapshot["scope"][1]) if snapshot and len(snapshot.get("scope", ())) > 1 else [],
+                "periods": list(snapshot.get("periods", []) or []),
+            },
+            filas_evaluadas=len(accounts),
+            incorporaciones=[],
+            exclusiones=[],
+        )
+    else:
+        if hasattr(df, "attrs"):
+            df.attrs.pop("certification_binding", None)
+        setattr(result, "certification_binding", None)
+        result.contenido_certificado_digest = None
+        result.contenido_certificado_version = None
+    return result
+
+
+def _clave_compuesta_cuenta(item: Any) -> tuple[Any, Any]:
+    """Genera la tupla (pagina, linea) para identificar unívocamente una cuenta."""
+    if isinstance(item, dict):
+        p = item.get("pagina")
+        if p is None:
+            p = item.get("page")
+        l = item.get("linea")
+    else:
+        p = getattr(item, "pagina", None)
+        if p is None:
+            p = getattr(item, "page", None)
+        l = getattr(item, "linea", None)
+    if p is not None and pd.notna(p):
+        try:
+            p_val = int(p)
+        except (ValueError, TypeError):
+            p_val = str(p).strip()
+    else:
+        p_val = None
+    return (p_val, l)
+
+
+def _es_cuenta_relevante(cuenta: CuentaRaw) -> bool:
+    """Una cuenta es relevante si no es total y tiene movimientos, saldos o clasificación."""
+    if getattr(cuenta, "es_total", False):
+        return False
+    if cuenta.monto is not None and abs(float(cuenta.monto)) > 1e-6:
+        return True
+    if cuenta.montos_columnas:
+        if any(abs(float(v or 0)) > 1e-6 for v in cuenta.montos_columnas.values()):
+            return True
+    if cuenta.codigo and str(cuenta.codigo).strip():
+        return True
+    return False
+
+
+def _es_cuenta_relevante_row(row: dict[str, Any]) -> bool:
+    """Evalúa si una fila del DataFrame representa una cuenta contable relevante."""
+    if bool(row.get("es_total")):
+        return False
+    m = row.get("monto")
+    if pd.notna(m) and abs(float(m or 0)) > 1e-6:
+        return True
+    for col in RAW_MONETARY_COLUMNS:
+        v = row.get(col)
+        if pd.notna(v) and abs(float(v or 0)) > 1e-6:
+            return True
+    if row.get("codigo_original") and str(row.get("codigo_original")).strip():
+        return True
+    return False
+
+
+def _validar_respaldo_incorporacion(
+    row: dict[str, Any],
+    filename: str,
+    file_digest: str | None = None,
+) -> tuple[bool, str, dict[str, Any] | None]:
+    """Valida el registro estructurado de respaldo documental para incorporar una cuenta omitida."""
+    respaldo = row.get("respaldo_documental")
+    if not isinstance(respaldo, dict):
+        return False, "carece de registro estructurado de respaldo documental ('respaldo_documental')", None
+
+    doc_id = str(respaldo.get("archivo") or respaldo.get("file_name") or respaldo.get("file_digest") or "").strip()
+    if not doc_id:
+        return False, "el respaldo documental no especifica el identificador o huella del archivo", None
+    if doc_id != filename and (not file_digest or doc_id != file_digest):
+        return False, f"el respaldo documental vincula al archivo '{doc_id}', distinto de '{filename}'", None
+
+    # Comprobar huella del archivo real (Condición 2: documento sustituido por otro con igual nombre)
+    actor = _authenticated_actor()
+    file_meta = (st.session_state.get("file_metadata") or {}).get(filename, {})
+    org_id = file_meta.get("organization_id") or (actor.organization_id if actor else None)
+    source_path = file_meta.get("source_path") or (st.session_state.get("file_sources") or {}).get(filename)
+    resp_digest = respaldo.get("file_digest") or (doc_id if doc_id != filename else None)
+    if not isinstance(resp_digest, str) or not re.fullmatch(r"[0-9a-f]{64}", resp_digest):
+        return False, "el respaldo no registra una huella SHA-256 válida de su versión documental", None
+    try:
+        real_digest, estado_fuente = _obtener_huella_archivo_real(
+            filename,
+            expected_digest=resp_digest or file_digest,
+            organization_id=org_id,
+            source_path=source_path,
+            actor=actor,
+        )
+    except AuthorizationDenied:
+        return False, f"acceso denegado: actor no autorizado para verificar el archivo '{filename}'", None
+
+    if estado_fuente == "rechazada":
+        return False, f"la fuente documental de '{filename}' fue rechazada o alterada", None
+    if estado_fuente == "ambiguo":
+        return False, f"referencia ambigua: existen múltiples archivos con el nombre '{filename}'", None
+    if estado_fuente != "disponible" or not real_digest:
+        return False, "no se pudo verificar la fuente documental autorizada y su huella", None
+    if file_digest is not None and file_digest != real_digest:
+        return False, "la huella proporcionada no coincide con la fuente documental", None
+
+    current_digest = file_digest or real_digest
+    if current_digest and resp_digest and resp_digest != current_digest:
+        return False, f"el respaldo documental corresponde a una versión anterior o distinta del archivo (huella '{resp_digest}' != '{current_digest}')", None
+
+    pagina = respaldo.get("pagina")
+    ubicacion = respaldo.get("ubicacion")
+    if (pagina is None or pd.isna(pagina) or str(pagina).strip() == "") and not str(ubicacion or "").strip():
+        return False, "el respaldo documental no especifica página ni ubicación documental", None
+    if pagina is not None and pd.notna(pagina) and str(pagina).strip() != "":
+        try:
+            p_int = int(pagina)
+            if p_int < 1:
+                return False, f"página inválida en respaldo documental: {pagina}", None
+        except (ValueError, TypeError):
+            return False, f"página inválida en respaldo documental: {pagina}", None
+
+    actor = str(respaldo.get("actor") or respaldo.get("actor_id") or respaldo.get("usuario_confirmacion") or "").strip()
+    if not actor:
+        return False, "el respaldo documental no registra la trazabilidad del actor que confirmó la incorporación", None
+
+    # Verificación de actor y contexto de auditoría (Condición 1)
+    actor_obj = respaldo.get("actor_object") or _authenticated_actor()
+    if actor_obj is not None:
+        if not isinstance(actor_obj, AuthenticatedActor):
+            return False, "el actor que respaldó la incorporación no es una identidad autenticada válida", None
+        if actor not in (actor_obj.actor_id, actor_obj.display_name):
+            return False, f"el actor registrado '{actor}' no coincide con el actor autenticado '{actor_obj.actor_id}'", None
+        file_meta = st.session_state.get("file_metadata", {}).get(filename, {})
+        file_org = file_meta.get("organization_id")
+        if file_org and actor_obj.organization_id != file_org:
+            return False, f"el actor pertenece a la organización '{actor_obj.organization_id}', incompatible con la del archivo '{file_org}'", None
+    elif _auth_enforced():
+        return False, "se requiere una identidad autenticada acreditada para respaldar la incorporación", None
+
+    # Confirmación explícita obligatoria (Condición 6)
+    if not (respaldo.get("confirmacion_explicita") or "importes_confirmados" in respaldo):
+        return False, "el respaldo documental no registra la confirmación explícita de los importes", None
+
+    importes = respaldo.get("importes_confirmados") if "importes_confirmados" in respaldo else respaldo.get("importes")
+    if not isinstance(importes, dict):
+        return False, "el respaldo documental no contiene el registro estructurado de importes confirmados", None
+
+    for col in RAW_MONETARY_COLUMNS:
+        if col not in row or row[col] is None or pd.isna(row[col]):
+            return False, f"la fila agregada no especifica la columna requerida '{col}'; no se permite inventar importes faltantes para obtener cuadratura", None
+        if col not in importes or importes[col] is None or pd.isna(importes[col]):
+            return False, f"la fila agregada no especifica la columna requerida '{col}'; no se permite inventar importes faltantes para obtener cuadratura", None
+        try:
+            val_row = float(row[col])
+            val_resp = float(importes[col])
+        except (ValueError, TypeError):
+            return False, f"valor numérico no convertible en columna '{col}'", None
+        if not math.isfinite(val_row) or not math.isfinite(val_resp):
+            return False, f"el importe en la columna '{col}' no es un número finito", None
+        if abs(val_row - val_resp) > 1e-4:
+            return False, f"discrepancia entre importe de fila y respaldo para '{col}': {val_row} vs {val_resp}", None
+
+    return True, "", dict(respaldo)
+
+
+def _validar_respaldo_exclusion(
+    row: dict[str, Any],
+    filename: str,
+    file_digest: str | None = None,
+) -> tuple[bool, str, dict[str, Any] | None]:
+    """Valida el registro estructurado de autorización para excluir una cuenta relevante."""
+    exclusion = row.get("decision_exclusion") or row.get("respaldo_exclusion")
+    if not isinstance(exclusion, dict):
+        return False, "carece de registro estructurado de exclusión autorizada ('decision_exclusion')", None
+
+    doc_id = str(exclusion.get("archivo") or exclusion.get("file_name") or exclusion.get("file_digest") or "").strip()
+    if not doc_id:
+        return False, "el registro de exclusión no especifica el identificador o huella del archivo", None
+    if doc_id != filename and (not file_digest or doc_id != file_digest):
+        return False, f"el registro de exclusión vincula al archivo '{doc_id}', distinto de '{filename}'", None
+
+    actor = str(exclusion.get("actor") or exclusion.get("actor_id") or exclusion.get("usuario_confirmacion") or "").strip()
+    if not actor:
+        return False, "el registro de exclusión no registra la trazabilidad del actor que autorizó la exclusión", None
+
+    motivo = str(exclusion.get("motivo") or exclusion.get("tipo_exclusion") or "").strip()
+    if not motivo:
+        return False, "el registro de exclusión no especifica el motivo estructurado de exclusión", None
+
+    return True, "", dict(exclusion)
+
+
+def _es_control_o_subtotal(nombre: str) -> bool:
+    """Identifica si una descripción corresponde a un subtotal o control contable."""
+    if not nombre:
+        return False
+    import unicodedata
+    s = unicodedata.normalize("NFKD", str(nombre))
+    s = "".join(c for c in s if not unicodedata.combining(c))
+    norm = re.sub(r"[^a-z0-9]+", "", s.lower())
+    if not norm:
+        return False
+    patrones = (
+        "subtotal", "sumas", "totalgeneral", "sumastotales",
+        "totalesiguales", "sumasiguales", "totalacumulado", "total",
+    )
+    return any(p in norm for p in patrones)
+
+
+def _recertificar_balance_columnas(
+    filename: str,
+    df: pd.DataFrame,
+    certification: Any,
+    *,
+    snapshot_cuentas: list[CuentaRaw] | None = None,
+    file_digest: str | None = None,
+) -> CertificacionExtraccion:
+    """Recertifica las ocho columnas con correspondencia documental estricta contra el snapshot original."""
+    metodo_cert = getattr(certification, "metodo", "excel_8_columns") or "excel_8_columns"
+    if certification is None:
+        if hasattr(df, "attrs"):
+            df.attrs.pop("certification_binding", None)
+        return CertificacionExtraccion(
+            estado="fallida", metodo=metodo_cert,
+            razones=["Falta certificación previa de ocho columnas."],
+            columnas_finales_validadas=False,
+        )
+    snapshot = snapshot_cuentas
+    if snapshot is None:
+        snap_info = st.session_state.get("classified_source_snapshots", {}).get(filename)
+        if snap_info and "accounts" in snap_info:
+            snapshot = snap_info["accounts"]
+    if not snapshot:
+        if hasattr(df, "attrs"):
+            df.attrs.pop("certification_binding", None)
+        return CertificacionExtraccion(
+            estado="fallida", metodo=metodo_cert,
+            razones=["Falta el documento completo original de ocho columnas; no puede recertificarse desde una tabla editada sin controles fuente."],
+            columnas_finales_validadas=False,
+        )
+    if df is None or not isinstance(df, pd.DataFrame) or df.empty:
+        if hasattr(df, "attrs"):
+            df.attrs.pop("certification_binding", None)
+        return CertificacionExtraccion(
+            estado="fallida", metodo=metodo_cert,
+            razones=["El contenido editado está vacío o no es un DataFrame válido."],
+            columnas_finales_validadas=False,
+        )
+    if "linea" not in df.columns:
+        if hasattr(df, "attrs"):
+            df.attrs.pop("certification_binding", None)
+        return CertificacionExtraccion(
+            estado="fallida", metodo=metodo_cert,
+            razones=["Las filas editadas no tienen una columna de identidad de línea ('linea')."],
+            columnas_finales_validadas=False,
+        )
+
+    # 1. Comprobar identificador presente y no nulo en todas las filas de df
+    for idx, row in df.iterrows():
+        val = row.get("linea")
+        if val is None or pd.isna(val) or str(val).strip() == "":
+            if hasattr(df, "attrs"):
+                df.attrs.pop("certification_binding", None)
+            return CertificacionExtraccion(
+                estado="fallida", metodo=metodo_cert,
+                razones=[f"Identificador de línea ausente o nulo detectado en la fila de índice {idx}."],
+                columnas_finales_validadas=False,
+            )
+
+    # 2. Identificadores compuestos y detección de duplicados en df
+    page_col = "pagina" if "pagina" in df.columns else ("page" if "page" in df.columns else None)
+    df_records = df.to_dict("records")
+    df_by_composite: dict[tuple[Any, Any], list[dict[str, Any]]] = {}
+    lines_in_df: dict[Any, set[Any]] = {}
+
+    for r in df_records:
+        k = _clave_compuesta_cuenta(r)
+        df_by_composite.setdefault(k, []).append(r)
+        l_val = r["linea"]
+        lines_in_df.setdefault(l_val, set()).add(k[0])
+
+    for k, rows_k in df_by_composite.items():
+        if len(rows_k) > 1:
+            if hasattr(df, "attrs"):
+                df.attrs.pop("certification_binding", None)
+            montos = [r.get("monto") for r in rows_k]
+            p_desc = f"en página {k[0]}" if k[0] is not None else "sin página"
+            if len(set(montos)) > 1:
+                return CertificacionExtraccion(
+                    estado="fallida", metodo=metodo_cert,
+                    razones=[f"Líneas duplicadas con importes distintos detectadas en la edición (línea {k[1]} {p_desc}: importes {montos})."],
+                    columnas_finales_validadas=False,
+                )
+            return CertificacionExtraccion(
+                estado="fallida", metodo=metodo_cert,
+                razones=[f"Líneas duplicadas detectadas en la edición (línea {k[1]} {p_desc})."],
+                columnas_finales_validadas=False,
+            )
+
+    # 3. Identificadores compuestos en snapshot y detección de ambigüedad
+    snap_by_composite: dict[tuple[Any, Any], list[CuentaRaw]] = {}
+    snap_lines_pages: dict[Any, set[Any]] = {}
+    for c in snapshot:
+        sk = _clave_compuesta_cuenta(c)
+        snap_by_composite.setdefault(sk, []).append(c)
+        snap_lines_pages.setdefault(c.linea, set()).add(sk[0])
+
+    for sk, clist in snap_by_composite.items():
+        if len(clist) > 1:
+            if hasattr(df, "attrs"):
+                df.attrs.pop("certification_binding", None)
+            p_desc = f"en página {sk[0]}" if sk[0] is not None else "sin página"
+            return CertificacionExtraccion(
+                estado="fallida", metodo=metodo_cert,
+                razones=[f"Identificadores duplicados o ambiguos detectados en el snapshot original (línea {sk[1]} {p_desc})."],
+                columnas_finales_validadas=False,
+            )
+
+    # Validar ambigüedad entre páginas si misma línea aparece en múltiples páginas
+    for l_val, pages in lines_in_df.items():
+        if len(pages) > 1:
+            for p in pages:
+                if (p, l_val) not in snap_by_composite:
+                    r_candidate = df_by_composite[(p, l_val)][0]
+                    if not r_candidate.get("respaldo_documental"):
+                        if hasattr(df, "attrs"):
+                            df.attrs.pop("certification_binding", None)
+                        return CertificacionExtraccion(
+                            estado="fallida", metodo=metodo_cert,
+                            razones=[f"Identificadores ambiguos entre páginas detectados sin correspondencia unívoca en el documento original (línea {l_val}, página {p})."],
+                            columnas_finales_validadas=False,
+                        )
+
+    # 4. Tratamiento de cuentas agregadas (filas en df que no están en snapshot)
+    decisiones_incorporacion: list[dict[str, Any]] = []
+    cuentas_nuevas: list[CuentaRaw] = []
+    snapshot_lines_only = {c.linea: c for c in snapshot if _clave_compuesta_cuenta(c)[0] is None}
+
+    for k, rows_k in df_by_composite.items():
+        row = rows_k[0]
+        match_snap = snap_by_composite.get(k)
+        if not match_snap and k[0] is None:
+            match_snap = [snapshot_lines_only[k[1]]] if k[1] in snapshot_lines_only else None
+
+        if not match_snap:
+            # Fila agregada nueva: exige respaldo documental estructurado estricto
+            valido, motivo_respaldo, respaldo_dict = _validar_respaldo_incorporacion(row, filename, file_digest)
+            if not valido:
+                if hasattr(df, "attrs"):
+                    df.attrs.pop("certification_binding", None)
+                return CertificacionExtraccion(
+                    estado="fallida", metodo=metodo_cert,
+                    razones=[f"Fila agregada sin respaldo documental válido (línea {k[1]}): {motivo_respaldo}."],
+                    columnas_finales_validadas=False,
+                )
+            col_montos = {col: float(row[col]) for col in RAW_MONETARY_COLUMNS}
+            monto_val = float(row["monto"]) if pd.notna(row.get("monto")) else None
+            nom_cuenta = str(row.get("nombre_original") or row.get("nombre") or "").strip()
+            es_sub = bool(
+                row.get("es_total") is True
+                or row.get("total") is True
+                or _es_control_o_subtotal(nom_cuenta)
+                or (respaldo_dict and respaldo_dict.get("es_subtotal") is True)
+            )
+            nueva_c = CuentaRaw(
+                linea=int(k[1]) if str(k[1]).isdigit() else k[1],
+                codigo=str(row.get("codigo_original") or row.get("codigo") or "").strip() or None,
+                nombre=nom_cuenta,
+                monto=monto_val,
+                es_total=es_sub,
+                montos_columnas=col_montos,
+                confianza_extraccion=1.0,
+            )
+            if es_sub:
+                setattr(nueva_c, "es_subtotal_manual", True)
+            if k[0] is not None:
+                setattr(nueva_c, "pagina", k[0])
+            setattr(nueva_c, "respaldo_documental", respaldo_dict)
+            cuentas_nuevas.append(nueva_c)
+            decisiones_incorporacion.append(respaldo_dict)
+
+    # 5. Tratamiento de cuentas eliminadas o excluidas
+    df_keys = set(df_by_composite.keys())
+    df_lines_only = {k[1] for k in df_keys if k[0] is None}
+    decisiones_exclusion: list[dict[str, Any]] = []
+    claves_excluidas: set[tuple[Any, Any]] = set()
+
+    for c in snapshot:
+        if c.es_total:
+            continue
+        ck = _clave_compuesta_cuenta(c)
+        presente_en_df = ck in df_keys or (ck[0] is None and c.linea in df_lines_only)
+        if not presente_en_df:
+            # Cuenta del snapshot ausente en df
+            if _es_cuenta_relevante(c):
+                if hasattr(df, "attrs"):
+                    df.attrs.pop("certification_binding", None)
+                return CertificacionExtraccion(
+                    estado="fallida", metodo=metodo_cert,
+                    razones=[f"Eliminación no documentada de cuenta relevante detectada (cuenta '{c.nombre}', línea {c.linea})."],
+                    columnas_finales_validadas=False,
+                )
+
+    # Verificar filas en df marcadas para exclusión
+    for k, rows_k in df_by_composite.items():
+        row = rows_k[0]
+        esta_marcada_excluida = bool(row.get("excluida") is True or str(row.get("codigo_clasificado") or "").strip() == "__EXCLUIR__")
+        if esta_marcada_excluida:
+            if _es_cuenta_relevante_row(row):
+                valida_exc, motivo_exc, exc_dict = _validar_respaldo_exclusion(row, filename, file_digest)
+                if not valida_exc:
+                    if hasattr(df, "attrs"):
+                        df.attrs.pop("certification_binding", None)
+                    return CertificacionExtraccion(
+                        estado="fallida", metodo=metodo_cert,
+                        razones=[f"Exclusión no autorizada de cuenta relevante (línea {k[1]}, cuenta '{row.get('nombre_original')}'): {motivo_exc}. Una justificación libre no autoriza a excluir una cuenta."],
+                        columnas_finales_validadas=False,
+                    )
+                decisiones_exclusion.append(exc_dict)
+                claves_excluidas.add(k)
+
+    # 6. Construir cuentas_actualizadas:
+    # Snapshot original deepcopy, omitir excluidas justificadas, actualizar editadas, añadir incorporaciones
+    cuentas_actualizadas: list[CuentaRaw] = []
+    for cuenta in deepcopy(snapshot):
+        ck = _clave_compuesta_cuenta(cuenta)
+        if ck in claves_excluidas:
+            continue
+        if ck[0] is None and (None, cuenta.linea) in claves_excluidas:
+            continue
+        if cuenta.es_total:
+            cuentas_actualizadas.append(cuenta)
+            continue
+
+        matching_row = None
+        if ck in df_by_composite:
+            matching_row = df_by_composite[ck][0]
+        elif ck[0] is None and (None, cuenta.linea) in df_by_composite:
+            matching_row = df_by_composite[(None, cuenta.linea)][0]
+
+        if matching_row is not None:
+            for col in RAW_MONETARY_COLUMNS:
+                if col in matching_row and pd.notna(matching_row[col]):
+                    cuenta.montos_columnas[col] = float(matching_row[col])
+            if "monto" in matching_row and pd.notna(matching_row["monto"]):
+                cuenta.monto = float(matching_row["monto"])
+            if "nombre_original" in matching_row and matching_row["nombre_original"]:
+                cuenta.nombre = str(matching_row["nombre_original"])
+            if "codigo_original" in matching_row:
+                cuenta.codigo = str(matching_row["codigo_original"]) if matching_row["codigo_original"] else None
+            if "origen_columna" in matching_row and matching_row["origen_columna"]:
+                try:
+                    cuenta.origen_columna = OrigenColumna(matching_row["origen_columna"])
+                except (ValueError, KeyError):
+                    pass
+        cuentas_actualizadas.append(cuenta)
+
+    cuentas_actualizadas.extend(cuentas_nuevas)
+
+    # 7. Ejecutar validación de ocho columnas contrastando controles originales
+    resultado = certificar_extraccion_columnas(cuentas_actualizadas, metodo=metodo_cert)
+    filas_eval = len([c for c in cuentas_actualizadas if not c.es_total])
+    resultado.filas_evaluadas = filas_eval
+    setattr(resultado, "decisiones_incorporacion", decisiones_incorporacion)
+    setattr(resultado, "decisiones_exclusion", decisiones_exclusion)
+
+    if resultado.estado == "certificada" or getattr(resultado, "columnas_finales_validadas", False):
+        _vincular_certificacion_contenido(
+            resultado, df,
+            filename=filename,
+            file_digest=file_digest,
+            alcance={
+                "pages": list(df[page_col].dropna().unique()) if page_col else [],
+                "filas": [r["linea"] for r in df_records],
+            },
+            filas_evaluadas=filas_eval,
+            incorporaciones=decisiones_incorporacion,
+            exclusiones=decisiones_exclusion,
+        )
+    else:
+        if hasattr(df, "attrs"):
+            df.attrs.pop("certification_binding", None)
+
+    return resultado
+
+
+def _ejecutar_recertificar_contenido_corregido(
+    archivo_nombre: str,
+    df: pd.DataFrame,
+    extraction_certification: Any,
+    catalogo: Any = None,
+) -> Any:
+    """Acción del botón 'Recertificar contenido corregido'.
+
+    Identifica el método de certificación (8 columnas o clasificado) y ejecuta
+    la recertificación completa contra controles documentales independientes.
+    """
+    if extraction_certification is None:
+        nueva_cert = CertificacionExtraccion(
+            estado="fallida", metodo="desconocido",
+            razones=["No existe certificación previa para recertificar."],
+            columnas_finales_validadas=False,
+        )
+        st.session_state.setdefault("extraction_certifications", {})[archivo_nombre] = nueva_cert
+        return nueva_cert
+
+    metodo = getattr(extraction_certification, "metodo", "") or ""
+    if metodo in {"classified_totals", "classified_final_detail"}:
+        nueva_cert = _recertificar_balance_clasificado(
+            archivo_nombre, df, extraction_certification, force=True, catalogo=catalogo,
+        )
+    elif _es_certificacion_ocho_columnas(extraction_certification):
+        nueva_cert = _recertificar_balance_columnas(
+            archivo_nombre, df, extraction_certification,
+        )
+    else:
+        nueva_cert = CertificacionExtraccion(
+            estado="fallida", metodo=metodo,
+            razones=["Método no reconocido o sin controles documentales independientes; no se certifica."],
+            columnas_finales_validadas=False,
+        )
+
+    st.session_state.setdefault("extraction_certifications", {})[archivo_nombre] = nueva_cert
+    if nueva_cert.estado == "certificada" or getattr(nueva_cert, "columnas_finales_validadas", False):
+        if not (hasattr(df, "attrs") and "certification_binding" in df.attrs):
+            _vincular_certificacion_contenido(nueva_cert, df, filename=archivo_nombre)
+        _registrar_evento_auditoria(
+            "Recertificación", archivo_nombre,
+            "Contenido corregido comparado nuevamente con el documento original",
+            df.attrs.get("certification_binding", {}).get("digest", ""), df,
+        )
+    else:
+        if hasattr(df, "attrs"):
+            df.attrs.pop("certification_binding", None)
+    return nueva_cert
+
+
+def _aplicar_edicion_monto_periodos(
+    df: pd.DataFrame, idx: Any, nuevo_monto: float, periodo_activo: str | None = None,
+    *, periodos: tuple[str, ...] | None = None,
+) -> None:
+    """Sincroniza atómicamente monto y el período activo sin alterar otros períodos."""
+    value = float(nuevo_monto)
+    if not math.isfinite(value) or idx not in df.index:
+        raise ValueError("El monto debe ser finito y la fila debe existir")
+    years = tuple(str(p) for p in periodos) if periodos is not None else tuple(
+        str(col).removeprefix("monto_periodo_") for col in df.columns
+        if re.fullmatch(r"monto_periodo_\d{4}", str(col))
+    )
+    selected = str(periodo_activo) if periodo_activo is not None else None
+    if years and (selected not in years or f"monto_periodo_{selected}" not in df.columns):
+        raise ValueError("Debe indicar un período presente en el documento")
+    position = years.index(selected) if years else 0
+    if position > 1:
+        raise ValueError("La edición admite los dos períodos del comparativo")
+    updates = {}
+    if selected is not None:
+        if f"monto_periodo_{selected}" not in df.columns:
+            raise ValueError("El período no tiene una columna documental")
+        updates[f"monto_periodo_{selected}"] = value
+    if position == 0:
+        updates["monto"] = value
+    alias = "monto_periodo_actual" if position == 0 else "monto_periodo_anterior"
+    if alias in df.columns:
+        updates[alias] = value
+    for column, amount in updates.items():
+        df.at[idx, column] = amount
+    df.attrs.pop("certification_binding", None)
+
+
+def _extraer_confianza_segura(valor: Any) -> float | None:
+    """Extrae confianza numérica entre 0.0 y 1.0, preservando 0.0 exacto.
+
+    Devuelve None si el valor no existe o no es numérico finito.
+    """
+    if valor is None or valor is False:
+        return 0.0 if valor is False else None
+    try:
+        f = float(valor)
+        if not math.isfinite(f):
+            return None
+        return max(0.0, min(1.0, f))
+    except (ValueError, TypeError):
+        return None
+
+
+def normalizar_rut(rut_str: str) -> str:
+    """Normaliza un RUT chileno eliminando puntos, guiones y espacios, en mayúsculas."""
+    if not rut_str:
+        return ""
+    return re.sub(r"[^0-9kK]", "", str(rut_str)).upper()
+
+
+def propagar_entre_balances_seguro(
+    resultados: dict[str, pd.DataFrame],
+    metadatos_archivos: dict[str, dict[str, Any]] | None = None,
+) -> int:
+    """Propaga clasificaciones respetando identidad de empresa, organización y revisión."""
+    if not resultados or len(resultados) < 2:
+        return 0
+    metadatos = metadatos_archivos
+    if metadatos is None:
+        metadatos = st.session_state.get("file_metadata") or {}
+
+    act = _authenticated_actor()
+    actor_org = str(getattr(act, "organization_id", "") or "").strip()
+    if not actor_org and _auth_enforced():
+        return 0
+
+    def _obtener_info(fname: str) -> tuple[str, str, bool]:
+        meta = metadatos.get(fname, {})
+        # Exige identidad documental propia vinculada al archivo; NUNCA tomar de sesión
+        raw_rut = meta.get("rut") or meta.get("company_rut")
+        rut_norm = normalizar_rut(str(raw_rut or ""))
+
+        # Exige organización explícita vinculada al archivo; NUNCA inventar default_org
+        org = str(meta.get("organization_id") or "").strip()
+        if not org:
+            return rut_norm, "", False
+
+        # Si el actor autenticado tiene organización, la org del archivo DEBE coincidir
+        if actor_org and org != actor_org:
+            return rut_norm, org, False
+
+        # Verificación explícita: debe ser booleano True estricto (no "false", "true", 1, etc.)
+        verified_val = meta.get("verified")
+        if verified_val is not True:
+            return rut_norm, org, False
+
+        if not rut_norm:
+            return "", org, False
+
+        return rut_norm, org, True
+
+    ruts_por_archivo: dict[str, str] = {}
+    orgs_por_archivo: dict[str, str] = {}
+    verified_por_archivo: dict[str, bool] = {}
+    for fname in resultados:
+        r, o, v = _obtener_info(fname)
+        ruts_por_archivo[fname] = r
+        orgs_por_archivo[fname] = o
+        verified_por_archivo[fname] = v
+
+    candidates: dict[tuple[str, str, str], list[tuple[str, Any, str, str, float | None]]] = {}
+    for fname, df in resultados.items():
+        rut = ruts_por_archivo[fname]
+        org = orgs_por_archivo[fname]
+        verified = verified_por_archivo[fname]
+        if not rut or not org or not verified:
+            continue
+        for idx, row in df.iterrows():
+            nombre = row.get("nombre_original")
+            if not nombre:
+                continue
+            norm = normalizar_nombre(str(nombre))
+            cod = str(row.get("codigo_clasificado") or "").strip()
+            sec = str(row.get("seccion_contable") or row.get("origen_columna") or "").strip().upper()
+            conf = _extraer_confianza_segura(row.get("confianza"))
+            candidates.setdefault((org, rut, norm), []).append((fname, idx, cod, sec, conf))
+
+    propagados = 0
+    for (org, rut, norm), entries in candidates.items():
+        classified_entries = [e for e in entries if e[2] and e[2] not in ("", "__EXCLUIR__")]
+        if not classified_entries:
+            continue
+        unique_codes = {e[2] for e in classified_entries}
+        if len(unique_codes) > 1:
+            continue
+        source_fname, source_idx, classified_code, source_sec, source_conf = classified_entries[0]
+
+        for fname, idx, cod, sec, conf in entries:
+            if cod and cod != "":
+                continue
+            if orgs_por_archivo.get(fname) != org or ruts_por_archivo.get(fname) != rut:
+                continue
+            row = resultados[fname].loc[idx]
+            es_source_no_corriente = "NO CORRIENT" in source_sec or source_sec.startswith("ANC") or source_sec.startswith("PNC")
+            target_sec = str(row.get("seccion_contable") or row.get("origen_columna") or "").strip().upper()
+            es_target_no_corriente = "NO CORRIENT" in target_sec or target_sec.startswith("ANC") or target_sec.startswith("PNC")
+            if es_source_no_corriente != es_target_no_corriente and bool(source_sec) and bool(target_sec):
+                continue
+            if _codigo_compatible_con_origen(
+                classified_code,
+                row.get("origen_columna"),
+                row.get("monto"),
+                _nombre_contable_fila(row),
+            ):
+                resultados[fname].at[idx, "codigo_clasificado"] = classified_code
+                resultados[fname].at[idx, "metodo"] = "propagado_sugerido"
+                target_conf = source_conf if source_conf is not None else 0.0
+                resultados[fname].at[idx, "confianza"] = target_conf
+                resultados[fname].at[idx, "requiere_revision"] = True
+                if "origen" in resultados[fname].columns:
+                    resultados[fname].at[idx, "origen"] = "Propagado"
+                    resultados[fname].at[idx, "regla"] = "propagado_sugerido"
+                    evid = f"Sugerencia propagada desde {source_fname} (revisión pendiente"
+                    if source_conf is not None:
+                        evid += f"; confianza origen: {source_conf})"
+                    else:
+                        evid += "; sin confianza previa)"
+                    resultados[fname].at[idx, "evidencia"] = evid
+                propagados += 1
+    return propagados
+
+
+def _registrar_evento_auditoria(
+        tipo: str, archivo: str, razon: str, detalle: str = "",
+        df: pd.DataFrame | None = None) -> dict:
+    evento = {
+        "Tipo": tipo, "Archivo": archivo, "Razón": razon, "Detalle": detalle,
+        "Fecha/hora": datetime.now().astimezone().isoformat(),
+        **_actor_audit_fields(),
+    }
+    st.session_state.setdefault("audit_events", []).append(evento)
+    if df is not None:
+        df.attrs.setdefault("audit_events", []).append(dict(evento))
+    return evento
+
+
+def _resumen_bloqueadores_emision(motivos: list[str]) -> pd.DataFrame:
+    filas = []
+    for motivo in dict.fromkeys(str(m) for m in motivos if str(m).strip()):
+        recertificar = any(token in motivo.lower() for token in (
+            "certific", "extracción documental", "contenido actual",
+        ))
+        filas.append({
+            "Tipo": "Recertificar extracción" if recertificar else "Corregir clasificación o control",
+            "Bloqueador": motivo,
+            "Acción requerida": (
+                "Volver a verificar la extracción contra el documento"
+                if recertificar else "Revisar la cuenta o control indicado"
+            ),
+        })
+    return pd.DataFrame(filas)
 
 
 def _valores_periodo_metadata(meta: MetadataEmpresa) -> tuple[str, int, int]:
@@ -164,10 +1763,16 @@ def _detectar_periodos_comparativos(
 
 
 def _periodos_seleccionados() -> tuple[str, ...]:
-    selected = tuple(st.session_state.get("company_periodos_seleccionados", ()))
+    sel = getattr(st.session_state, "company_periodos_seleccionados", None)
+    if sel is None and hasattr(st.session_state, "get"):
+        sel = st.session_state.get("company_periodos_seleccionados", ())
+    selected = tuple(sel or ())
     if selected:
         return selected
-    return (str(int(st.session_state.get("company_anio", date.today().year))),)
+    anio = getattr(st.session_state, "company_anio", None)
+    if anio is None and hasattr(st.session_state, "get"):
+        anio = st.session_state.get("company_anio")
+    return (str(int(anio or date.today().year)),)
 
 
 def _valor_periodo(
@@ -245,37 +1850,107 @@ st.set_page_config(
 # CARGA DE CATÁLOGO Y DICCIONARIO
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _persistence_settings() -> PersistenceSettings:
+    return PersistenceSettings.from_environment()
+
+
+def _legacy_neon_store() -> NeonKnowledgeStore:
+    if _local_persistence_enabled():
+        raise RuntimeError("Neon está deshabilitado en modo de persistencia local")
+    return NeonKnowledgeStore()
+
+
+def _knowledge_repository():
+    """Resuelve el puerto activo conservando explícitamente el modo heredado."""
+    settings = _persistence_settings()
+    legacy_store = _legacy_neon_store() if settings.mode == "legacy_neon" else None
+    return build_persistence(
+        settings, legacy_neon_store=legacy_store,
+    ).knowledge
+
+
+def _local_persistence_enabled() -> bool:
+    return _persistence_settings().mode == "local"
+
+
+def _gold_benchmark_path() -> Path:
+    """Benchmark empaquetado de solo lectura."""
+    return BASE_DIR / "gold_standard.db"
+
+
+def _gold_runtime_path() -> Path:
+    """Runtime mutable bajo el volumen local; legacy conserva su ruta histórica."""
+    settings = _persistence_settings()
+    if settings.mode != "local":
+        return BASE_DIR / "gold_standard_runtime.db"
+    if settings.local_root is None:
+        raise RuntimeError("LOCAL_PERSISTENCE_ROOT es obligatorio para el runtime Gold")
+    path = settings.local_root.resolve() / "gold" / "gold_standard_runtime.db"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _legacy_json_fallback_allowed() -> bool:
+    """El JSON empaquetado sólo es fallback del despliegue heredado."""
+    return not _local_persistence_enabled()
+
+
+def _write_legacy_packaged_dictionary(dictionary: list[dict]) -> None:
+    """Fallback heredado deliberado; queda inaccesible en modo on-prem local."""
+    if not _legacy_json_fallback_allowed():
+        raise RuntimeError("No se permite escribir el JSON empaquetado en modo local")
+    with open(BASE_DIR / "diccionario.json", "w", encoding="utf-8") as handle:
+        json.dump(dictionary, handle, ensure_ascii=False, indent=2)
+
+
+def _write_legacy_packaged_catalog(catalog: dict) -> None:
+    """Fallback heredado deliberado; queda inaccesible en modo on-prem local."""
+    if not _legacy_json_fallback_allowed():
+        raise RuntimeError("No se permite escribir el JSON empaquetado en modo local")
+    with open(BASE_DIR / "catalogo_maestro.json", "w", encoding="utf-8") as handle:
+        json.dump(catalog, handle, ensure_ascii=False, indent=2)
+
+
+def _validation_reviewer() -> str:
+    actor = _authenticated_actor()
+    if _auth_enforced():
+        require_role(actor, "analyst")
+    return actor.actor_id if actor is not None else "anonymous_staging"
+
 @st.cache_data
 def cargar_catalogo() -> dict:
+    try:
+        catalogo_repo = _knowledge_repository().load_catalog()
+    except Exception:
+        if _local_persistence_enabled():
+            raise RuntimeError(
+                "No se pudo cargar el catálogo desde la persistencia local durable"
+            )
+        catalogo_repo = {}
+    if _local_persistence_enabled():
+        return canonicalize_catalog(catalogo_repo)
     with open(BASE_DIR / 'catalogo_maestro.json', encoding='utf-8') as f:
-        catalogo_local = json.load(f)
-    store = NeonKnowledgeStore()
-    if store.enabled:
-        try:
-            catalogo_neon = store.load_catalog()
-            if catalogo_neon:
-                return canonicalize_catalog({
-                    codigo: {**entrada, **catalogo_neon.get(codigo, {})}
-                    for codigo, entrada in catalogo_local.items()
-                } | {
-                    codigo: entrada for codigo, entrada in catalogo_neon.items()
-                    if codigo not in catalogo_local
-                })
-        except Exception:
-            pass
-    return canonicalize_catalog(catalogo_local)
+        catalogo_empaquetado = json.load(f)
+    return canonicalize_catalog({
+        codigo: {**entrada, **catalogo_repo.get(codigo, {})}
+        for codigo, entrada in catalogo_empaquetado.items()
+    } | {
+        codigo: entrada for codigo, entrada in catalogo_repo.items()
+        if codigo not in catalogo_empaquetado
+    })
 
 
 @st.cache_data
 def cargar_diccionario_base() -> list[dict]:
-    store = NeonKnowledgeStore()
-    if store.enabled:
-        try:
-            diccionario = store.load_dictionary()
-            if diccionario:
-                return canonicalize_dictionary(diccionario)
-        except Exception:
-            pass
+    try:
+        diccionario = _knowledge_repository().load_dictionary()
+        if diccionario or _local_persistence_enabled():
+            return canonicalize_dictionary(diccionario)
+    except Exception:
+        if _local_persistence_enabled():
+            raise RuntimeError(
+                "No se pudo cargar el diccionario desde la persistencia local durable"
+            )
     with open(BASE_DIR / 'diccionario.json', encoding='utf-8') as f:
         return canonicalize_dictionary(json.load(f))
 
@@ -285,63 +1960,83 @@ def _persistir_validacion(
     sugerido: str | None = None, metodo: str | None = None,
     confianza: float | None = None, archivo: str = '',
 ) -> bool:
-    """Persiste en Neon; retorna False para que el caller use fallback JSON."""
+    """Persiste mediante el puerto activo; el fallback JSON es sólo heredado."""
     codigo = canonical_catalog_code(codigo)
     sugerido = canonical_catalog_code(sugerido) if sugerido else sugerido
-    store = NeonKnowledgeStore()
-    if not store.enabled:
-        return False
     try:
-        store.save_validation(
+        _knowledge_repository().save_validation(ValidationDecision(
             account_name=nombre,
             validated_code=codigo,
             source=fuente,
             suggested_code=sugerido,
             suggested_method=metodo,
             suggested_confidence=confianza,
+            reviewer=_validation_reviewer(),
             source_file=archivo,
             add_to_dictionary=agregar_diccionario,
-        )
+        ))
         cargar_diccionario_base.clear()
         return True
-    except Exception:
-        st.error("Neon no pudo guardar la validación; se usará respaldo local.")
+    except (AuthenticationRequired, AuthorizationDenied):
+        raise
+    except Exception as exc:
+        if _local_persistence_enabled():
+            st.error(f"No se guardó la validación en persistencia local durable: {exc}")
+        else:
+            st.error("Neon no pudo guardar la validación; se usará respaldo JSON heredado.")
         return False
 
 
 def _persistir_validaciones_lote(validaciones: list[dict]) -> bool:
-    """Persiste un lote completo en una única transacción Neon."""
-    store = NeonKnowledgeStore()
-    if not store.enabled:
-        return False
+    """Persiste un lote completo mediante el repositorio configurado."""
     try:
-        store.save_validations(validaciones)
+        reviewer = _validation_reviewer()
+        decisions = [ValidationDecision(
+            account_name=item["account_name"],
+            validated_code=canonical_catalog_code(item["validated_code"]),
+            source=item["source"],
+            suggested_code=(canonical_catalog_code(item["suggested_code"])
+                            if item.get("suggested_code") else None),
+            suggested_method=item.get("suggested_method"),
+            suggested_confidence=item.get("suggested_confidence"),
+            reviewer=reviewer,
+            source_file=item.get("source_file", ""),
+            add_to_dictionary=bool(item.get("add_to_dictionary", True)),
+        ) for item in validaciones]
+        _knowledge_repository().save_validations(decisions)
         cargar_diccionario_base.clear()
         return True
-    except Exception:
-        st.error(
-            "Neon no pudo guardar el lote; las clasificaciones permanecen "
-            "en esta sesión y se usará el respaldo local del diccionario."
-        )
+    except (AuthenticationRequired, AuthorizationDenied):
+        raise
+    except Exception as exc:
+        if _local_persistence_enabled():
+            st.error(f"No se guardó el lote en persistencia local durable: {exc}")
+        else:
+            st.error(
+                "Neon no pudo guardar el lote; las clasificaciones permanecen "
+                "en esta sesión y se usará el respaldo JSON heredado."
+            )
         return False
 
 
 def _persistir_catalogo(entry: dict) -> bool:
-    store = NeonKnowledgeStore()
-    if not store.enabled:
-        return False
     try:
-        store.save_catalog_entry(entry)
+        _knowledge_repository().save_catalog_entry(entry)
         cargar_catalogo.clear()
         return True
-    except Exception:
-        st.error("Neon no pudo guardar la categoría; se usará respaldo local.")
+    except Exception as exc:
+        if _local_persistence_enabled():
+            st.error(f"No se guardó la categoría en persistencia local durable: {exc}")
+        else:
+            st.error("Neon no pudo guardar la categoría; se usará respaldo JSON heredado.")
         return False
 
 
 @st.cache_data(ttl=60)
 def _neon_disponible() -> bool:
-    return NeonKnowledgeStore().healthcheck()
+    if _local_persistence_enabled():
+        return False
+    return _knowledge_repository().healthcheck()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -421,7 +2116,7 @@ def propagar_clasificacion_resultados(nombre_original: str, codigo_final: str, m
                         codigo_final,
                         row.get('origen_columna'),
                         row.get('monto'),
-                        row.get('nombre_original'),
+                        _nombre_contable_fila(row),
                     ),
                     axis=1,
                 )
@@ -588,6 +2283,22 @@ _CONTRA_ORIGEN = {
 }
 
 
+def _nombre_con_contexto(
+    nombre: str | None, jerarquia_contable: str | None = None,
+) -> str:
+    """Combina glosa y subtotal padre sólo para interpretar la cuenta."""
+    return " ".join(
+        str(value).strip() for value in (jerarquia_contable, nombre)
+        if value and str(value).strip()
+    )
+
+
+def _nombre_contable_fila(row) -> str:
+    return _nombre_con_contexto(
+        _nombre_mostrar(row), row.get('jerarquia_contable'),
+    )
+
+
 def _origen_efectivo(origen_columna, monto, nombre: str | None = None) -> str:
     """Naturaleza contable efectiva, preservando aparte la columna física.
 
@@ -598,6 +2309,8 @@ def _origen_efectivo(origen_columna, monto, nombre: str | None = None) -> str:
     origen = str(origen or 'desconocido').strip().lower()
     if is_patrimonial_reserve_name(nombre) or is_accumulated_result_name(nombre):
         return 'patrimonio'
+    if _es_contra_activo(nombre):
+        return 'activo'
     try:
         es_negativo = monto is not None and pd.notna(monto) and float(monto) < 0
     except (TypeError, ValueError):
@@ -612,6 +2325,8 @@ def _etiqueta_origen(origen_columna, monto, nombre: str | None = None) -> str:
     efectivo = _origen_efectivo(origen_columna, monto, nombre).upper()
     if is_patrimonial_reserve_name(nombre) or is_accumulated_result_name(nombre):
         return f"{extraido} → PATRIMONIO (naturaleza de la cuenta)"
+    if _es_contra_activo(nombre) and efectivo == 'ACTIVO' and extraido != efectivo:
+        return f"{extraido} → ACTIVO (contra-activo)"
     if efectivo != extraido:
         return f"{extraido} → {efectivo} (monto negativo)"
     return extraido
@@ -636,7 +2351,9 @@ def _monto_presentacion(codigo: str | None, monto, nombre: str | None = None,
             return resultado
     if str(codigo or '') == 'PAT.10':
         return -abs(valor)
-    if str(codigo or '').startswith('ANC') and _es_contra_activo(nombre):
+    if str(codigo or '') == 'ANC.01.01' or (
+        str(codigo or '').startswith('ANC') and _es_contra_activo(nombre)
+    ):
         return -abs(valor)
     return valor
 
@@ -1125,6 +2842,420 @@ class MotorHibridoLocal:
 # INTERFAZ DE USUARIO PRINCIPAL (MAIN)
 # ─────────────────────────────────────────────────────────────────────────────
 
+PROCESS_REGISTRY_QUERY_KEY = "processes"
+
+
+def _process_media_type(file_name: str) -> str:
+    return (
+        "application/pdf" if Path(file_name).suffix.lower() == ".pdf"
+        else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+
+
+def _process_scope(archivo) -> ProcessScope:
+    periods = tuple(str(value) for value in
+                    st.session_state.get("company_periodos_seleccionados", ())[:2])
+    if not periods:
+        year = st.session_state.get("company_anio")
+        periods = (str(year),) if year else ()
+    pages = tuple(sorted(set(int(page) for page in
+                             st.session_state.get("document_pages", {}).get(
+                                 archivo.name, ()))))
+    if Path(archivo.name).suffix.lower() != ".pdf" or not pages:
+        return ProcessScope("all", (), periods)
+    total = page_count(archivo.getvalue())
+    if pages == tuple(range(1, total + 1)):
+        return ProcessScope("all", (), periods)
+    return ProcessScope("selected", pages, periods)
+
+
+def _application_version() -> str:
+    raw = (
+        os.getenv("RENDER_GIT_COMMIT")
+        or os.getenv("APP_BUILD_ID")
+        or "local"
+    )
+    normalized = re.sub(r"[^A-Za-z0-9._:/-]", "-", str(raw).strip())[:80]
+    return normalized or "local"
+
+
+def _recover_or_start_process(
+    service: LocalProcessPersistence, *, actor: AuthenticatedActor,
+    content: bytes, original_name: str, media_type: str, scope: ProcessScope,
+    execution_id: str | None = None, application_version: str | None = None,
+) -> PersistedProcess:
+    """Recupera por ID explícito o inicia una ejecución; nunca busca por nombre."""
+    if execution_id:
+        recovered = service.get(execution_id, actor=actor)
+        if recovered is None:
+            raise ProcessPersistenceError(
+                "El puntero de proceso no referencia una ejecución durable",
+                stage="execution_recovery", execution_id=execution_id,
+            )
+        digest = hashlib.sha256(content).hexdigest()
+        metadata = recovered.execution.metadata
+        expected_scope = {
+            "page_mode": scope.page_mode,
+            "selected_pages": list(scope.selected_pages),
+            "periods": list(scope.periods),
+        }
+        actual_scope = {key: metadata.get(key) for key in expected_scope}
+        if recovered.document.sha256 != digest:
+            raise ProcessPersistenceError(
+                "La ejecución durable pertenece a otro contenido",
+                stage="document_digest_mismatch",
+                document_id=recovered.document.document_id,
+                execution_id=execution_id,
+            )
+        if actual_scope != expected_scope:
+            raise ProcessPersistenceError(
+                "El alcance durable no coincide con la selección actual",
+                stage="scope_mismatch",
+                document_id=recovered.document.document_id,
+                execution_id=execution_id,
+            )
+        return recovered
+    return service.start(
+        content, original_name=original_name, media_type=media_type,
+        scope=scope, actor=actor,
+        application_version=application_version or _application_version(),
+    )
+
+
+def _persist_process_correction(
+    service: LocalProcessPersistence, *, process: PersistedProcess,
+    actor: AuthenticatedActor, correction_id: str, classification_code: str,
+):
+    """Audita sólo referencias y clasificación; no recibe ni envía montos."""
+    return service.record_correction(
+        process.execution.execution_id, actor=actor,
+        correction_id=correction_id,
+        classification_code=classification_code,
+    )
+
+
+def _persist_definitive_process_report(
+    service: LocalProcessPersistence, *, process: PersistedProcess,
+    actor: AuthenticatedActor, content: bytes, file_name: str,
+    media_type: str, certified: bool,
+) -> tuple[PersistedProcess, bytes]:
+    """Completa una vez y relee el binario sólo desde el servicio autorizado."""
+    if not certified:
+        raise AuthorizationDenied(
+            "Un reporte no certificado no puede persistirse como definitivo"
+        )
+    current = service.get(process.execution.execution_id, actor=actor)
+    if current is None:
+        raise ProcessPersistenceError(
+            "La ejecución desapareció antes de persistir el reporte",
+            stage="report_execution_recovery",
+            execution_id=process.execution.execution_id,
+        )
+    if current.execution.status == "completed":
+        definitive = [report for report in current.reports if report.definitive]
+        if len(definitive) != 1:
+            raise ProcessPersistenceError(
+                "La ejecución completada no tiene un único reporte definitivo",
+                stage="report_reconciliation",
+                execution_id=current.execution.execution_id,
+            )
+        return current, service.read_definitive_report(
+            current.execution.execution_id, definitive[0].report_id, actor=actor,
+        )
+    if current.execution.status not in {"running", "review"}:
+        raise ProcessPersistenceError(
+            "La ejecución no está habilitada para emitir un reporte definitivo",
+            stage="report_state", execution_id=current.execution.execution_id,
+        )
+    completed = service.complete_with_report(
+        current.execution.execution_id, content, actor=actor,
+        file_name=file_name, media_type=media_type,
+    )
+    definitive = [report for report in completed.reports if report.definitive]
+    if completed.execution.status != "completed" or len(definitive) != 1:
+        raise ProcessPersistenceError(
+            "La finalización no produjo un único reporte definitivo recuperable",
+            stage="report_reconciliation",
+            execution_id=completed.execution.execution_id,
+        )
+    durable_content = service.read_definitive_report(
+        completed.execution.execution_id, definitive[0].report_id, actor=actor,
+    )
+    if durable_content != content:
+        raise ProcessPersistenceError(
+            "El reporte durable no coincide con el contenido certificado",
+            stage="report_content_mismatch",
+            execution_id=completed.execution.execution_id,
+            report_id=definitive[0].report_id,
+        )
+    return completed, durable_content
+
+
+def _process_registry() -> dict[str, str]:
+    registry = st.session_state.setdefault("process_execution_ids", {})
+    if registry:
+        return registry
+    try:
+        raw = st.query_params.get(PROCESS_REGISTRY_QUERY_KEY, "")
+        decoded = json.loads(raw) if raw else {}
+        if isinstance(decoded, dict):
+            registry.update({
+                str(key): str(value) for key, value in decoded.items()
+                if re.fullmatch(r"[a-f0-9]{64}", str(key))
+                and re.fullmatch(r"[A-Za-z0-9-]{20,80}", str(value))
+            })
+    except Exception:
+        pass
+    return registry
+
+
+def _save_process_registry(registry: dict[str, str]) -> None:
+    st.session_state["process_execution_ids"] = dict(registry)
+    st.query_params[PROCESS_REGISTRY_QUERY_KEY] = json.dumps(
+        registry, sort_keys=True, separators=(",", ":"),
+    )
+
+
+def _streamlit_process_service(
+    actor: AuthenticatedActor | None,
+) -> LocalProcessPersistence | None:
+    if actor is None:
+        return None
+    return build_persistence().processes
+
+
+def _streamlit_process_for_file(
+    file_name: str, actor: AuthenticatedActor | None,
+) -> tuple[LocalProcessPersistence, PersistedProcess] | None:
+    """Obtiene el proceso durable de un archivo sin inferirlo por su nombre."""
+    service = _streamlit_process_service(actor)
+    if service is None or actor is None:
+        return None
+    process = st.session_state.get("persisted_processes", {}).get(file_name)
+    if not isinstance(process, PersistedProcess):
+        raise ProcessPersistenceError(
+            "No existe un proceso durable para la acción solicitada",
+            stage="streamlit_process_lookup",
+        )
+    recovered = service.get(process.execution.execution_id, actor=actor)
+    if recovered is None:
+        raise ProcessPersistenceError(
+            "El proceso durable dejó de estar disponible",
+            stage="streamlit_process_recovery",
+            document_id=process.document.document_id,
+            execution_id=process.execution.execution_id,
+        )
+    st.session_state.setdefault("persisted_processes", {})[file_name] = recovered
+    return service, recovered
+
+
+def _correction_reference(file_name: str, row_reference, action: str) -> str:
+    payload = f"{file_name}\0{row_reference}\0{action}".encode("utf-8")
+    return f"ui:{action}:{hashlib.sha256(payload).hexdigest()[:24]}"
+
+
+def _persist_streamlit_correction(
+    file_name: str, *, row_reference, classification_code: str,
+    action: str,
+):
+    """Registra una decisión manual antes de alterar el estado de Streamlit.
+
+    El registro deliberadamente sólo contiene referencias y el código de
+    clasificación. Los importes permanecen en la sesión y en el reporte, no en
+    el evento de auditoría operacional.
+    """
+    actor = _authenticated_actor()
+    resolved = _streamlit_process_for_file(file_name, actor)
+    if resolved is None:
+        return None
+    service, process = resolved
+    if process.execution.status == "running":
+        process = service.mark_review(
+            process.execution.execution_id, actor=actor,
+        )
+        st.session_state["persisted_processes"][file_name] = process
+    if process.execution.status != "review":
+        raise ProcessPersistenceError(
+            "La ejecución durable no admite nuevas correcciones",
+            stage="correction_state",
+            document_id=process.document.document_id,
+            execution_id=process.execution.execution_id,
+        )
+    event = _persist_process_correction(
+        service, process=process, actor=actor,
+        correction_id=_correction_reference(
+            file_name, row_reference, action,
+        ),
+        classification_code=(
+            "EXCLUDE" if classification_code == "__EXCLUIR__"
+            else classification_code or "UNCLASSIFIED"
+        ),
+    )
+    recovered = service.get(process.execution.execution_id, actor=actor)
+    if recovered is None:
+        raise ProcessPersistenceError(
+            "La corrección fue auditada, pero la ejecución no pudo releerse",
+            stage="correction_recovery",
+            document_id=process.document.document_id,
+            execution_id=process.execution.execution_id,
+        )
+    st.session_state["persisted_processes"][file_name] = recovered
+    return event
+
+
+def _persist_streamlit_definitive_report(
+    file_name: str, *, content: bytes, report_name: str, certified: bool,
+) -> bytes:
+    """Persiste y relee el reporte definitivo, o conserva staging explícito."""
+    if not certified:
+        return content
+    actor = _authenticated_actor()
+    resolved = _streamlit_process_for_file(file_name, actor)
+    if resolved is None:
+        return content
+    service, process = resolved
+    completed, durable_content = _persist_definitive_process_report(
+        service, process=process, actor=actor, content=content,
+        file_name=report_name,
+        media_type=(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ),
+        certified=True,
+    )
+    st.session_state["persisted_processes"][file_name] = completed
+    return durable_content
+
+
+def _ensure_streamlit_processes(archivos, actor: AuthenticatedActor | None) -> None:
+    service = _streamlit_process_service(actor)
+    if service is None or actor is None:
+        st.session_state["process_persistence_mode"] = "staging_or_legacy_disabled"
+        return
+    registry = _process_registry()
+    processes = st.session_state.setdefault("persisted_processes", {})
+    revised_scopes = st.session_state.setdefault(
+        "process_scope_revisions_pending", set(),
+    )
+    for archivo in archivos:
+        content = archivo.getvalue()
+        digest = hashlib.sha256(content).hexdigest()
+        execution_id = registry.get(digest)
+        if digest in revised_scopes and execution_id:
+            previous = service.get(execution_id, actor=actor)
+            if previous is None:
+                raise ProcessPersistenceError(
+                    "No se encontró la ejecución cuyo alcance fue modificado",
+                    stage="scope_revision_recovery", execution_id=execution_id,
+                )
+            if previous.execution.status in {"pending", "running", "review"}:
+                service.fail(
+                    execution_id, actor=actor, error_code="SCOPE_CHANGED",
+                )
+            execution_id = None
+        process = _recover_or_start_process(
+            service, actor=actor, content=content, original_name=archivo.name,
+            media_type=_process_media_type(archivo.name),
+            scope=_process_scope(archivo), execution_id=execution_id,
+        )
+        if process.execution.status == "failed":
+            raise ProcessPersistenceError(
+                "La ejecución durable está fallida y requiere conciliación antes "
+                "de iniciar otro procesamiento",
+                stage="failed_execution_recovery",
+                document_id=process.document.document_id,
+                execution_id=process.execution.execution_id,
+            )
+        processes[archivo.name] = process
+        revised_scopes.discard(digest)
+        if registry.get(digest) == process.execution.execution_id:
+            continue
+        registry[digest] = process.execution.execution_id
+        try:
+            _save_process_registry(registry)
+        except Exception as pointer_error:
+            try:
+                service.fail(
+                    process.execution.execution_id, actor=actor,
+                    error_code="PROCESS_POINTER_PERSISTENCE_FAILED",
+                )
+            except Exception:
+                pass
+            raise ProcessPersistenceError(
+                "La ejecución inició, pero no pudo guardarse su puntero de recuperación",
+                stage="process_pointer", document_id=process.document.document_id,
+                execution_id=process.execution.execution_id,
+            ) from pointer_error
+
+
+def _restore_streamlit_process_scope(
+    archivos, actor: AuthenticatedActor | None,
+) -> None:
+    """Restaura alcance y estado desde IDs URL; no infiere ejecuciones por nombre."""
+    if st.session_state.get("document_scope_editing"):
+        return
+    if st.session_state.get("process_scope_revisions_pending"):
+        return
+    service = _streamlit_process_service(actor)
+    if service is None or actor is None:
+        return
+    registry = _process_registry()
+    recovered_by_name = {}
+    recovered_pages = {}
+    recovered_periods = None
+    for archivo in archivos:
+        content = archivo.getvalue()
+        digest = hashlib.sha256(content).hexdigest()
+        execution_id = registry.get(digest)
+        if not execution_id:
+            return
+        recovered = service.get(execution_id, actor=actor)
+        if recovered is None or recovered.document.sha256 != digest:
+            raise ProcessPersistenceError(
+                "No fue posible reconciliar el documento con su ejecución durable",
+                stage="scope_recovery", execution_id=execution_id,
+            )
+        metadata = recovered.execution.metadata
+        periods = tuple(str(value) for value in metadata.get("periods", ()))
+        if recovered_periods is not None and periods != recovered_periods:
+            raise ProcessPersistenceError(
+                "Los procesos recuperados tienen períodos incompatibles",
+                stage="period_recovery", execution_id=execution_id,
+            )
+        recovered_periods = periods
+        if Path(archivo.name).suffix.lower() == ".pdf":
+            if metadata.get("page_mode") == "selected":
+                pages = list(metadata.get("selected_pages", ()))
+            else:
+                pages = list(range(1, page_count(content) + 1))
+            recovered_pages[archivo.name] = pages
+        recovered_by_name[archivo.name] = recovered
+    if len(recovered_by_name) != len(archivos):
+        return
+    signature = tuple(
+        (archivo.name, hashlib.sha256(archivo.getvalue()).hexdigest())
+        for archivo in archivos
+    )
+    st.session_state["persisted_processes"] = recovered_by_name
+    st.session_state["document_pages"] = recovered_pages
+    st.session_state["document_scope_confirmed"] = signature
+    if recovered_periods:
+        st.session_state["company_periodos_seleccionados"] = recovered_periods
+
+    raw_map = st.session_state.setdefault("raw_file_bytes", {})
+    for archivo in archivos:
+        content = archivo.getvalue()
+        digest = hashlib.sha256(content).hexdigest()
+        if actor and getattr(actor, "organization_id", None):
+            raw_map[(archivo.name, actor.organization_id, digest)] = content
+
+    # Revalidar vínculos de certificación existentes en memoria al restaurar alcance
+    for archivo in archivos:
+        df_existente = st.session_state.get("resultados", {}).get(archivo.name)
+        cert_existente = st.session_state.get("extraction_certifications", {}).get(archivo.name)
+        if df_existente is not None and cert_existente is not None:
+            _restaurar_vinculo_certificacion(cert_existente, df_existente, al_restaurar=True)
+
+
 def _contenido_para_extraer(archivo) -> bytes:
     content = archivo.getvalue()
     if Path(archivo.name).suffix.lower() == ".pdf":
@@ -1138,6 +3269,20 @@ def _confirmar_alcance_documentos(archivos) -> bool:
     if len({a.name for a in archivos}) != len(archivos):
         st.error("Hay archivos con el mismo nombre. Renómbrelos para mantener separadas sus páginas y correcciones.")
         return False
+    for a in archivos:
+        try:
+            a_digest = hashlib.sha256(a.getvalue()).hexdigest()
+            existing_meta = st.session_state.get("file_metadata", {}).get(a.name)
+            if existing_meta:
+                prev_digest = existing_meta.get("file_digest")
+                if prev_digest and prev_digest != a_digest:
+                    st.error(
+                        f"El archivo '{a.name}' tiene un nombre idéntico a un documento ya procesado pero con distinto contenido. "
+                        f"Renómbrelo para mantener separadas sus páginas, correcciones y evidencia."
+                    )
+                    return False
+        except Exception:
+            pass
     signature = tuple((a.name, hashlib.sha256(a.getvalue()).hexdigest()) for a in archivos)
     if (st.session_state.get("document_scope_confirmed") == signature
             and not st.session_state.get("document_scope_editing", False)):
@@ -1193,13 +3338,16 @@ def _confirmar_alcance_documentos(archivos) -> bool:
             previous_pages = st.session_state.get("document_pages", {})
             for name, digest in signature:
                 if previous.get(name) != digest or previous_pages.get(name) != selections.get(name):
+                    st.session_state.setdefault(
+                        "process_scope_revisions_pending", set(),
+                    ).add(digest)
                     revisions = st.session_state.setdefault("extraction_revisions", {})
                     revisions[name] = revisions.get(name, 0) + 1
                     st.session_state.metadata_confirmada = False
                     st.session_state.company_periodos_detectados = ()
                     st.session_state.company_periodos_seleccionados = ()
-                    for state_key in ("resultados", "metadata_files", "document_intel", "extraction_pending",
-                                      "extraction_resolved", "extraction_certifications", "processed_at",
+                    for state_key in ("resultados", "metadata_files", "document_intel", "document_families", "extraction_pending",
+                                      "extraction_resolved", "extraction_certifications", "classified_source_snapshots", "processed_at",
                                       "quality_controls", "depreciation_reclassifications"):
                         st.session_state.setdefault(state_key, {}).pop(name, None)
             st.session_state.document_pages = selections
@@ -1219,6 +3367,18 @@ def main():
         "(código → diccionario → reglas) → cola de revisión → balance normalizado."
     )
 
+    try:
+        actor = _require_app_role("analyst")
+    except (AuthenticationRequired, AuthorizationDenied) as exc:
+        st.error(f"Acceso bloqueado: {exc}")
+        st.stop()
+    if actor is None:
+        st.caption("Modo staging sin autenticación: las acciones quedan con actor vacío.")
+    else:
+        st.caption(
+            f"Sesión autenticada: {actor.display_name} · Organización: {actor.organization_id}"
+        )
+
     catalogo = cargar_catalogo()
     dic_base = cargar_diccionario_base()
 
@@ -1230,12 +3390,15 @@ def main():
         st.session_state.metadata_files = {}
     if 'document_intel' not in st.session_state:
         st.session_state.document_intel = {}
+    if 'document_families' not in st.session_state:
+        st.session_state.document_families = {}
     if 'extraction_pending' not in st.session_state:
         st.session_state.extraction_pending = {}
     if 'extraction_resolved' not in st.session_state:
         st.session_state.extraction_resolved = {}
     if 'extraction_certifications' not in st.session_state:
         st.session_state.extraction_certifications = {}
+        st.session_state.classified_source_snapshots = {}
     if 'depreciation_reclassifications' not in st.session_state:
         st.session_state.depreciation_reclassifications = {}
     if 'correcciones' not in st.session_state:
@@ -1295,6 +3458,14 @@ def main():
         st.session_state.company_periodos_seleccionados = ()
         _mostrar_resumen_catalogo(catalogo)
         return
+
+    try:
+        # La URL contiene exclusivamente punteros opacos por hash. Si existen,
+        # el alcance durable se recupera antes de mostrar o confirmar páginas.
+        _restore_streamlit_process_scope(archivos, actor)
+    except (ProcessPersistenceError, AuthorizationDenied, ValueError) as exc:
+        st.error(f"No se pudo recuperar el procesamiento durable: {exc}")
+        st.stop()
 
     if not _confirmar_alcance_documentos(archivos):
         return
@@ -1474,6 +3645,14 @@ def main():
         _visor_documento(first_file, altura="58vh", mostrar_titulo=False)
         return
 
+    try:
+        # Sólo se crea una ejecución después de que páginas, períodos y metadata
+        # fueron confirmados. Cualquier fallo detiene el procesamiento.
+        _ensure_streamlit_processes(archivos, actor)
+    except (ProcessPersistenceError, AuthorizationDenied, ValueError, OSError) as exc:
+        st.error(f"No se pudo iniciar o reconciliar el procesamiento durable: {exc}")
+        st.stop()
+
     company_giro_norm = None if st.session_state.company_giro == 'Otro' else st.session_state.company_giro.lower()
 
     nombres_subidos = [a.name for a in archivos]
@@ -1481,7 +3660,11 @@ def main():
         if k not in nombres_subidos:
             st.session_state.resultados.pop(k, None)
             st.session_state.metadata_files.pop(k, None)
-    for state_key in ('extraction_pending', 'extraction_resolved', 'extraction_certifications'):
+            st.session_state.document_families.pop(k, None)
+    for state_key in (
+        'document_families', 'extraction_pending', 'extraction_resolved',
+        'extraction_certifications', 'classified_source_snapshots', 'file_metadata',
+    ):
         state = st.session_state.get(state_key, {})
         for k in list(state.keys()):
             if k not in nombres_subidos:
@@ -1494,8 +3677,9 @@ def main():
             if archivo.name not in st.session_state.resultados:
                 with st.spinner(f"Clasificando cuentas de {archivo.name}..."):
                     lineas_encabezado = _extraer_lineas_encabezado(archivo)
+                    doc_meta_raw = extraer_metadata(lineas_encabezado)
                     meta_indiv = _aplicar_metadata_confirmada(
-                        extraer_metadata(lineas_encabezado)
+                        deepcopy(doc_meta_raw)
                     )
                     st.session_state.metadata_files[archivo.name] = meta_indiv
 
@@ -1525,14 +3709,17 @@ def main():
                             cuenta_clasificacion, company_giro_norm,
                         )
                         _t1_legacy = (time.perf_counter() - _t0_legacy) * 1000
+                        nombre_contable = _nombre_con_contexto(
+                            c.nombre, c.jerarquia_contable,
+                        )
                         origen_efectivo = _origen_efectivo(
-                            c.origen_columna, monto_seleccionado, c.nombre,
+                            c.origen_columna, monto_seleccionado, nombre_contable,
                         )
                         if (r.get('codigo_estandar') and
                                 not _codigo_compatible_con_origen(
                                     r['codigo_estandar'], c.origen_columna,
                                     monto_seleccionado,
-                                    c.nombre)):
+                                    nombre_contable)):
                             r = {
                                 **r,
                                 'codigo_estandar': None,
@@ -1546,8 +3733,12 @@ def main():
                             'nombre_original': c.nombre,
                             'nombre_normalizado': normalizar_nombre(c.nombre),
                             'monto': monto_seleccionado,
+                            'pagina': getattr(c, 'pagina', None),
+                            'respaldo_documental': getattr(c, 'respaldo_documental', None),
+                            **{col: float(c.montos_columnas.get(col, 0.0) or 0.0) for col in RAW_MONETARY_COLUMNS},
                             **campos_periodos,
                             'columnas_derivadas': ', '.join(c.columnas_derivadas),
+                            'jerarquia_contable': c.jerarquia_contable or '',
                             'origen_columna': c.origen_columna.value,
                             'origen_columna_efectiva': origen_efectivo,
                             'es_total': c.es_total,
@@ -1560,7 +3751,7 @@ def main():
                             'nota': r.get('nota_regla_especial', ''),
                             'confianza_extraccion': c.confianza_extraccion,
                             'origen_columna_display': _etiqueta_origen(
-                                c.origen_columna, monto_seleccionado, c.nombre,
+                                c.origen_columna, monto_seleccionado, nombre_contable,
                             ),
                             'nombre_revision_usuario': '',
                             'tipo_revision': '',
@@ -1570,7 +3761,50 @@ def main():
                             'tiempo_clasificacion': round(_t1_legacy, 3),
                         })
                     df_file = pd.DataFrame(filas)
+                    df_file.attrs["document_family"] = st.session_state.document_families.get(
+                        archivo.name, "",
+                    )
                     st.session_state.resultados[archivo.name] = df_file
+                    actor_leg = _authenticated_actor()
+                    actor_leg_org = str(getattr(actor_leg, "organization_id", "") or "").strip() or None
+                    doc_rut_raw = (getattr(doc_meta_raw, "rut", "") or "").strip()
+                    doc_rut_norm = normalizar_rut(doc_rut_raw)
+                    file_leg_company = getattr(meta_indiv, "razon_social", "") or ""
+                    file_leg_period = getattr(meta_indiv, "periodo", "") or str(st.session_state.get("company_anio", ""))
+
+                    file_digest = dict(st.session_state.get("document_scope_confirmed") or ()).get(archivo.name)
+                    if not file_digest and hasattr(archivo, "getvalue"):
+                        file_digest = hashlib.sha256(archivo.getvalue()).hexdigest()
+                    confirmed_scope = dict(st.session_state.get("document_scope_confirmed") or ())
+                    scope_confirmed = bool(archivo.name in confirmed_scope and confirmed_scope[archivo.name] == file_digest)
+                    confirmed_rut_norm = normalizar_rut(st.session_state.get("company_rut", ""))
+                    rut_matches = bool(doc_rut_norm and confirmed_rut_norm and doc_rut_norm == confirmed_rut_norm)
+                    is_session_confirmed = (st.session_state.get("metadata_confirmada") is True)
+
+                    is_verified = bool(
+                        is_session_confirmed
+                        and doc_rut_norm
+                        and rut_matches
+                        and scope_confirmed
+                        and actor_leg_org
+                    )
+
+                    _detectar_bloquear_colision_homonimo(archivo.name, file_digest, actor_leg_org)
+                    st.session_state.setdefault("file_metadata", {})[archivo.name] = {
+                        "rut": doc_rut_norm,
+                        "company_name": file_leg_company.strip(),
+                        "period": file_leg_period,
+                        "organization_id": actor_leg_org,
+                        "file_digest": file_digest,
+                        "verified": True if is_verified else False,
+                    }
+                    _vincular_certificacion_contenido(
+                        st.session_state.get("extraction_certifications", {}).get(archivo.name), df_file)
+                    _registrar_evento_auditoria(
+                        "Recertificación", archivo.name,
+                        "Certificación vinculada a la versión exacta de las filas extraídas",
+                        df_file.attrs.get("certification_binding", {}).get("digest", ""), df_file,
+                    )
 
                     # SHADOW MODE — homologación comparativa contra motor legacy
                     if SHADOW_MODE and Path(archivo.name).suffix.lower() == '.pdf':
@@ -1628,8 +3862,9 @@ def main():
                 with st.spinner(f"Clasificando cuentas de {archivo.name}..."):
                     _t0 = time.perf_counter()
                     lineas_encabezado = _extraer_lineas_encabezado(archivo)
+                    doc_meta_raw = extraer_metadata(lineas_encabezado)
                     meta_indiv = _aplicar_metadata_confirmada(
-                        extraer_metadata(lineas_encabezado)
+                        deepcopy(doc_meta_raw)
                     )
                     st.session_state.metadata_files[archivo.name] = meta_indiv
 
@@ -1664,14 +3899,17 @@ def main():
                             and not c.es_total
                         ):
                             classification_amount = float(monto_seleccionado)
+                        nombre_contable = _nombre_con_contexto(
+                            c.nombre, c.jerarquia_contable,
+                        )
                         origen_efectivo = _origen_efectivo(
-                            c.origen_columna, classification_amount, c.nombre,
+                            c.origen_columna, classification_amount, nombre_contable,
                         )
                         account_tipo = _resolver_tipo_cuenta(origen_efectivo, c.codigo)
                         if (origen_efectivo == 'pasivo'
-                                and _es_contra_activo(c.nombre)):
+                                and _es_contra_activo(nombre_contable)):
                             account_tipo = 'ACTIVO'
-                        if _es_partida_patrimonial(c.nombre):
+                        if _es_partida_patrimonial(nombre_contable):
                             account_tipo = 'PATRIMONIO'
                         if classification_amount is None:
                             codigo_clasificado = ""
@@ -1690,6 +3928,7 @@ def main():
                                 ab.account_name,
                                 account_tipo=account_tipo,
                                 account_section=c.seccion_contable,
+                                account_hierarchy=c.jerarquia_contable,
                             )
                             tiempo_clasif_ms = round((time.perf_counter() - _t0_clasif) * 1000, 3)
                             adjustment = hp._rule_processor.aplicar(
@@ -1705,7 +3944,7 @@ def main():
                             if (final_code and
                                     not _codigo_compatible_con_origen(
                                         final_code, c.origen_columna,
-                                        classification_amount, c.nombre)):
+                                        classification_amount, nombre_contable)):
                                 final_code = None
                                 classification = {
                                     **classification,
@@ -1739,8 +3978,12 @@ def main():
                             'nombre_original': c.nombre,
                             'nombre_normalizado': normalizar_nombre(c.nombre),
                             'monto': monto_seleccionado,
+                            'pagina': getattr(c, 'pagina', None),
+                            'respaldo_documental': getattr(c, 'respaldo_documental', None),
+                            **{col: float(c.montos_columnas.get(col, 0.0) or 0.0) for col in RAW_MONETARY_COLUMNS},
                             **campos_periodos,
                             'columnas_derivadas': ', '.join(c.columnas_derivadas),
+                            'jerarquia_contable': c.jerarquia_contable or '',
                             'origen_columna': c.origen_columna.value,
                             'origen_columna_efectiva': origen_efectivo,
                             'es_total': c.es_total,
@@ -1751,7 +3994,7 @@ def main():
                             'nota': nota,
                             'confianza_extraccion': c.confianza_extraccion,
                             'origen_columna_display': _etiqueta_origen(
-                                c.origen_columna, classification_amount, c.nombre),
+                                c.origen_columna, classification_amount, nombre_contable),
                             'nombre_revision_usuario': '',
                             'tipo_revision': '',
                             'origen': clasif_origen,
@@ -1761,7 +4004,50 @@ def main():
                         })
 
                     df_file = pd.DataFrame(filas)
+                    df_file.attrs["document_family"] = st.session_state.document_families.get(
+                        archivo.name, "",
+                    )
                     st.session_state.resultados[archivo.name] = df_file
+                    actor_new = _authenticated_actor()
+                    actor_new_org = str(getattr(actor_new, "organization_id", "") or "").strip() or None
+                    doc_rut_raw = (getattr(doc_meta_raw, "rut", "") or "").strip()
+                    doc_rut_norm = normalizar_rut(doc_rut_raw)
+                    file_new_company = getattr(meta_indiv, "razon_social", "") or ""
+                    file_new_period = getattr(meta_indiv, "periodo", "") or str(st.session_state.get("company_anio", ""))
+
+                    file_digest = dict(st.session_state.get("document_scope_confirmed") or ()).get(archivo.name)
+                    if not file_digest and hasattr(archivo, "getvalue"):
+                        file_digest = hashlib.sha256(archivo.getvalue()).hexdigest()
+                    confirmed_scope = dict(st.session_state.get("document_scope_confirmed") or ())
+                    scope_confirmed = bool(archivo.name in confirmed_scope and confirmed_scope[archivo.name] == file_digest)
+                    confirmed_rut_norm = normalizar_rut(st.session_state.get("company_rut", ""))
+                    rut_matches = bool(doc_rut_norm and confirmed_rut_norm and doc_rut_norm == confirmed_rut_norm)
+                    is_session_confirmed = (st.session_state.get("metadata_confirmada") is True)
+
+                    is_verified = bool(
+                        is_session_confirmed
+                        and doc_rut_norm
+                        and rut_matches
+                        and scope_confirmed
+                        and actor_new_org
+                    )
+
+                    _detectar_bloquear_colision_homonimo(archivo.name, file_digest, actor_new_org)
+                    st.session_state.setdefault("file_metadata", {})[archivo.name] = {
+                        "rut": doc_rut_norm,
+                        "company_name": file_new_company.strip(),
+                        "period": file_new_period,
+                        "organization_id": actor_new_org,
+                        "file_digest": file_digest,
+                        "verified": True if is_verified else False,
+                    }
+                    _vincular_certificacion_contenido(
+                        st.session_state.get("extraction_certifications", {}).get(archivo.name), df_file)
+                    _registrar_evento_auditoria(
+                        "Recertificación", archivo.name,
+                        "Certificación vinculada a la versión exacta de las filas extraídas",
+                        df_file.attrs.get("certification_binding", {}).get("digest", ""), df_file,
+                    )
 
                     _t1 = time.perf_counter()
                     _shadow_logger.info(
@@ -1776,45 +4062,12 @@ def main():
             pass
     # After processing all uploaded files, propagate classifications across all balances
     if 'propagation_done' not in st.session_state:
-        # Define helper to propagate classifications across balances
-        def propagar_entre_balances():
-            """Propaga códigos clasificados entre balances cargados."""
-            # Build mapping from normalized account name to list of (file, index)
-            name_map = {}
-            for fname, df in st.session_state.resultados.items():
-                for idx, row in df.iterrows():
-                    nombre = row['nombre_original']
-                    if not nombre:
-                        continue
-                    norm = normalizar_nombre(nombre)
-                    name_map.setdefault(norm, []).append((fname, idx, row['codigo_clasificado']))
-            # Propagar si existe alguna clasificación
-            for norm, entries in name_map.items():
-                classified_code = None
-                for fname, idx, cod in entries:
-                    if cod and cod not in ('', '__EXCLUIR__'):
-                        classified_code = cod
-                        break
-                if classified_code:
-                    for fname, idx, cod in entries:
-                        row = st.session_state.resultados[fname].loc[idx]
-                        if ((not cod or cod == '')
-                                and _codigo_compatible_con_origen(
-                                    classified_code,
-                                    row.get('origen_columna'),
-                                    row.get('monto'),
-                                    row.get('nombre_original'),
-                                )):
-                            st.session_state.resultados[fname].at[idx, 'codigo_clasificado'] = classified_code
-                            st.session_state.resultados[fname].at[idx, 'metodo'] = 'propagado_automático'
-                            st.session_state.resultados[fname].at[idx, 'confianza'] = 1.0
-                            st.session_state.resultados[fname].at[idx, 'requiere_revision'] = False
-                            if 'origen' in st.session_state.resultados[fname].columns:
-                                st.session_state.resultados[fname].at[idx, 'origen'] = 'Código'
-                                st.session_state.resultados[fname].at[idx, 'regla'] = 'propagado_automático'
-                                st.session_state.resultados[fname].at[idx, 'evidencia'] = 'Propagación automática entre balances'
-        propagar_entre_balances()
+        propagar_entre_balances_seguro(
+            st.session_state.resultados,
+            metadatos_archivos=st.session_state.get("file_metadata"),
+        )
         st.session_state['propagation_done'] = True
+
 
     with st.sidebar:
         st.divider()
@@ -2092,14 +4345,21 @@ def _aplicar_correcciones_extraccion(
         derived = list(cuenta.columnas_derivadas)
         if amounts != cuenta.montos_columnas and "correccion_humana" not in derived:
             derived.append("correccion_humana")
-        corrected.append(replace(
+        nueva_c = replace(
             cuenta,
             montos_columnas=amounts,
             monto=amount,
             origen_columna=origin,
             es_total=bool(row.get("total", cuenta.es_total)),
             columnas_derivadas=derived,
-        ))
+        )
+        if hasattr(cuenta, "respaldo_documental"):
+            setattr(nueva_c, "respaldo_documental", getattr(cuenta, "respaldo_documental"))
+        if hasattr(cuenta, "pagina"):
+            setattr(nueva_c, "pagina", getattr(cuenta, "pagina"))
+        if getattr(cuenta, "es_subtotal_manual", False):
+            setattr(nueva_c, "es_subtotal_manual", True)
+        corrected.append(nueva_c)
     certification = certificar_extraccion_columnas(
         corrected, metodo="revision_humana_8_columnas",
     )
@@ -2109,6 +4369,8 @@ def _aplicar_correcciones_extraccion(
 def _crear_cuenta_manual_extraccion(
     cuentas: list[CuentaRaw], *, codigo: str, nombre: str,
     montos: dict[str, float], es_total: bool = False,
+    pagina: int | None = None,
+    respaldo_documental: dict[str, Any] | None = None,
 ) -> CuentaRaw:
     """Construye una fila auditable ingresada por el analista."""
     if not str(nombre or '').strip():
@@ -2130,7 +4392,7 @@ def _crear_cuenta_manual_extraccion(
             amount = amounts[column]
             origin = origin_by_column[column]
             break
-    return CuentaRaw(
+    c = CuentaRaw(
         linea=max((int(c.linea) for c in cuentas), default=-1) + 1,
         codigo=str(codigo or '').strip() or None,
         nombre=str(nombre).strip(),
@@ -2141,6 +4403,138 @@ def _crear_cuenta_manual_extraccion(
         montos_columnas=amounts,
         columnas_derivadas=["ingreso_manual_analista"],
     )
+    if pagina is not None:
+        setattr(c, "pagina", pagina)
+    if respaldo_documental is not None:
+        setattr(c, "respaldo_documental", respaldo_documental)
+    return c
+
+
+def _ejecutar_incorporar_cuenta_omitida(
+    filename: str,
+    *,
+    codigo: str,
+    nombre: str,
+    pagina: int | None,
+    ubicacion: str,
+    montos: dict[str, Any],
+    confirmacion_explicita: bool,
+    es_total: bool = False,
+) -> tuple[bool, str, CuentaRaw | None]:
+    """Valida documentalmente e incorpora una cuenta omitida por la extracción.
+
+    Exige:
+    1. Actor acreditado con rol 'analyst' y pertenencia a la organización del documento.
+    2. Identidad y huella del archivo real, rechazando sustituciones.
+    3. Ubicación física comprobable en el documento (página, celda o coordenada).
+    4. Confirmación explícita de importes para las ocho columnas.
+    5. Cifras numéricas finitas distinguiendo ausencia de cero confirmado.
+    6. No permite que subtotales manuales actúen como controles de certificación.
+    7. No contamina el snapshot prístino de extracción.
+    """
+    if not str(nombre or "").strip():
+        return False, "El nombre de la cuenta es obligatorio.", None
+
+    # 1. Actor acreditado y organización (Condición 1)
+    act = _authenticated_actor()
+    if act is None or not getattr(act, "actor_id", None):
+        return False, "Operación rechazada: no existe un actor autenticado en la sesión.", None
+    try:
+        require_role(act, "analyst")
+    except Exception as exc:
+        return False, f"Operación rechazada: el actor no cuenta con el rol 'analyst' autorizado ({exc}).", None
+
+    file_meta = (st.session_state.get("file_metadata") or {}).get(filename, {})
+    doc_org = file_meta.get("organization_id")
+    actor_org = getattr(act, "organization_id", None)
+    if doc_org and actor_org != doc_org:
+        return False, f"Operación rechazada: la organización del actor ('{actor_org}') no coincide con la del archivo ('{doc_org}').", None
+
+    # 2. Huella del archivo real (Condición 2)
+    expected_digest = file_meta.get("file_digest")
+    source_path = file_meta.get("source_path") or (st.session_state.get("file_sources") or {}).get(filename)
+    try:
+        real_hash, status_archivo = _obtener_huella_archivo_real(
+            filename,
+            expected_digest=expected_digest,
+            organization_id=doc_org or actor_org,
+            source_path=source_path,
+            actor=act,
+        )
+    except AuthorizationDenied:
+        return False, f"Operación rechazada: actor no autorizado para acceder al archivo '{filename}'.", None
+
+    if not real_hash or status_archivo != "disponible":
+        return False, f"Operación rechazada: no se pudo verificar la huella del archivo real '{filename}'.", None
+
+    # 3. Ubicación física comprobable
+    ubicacion_str = str(ubicacion or "").strip()
+    if (pagina is None or (isinstance(pagina, (int, float)) and pagina <= 0)) and not ubicacion_str:
+        return False, "Debe indicar la ubicación comprobable en el documento (página o celda/coordenada).", None
+
+    # 4. Confirmación explícita (Condición 6)
+    if not confirmacion_explicita:
+        return False, "Debe confirmar explícitamente los importes según el documento original.", None
+
+    # 5. Distinguir ausencia de valor de cero confirmado y validar finitud (Condición 6)
+    montos_confirmados: dict[str, float] = {}
+    for col in RAW_MONETARY_COLUMNS:
+        if col not in montos or montos[col] is None:
+            return False, f"Falta el importe para la columna requerida '{col}'. No se permite inventar ceros para forzar cuadratura.", None
+        try:
+            val = float(montos[col])
+        except (ValueError, TypeError):
+            return False, f"El importe en la columna '{col}' no es un número válido.", None
+        if not math.isfinite(val):
+            return False, f"El importe en la columna '{col}' no es un número finito.", None
+        montos_confirmados[col] = val
+
+    # 6. Prevención de subtotales manuales que actúen como controles independientes (Condición 7)
+    es_subtotal = bool(es_total or _es_control_o_subtotal(nombre))
+
+    respaldo_documental = {
+        "archivo": filename,
+        "file_name": filename,
+        "file_digest": real_hash,
+        "pagina": pagina,
+        "ubicacion": ubicacion_str or (f"Página {pagina}" if pagina is not None else ""),
+        "actor": act.actor_id,
+        "actor_id": act.actor_id,
+        "actor_org": actor_org or "",
+        "confirmacion_explicita": True,
+        "importes": montos_confirmados,
+        "importes_confirmados": montos_confirmados,
+        "es_subtotal": es_subtotal,
+        "timestamp": datetime.now().astimezone().isoformat(),
+    }
+
+    # Asegurar snapshot prístino e inmutable en classified_source_snapshots (Condición 3)
+    resultado = st.session_state.get("extraction_pending", {}).get(filename)
+    if "classified_source_snapshots" not in st.session_state or filename not in st.session_state["classified_source_snapshots"]:
+        if resultado and hasattr(resultado, "cuentas"):
+            st.session_state.setdefault("classified_source_snapshots", {})[filename] = {
+                "scope": _alcance_snapshot_clasificado(filename),
+                "accounts": deepcopy(resultado.cuentas),
+                "periods": list(getattr(resultado, "periodos_detectados", []) or []),
+                "currencies": list(getattr(resultado, "monedas_detectadas", []) or []),
+                "metodo": getattr(getattr(resultado, "certificacion_extraccion", None), "metodo", "revision_humana_8_columnas"),
+            }
+
+    cuentas_actuales = resultado.cuentas if (resultado and hasattr(resultado, "cuentas")) else []
+
+    nueva_cuenta = _crear_cuenta_manual_extraccion(
+        cuentas_actuales,
+        codigo=codigo,
+        nombre=nombre,
+        montos=montos_confirmados,
+        es_total=es_subtotal,
+        pagina=pagina,
+        respaldo_documental=respaldo_documental,
+    )
+    if es_subtotal:
+        setattr(nueva_cuenta, "es_subtotal_manual", True)
+
+    return True, "", nueva_cuenta
 
 
 def _diagnosticar_filas_extraccion(
@@ -2540,44 +4934,90 @@ def _mostrar_correccion_extraccion(filename: str) -> None:
             "aparezca en la tabla. Copie sus ocho columnas tal como están impresas."
         )
         with st.form(f"manual_extraction_row_{filename}", clear_on_submit=True):
-            codigo_manual = st.text_input("Código original, si existe")
-            nombre_manual = st.text_input("Nombre de la cuenta")
+            codigo_manual = st.text_input("Código original, si existe", key=f"manual_code_{filename}")
+            nombre_manual = st.text_input("Nombre de la cuenta", key=f"manual_name_{filename}")
+            loc_c1, loc_c2 = st.columns(2)
+            pagina_manual = loc_c1.number_input(
+                "Página en el documento", min_value=1, step=1, value=1, key=f"manual_page_{filename}",
+            )
+            ubicacion_manual = loc_c2.text_input(
+                "Ubicación / Coordenada / Celda", value="", key=f"manual_loc_{filename}",
+                help="Ej: Celda B14, fila 28 o coordenada física",
+            )
             m1, m2, m3, m4 = st.columns(4)
-            debitos_manual = m1.number_input("Debe", value=0.0, format="%.0f")
-            creditos_manual = m2.number_input("Haber", value=0.0, format="%.0f")
-            saldo_deudor_manual = m3.number_input("Saldo deudor", value=0.0, format="%.0f")
-            saldo_acreedor_manual = m4.number_input("Saldo acreedor", value=0.0, format="%.0f")
+            debitos_manual = m1.number_input("Debe", value=0.0, format="%.2f", key=f"man_deb_{filename}")
+            creditos_manual = m2.number_input("Haber", value=0.0, format="%.2f", key=f"man_cred_{filename}")
+            saldo_deudor_manual = m3.number_input("Saldo deudor", value=0.0, format="%.2f", key=f"man_sdeud_{filename}")
+            saldo_acreedor_manual = m4.number_input("Saldo acreedor", value=0.0, format="%.2f", key=f"man_sacred_{filename}")
             c1m, c2m, c3m, c4m = st.columns(4)
-            activo_manual = c1m.number_input("Activo", value=0.0, format="%.0f")
-            pasivo_manual = c2m.number_input("Pasivo", value=0.0, format="%.0f")
-            perdida_manual = c3m.number_input("Pérdidas", value=0.0, format="%.0f")
-            ganancia_manual = c4m.number_input("Ganancias", value=0.0, format="%.0f")
-            total_manual = st.checkbox("Es subtotal, resultado o total impreso")
+            activo_manual = c1m.number_input("Activo", value=0.0, format="%.2f", key=f"man_act_{filename}")
+            pasivo_manual = c2m.number_input("Pasivo", value=0.0, format="%.2f", key=f"man_pas_{filename}")
+            perdida_manual = c3m.number_input("Pérdidas", value=0.0, format="%.2f", key=f"man_per_{filename}")
+            ganancia_manual = c4m.number_input("Ganancias", value=0.0, format="%.2f", key=f"man_gan_{filename}")
+            total_manual = st.checkbox(
+                "Es subtotal, resultado o total impreso (no se sumará al detalle ni autocertifica)",
+                key=f"man_tot_{filename}",
+            )
+            confirm_manual = st.checkbox(
+                "Confirmo explícitamente los importes según el documento original",
+                value=False,
+                key=f"man_conf_{filename}",
+            )
             agregar_manual = st.form_submit_button("Agregar cuenta a la extracción")
         if agregar_manual:
-            try:
-                nueva = _crear_cuenta_manual_extraccion(
-                    resultado.cuentas,
-                    codigo=codigo_manual,
-                    nombre=nombre_manual,
-                    montos={
-                        "debitos": debitos_manual, "creditos": creditos_manual,
-                        "saldo_deudor": saldo_deudor_manual,
-                        "saldo_acreedor": saldo_acreedor_manual,
-                        "activo": activo_manual, "pasivo": pasivo_manual,
-                        "perdida": perdida_manual, "ganancia": ganancia_manual,
-                    },
-                    es_total=total_manual,
-                )
-            except ValueError as exc:
-                st.error(str(exc))
+            ok, msg, nueva = _ejecutar_incorporar_cuenta_omitida(
+                filename,
+                codigo=codigo_manual,
+                nombre=nombre_manual,
+                pagina=int(pagina_manual) if pagina_manual else None,
+                ubicacion=ubicacion_manual,
+                montos={
+                    "debitos": debitos_manual, "creditos": creditos_manual,
+                    "saldo_deudor": saldo_deudor_manual, "saldo_acreedor": saldo_acreedor_manual,
+                    "activo": activo_manual, "pasivo": pasivo_manual,
+                    "perdida": perdida_manual, "ganancia": ganancia_manual,
+                },
+                confirmacion_explicita=confirm_manual,
+                es_total=total_manual,
+            )
+            if not ok:
+                st.error(msg)
             else:
-                resultado.cuentas.append(nueva)
-                resultado.certificacion_extraccion = certificar_extraccion_columnas(
-                    resultado.cuentas, metodo="revision_humana_8_columnas",
+                _persist_streamlit_correction(
+                    filename,
+                    row_reference=f"manual-row:{nueva.linea}",
+                    classification_code=(
+                        "TOTAL_CONTROL" if total_manual else "UNCLASSIFIED"
+                    ),
+                    action="manual-row",
                 )
+                resultado.cuentas.append(nueva)
+                filas_recert = []
+                for c in resultado.cuentas:
+                    r_c = {
+                        "linea": c.linea,
+                        "codigo_original": c.codigo or "",
+                        "nombre_original": c.nombre,
+                        "cuenta": c.nombre,
+                        "pagina": getattr(c, "pagina", None),
+                        "es_total": c.es_total,
+                        "total": c.es_total,
+                        **{col: float(c.montos_columnas.get(col, 0.0) or 0.0) for col in RAW_MONETARY_COLUMNS},
+                    }
+                    if hasattr(c, "respaldo_documental"):
+                        r_c["respaldo_documental"] = getattr(c, "respaldo_documental")
+                    filas_recert.append(r_c)
+                df_recert = pd.DataFrame(filas_recert)
+                nueva_cert = _recertificar_balance_columnas(
+                    filename, df_recert, resultado.certificacion_extraccion,
+                )
+                resultado.certificacion_extraccion = nueva_cert
+                st.session_state.setdefault("extraction_certifications", {})[filename] = nueva_cert
                 revisions[filename] = revision + 1
-                st.success("Cuenta incorporada. Revise la certificación actualizada.")
+                if nueva_cert.estado == "certificada":
+                    st.success("Cuenta incorporada y respaldada. Extracción certificada exitosamente.")
+                else:
+                    st.info("Cuenta incorporada con respaldo documental. Revise la certificación actualizada.")
                 st.rerun()
     st.caption("Puede corregir varias celdas antes de guardar. Los números conservan su precisión; los separadores se adaptan al idioma del navegador.")
     with st.form(f"extraction_batch_{filename}_{revision}"):
@@ -2654,6 +5094,12 @@ def _mostrar_correccion_extraccion(filename: str) -> None:
                 edited = pd.concat([edited, controles_editados], ignore_index=True)
         submitted = st.form_submit_button("🔎 Verificar correcciones y continuar", type="primary")
     if submitted:
+        _persist_streamlit_correction(
+            filename,
+            row_reference=f"extraction-batch:{revision}",
+            classification_code="PENDING_REVIEW",
+            action="extraction-batch",
+        )
         corrected, certification = _aplicar_correcciones_extraccion(
             resultado.cuentas, edited,
         )
@@ -2686,6 +5132,11 @@ def _extraer_cuentas(archivo) -> tuple[list[CuentaRaw], object]:
             tmp_path.write_bytes(_contenido_para_extraer(archivo))
             parser = ParserPDF()
             resultado = parser.parsear(tmp_path)
+        st.session_state.setdefault("document_families", {})[archivo.name] = document_family(
+            {"requirio_ocr": bool(getattr(resultado, "requirio_ocr", False))},
+            [{"codigo_original": cuenta.codigo or "", "is_total": cuenta.es_total}
+             for cuenta in resultado.cuentas],
+        )
         for adv in resultado.advertencias: st.warning(adv)
         document_context = getattr(resultado, 'document_context', None)
         signature = getattr(document_context, 'signature', None)
@@ -2697,6 +5148,7 @@ def _extraer_cuentas(archivo) -> tuple[list[CuentaRaw], object]:
             )
             return [], document_context
         certificacion = getattr(resultado, 'certificacion_extraccion', None)
+        _guardar_snapshot_clasificado(archivo.name, resultado)
         st.session_state.setdefault("extraction_certifications", {})[archivo.name] = certificacion
         if certificacion is not None and certificacion.estado == 'fallida' and not _permite_clasificar_extraccion(certificacion):
             st.error(
@@ -2766,10 +5218,23 @@ def _extraer_cuentas(archivo) -> tuple[list[CuentaRaw], object]:
         return resultado.cuentas, document_context
     else:
         cuentas = parsear_excel(archivo)
+        st.session_state.setdefault("document_families", {})[archivo.name] = document_family(
+            {"requirio_ocr": False},
+            [{"codigo_original": cuenta.codigo or "", "is_total": cuenta.es_total}
+             for cuenta in cuentas],
+        )
         certificacion = certificar_extraccion_columnas(
             cuentas, metodo="excel_8_columns",
         )
         st.session_state.setdefault("extraction_certifications", {})[archivo.name] = certificacion
+        st.session_state.setdefault("classified_source_snapshots", {})[archivo.name] = {
+            "scope": ("excel", (archivo.name,), ()),
+            "accounts": deepcopy(cuentas),
+            "periods": [],
+            "currencies": [],
+            "metodo": "excel_8_columns",
+        }
+
         if certificacion.estado == "fallida" and not _permite_clasificar_extraccion(certificacion):
             st.error(
                 "Las ocho columnas del Excel no reproducen sus controles "
@@ -3054,22 +5519,39 @@ def _tab_inteligencia() -> None:
 
 
 def _tab_resumen(df: pd.DataFrame):
-    col1, col2, col3, col4 = st.columns(4)
-    total = len(df)
-    pendientes = _pendientes_revision(df)
-    sin_clasificar = (pendientes['codigo_clasificado'] == '').sum()
-    requiere_rev = len(pendientes)
+    metricas = account_metrics(df.to_dict('records'))
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
+    total = metricas['accounts_total_detail']
+    requiere_rev = metricas['accounts_pending_review']
     confianza_prom = df.loc[df['confianza'] > 0, 'confianza'].mean()
 
-    col1.metric("Cuentas extraídas", total)
-    col2.metric("Sin clasificar", sin_clasificar)
-    col3.metric("En cola de revisión", int(requiere_rev), delta=f"{100*requiere_rev/total:.0f}%" if total else None, delta_color="inverse")
-    col4.metric("Confianza promedio", f"{confianza_prom:.0%}" if pd.notna(confianza_prom) else "—")
+    col1.metric("Detalle", total)
+    col2.metric("Específicas", metricas['accounts_classified_specific'])
+    col3.metric("Residuales", metricas['accounts_classified_residual'])
+    col4.metric("Sin clasificar", metricas['accounts_unclassified'])
+    col5.metric("Pendientes", requiere_rev)
+    col6.metric("Controles", metricas['accounts_controls'])
+    st.caption(
+        f"Confianza promedio: {confianza_prom:.0%}. Las categorías residuales, "
+        "incluido origin_fallback, no se contabilizan como clasificación específica."
+        if pd.notna(confianza_prom) else
+        "Las categorías residuales no se contabilizan como clasificación específica."
+    )
+    familia = df.attrs.get("document_family") or document_family(
+        {"ocr": False}, df.to_dict('records'),
+    )
+    cobertura_especifica = (
+        metricas['accounts_classified_specific'] / total if total else 1.0
+    )
+    st.caption(
+        f"Familia documental: {familia}. Cobertura específica: {cobertura_especifica:.1%}."
+    )
 
     st.subheader("Cobertura por método de clasificación")
     dist = df['metodo'].apply(lambda m: m.split('+')[0]).value_counts()
     dist_df = dist.reset_index()
     dist_df.columns = ['Método', 'Cuentas']
+    dist_df['Procedencia'] = dist_df['Método'].map(method_provenance)
     
     METODO_LABELS = {
         'codigo': '0 · Código de cuenta', 'diccionario_exacto': '1 · Diccionario (exacto)',
@@ -3088,6 +5570,7 @@ def _registrar_decision(archivo_nombre, idx, row, codigo, motivo):
         'Clasificación anterior': row.get('codigo_clasificado', ''),
         'Clasificación nueva': codigo, 'Método anterior': row.get('metodo', ''),
         'Motivo': motivo, 'Fecha': datetime.now().isoformat(timespec='seconds'),
+        **_actor_audit_fields(),
     })
 
 
@@ -3161,7 +5644,7 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                         codigo_lote,
                         df.at[idx_lote, 'origen_columna'],
                         df.at[idx_lote, 'monto'],
-                        df.at[idx_lote, 'nombre_original'],
+                        _nombre_contable_fila(df.loc[idx_lote]),
                         catalogo,
                     )
                 ]
@@ -3175,6 +5658,11 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                 fallback_json_lote = False
                 validaciones_lote = []
                 for idx_lote in list(st.session_state.lote_seleccion):
+                    _persist_streamlit_correction(
+                        archivo_nombre, row_reference=idx_lote,
+                        classification_code=codigo_lote,
+                        action="classification-batch",
+                    )
                     _registrar_decision(archivo_nombre, idx_lote, df.loc[idx_lote].copy(), codigo_lote, 'Confirmación en lote')
                     nombre_orig = df.at[idx_lote, 'nombre_original']
                     codigo_sugerido = df.at[idx_lote, 'codigo_clasificado'] or None
@@ -3206,9 +5694,9 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                     procesados += 1
                 persistido = _persistir_validaciones_lote(validaciones_lote)
                 fallback_json_lote = not persistido
-                if "diccionario" in alcance_lote and fallback_json_lote:
-                    with open(BASE_DIR / 'diccionario.json', 'w', encoding='utf-8') as f:
-                        json.dump(st.session_state.diccionario, f, ensure_ascii=False, indent=2)
+                if ("diccionario" in alcance_lote and fallback_json_lote
+                        and _legacy_json_fallback_allowed()):
+                    _write_legacy_packaged_dictionary(st.session_state.diccionario)
                 st.session_state.lote_seleccion = set()
                 st.rerun()
 
@@ -3272,11 +5760,11 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                 col_actual = row.get(
                     'origen_columna_efectiva',
                     _origen_efectivo(
-                        col_extraida, row.get('monto'), row.get('nombre_original'),
+                        col_extraida, row.get('monto'), _nombre_contable_fila(row),
                     ),
                 ).upper()
                 etiqueta_columna = _etiqueta_origen(
-                    col_extraida, row.get('monto'), row.get('nombre_original'),
+                    col_extraida, row.get('monto'), _nombre_contable_fila(row),
                 )
                 badge_bg = {
                     'ACTIVO': '#1E90FF', 'PASIVO': '#FF8C00',
@@ -3321,7 +5809,9 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                     idx_nat = opciones_nat.index(columna_fisica) if columna_fisica in opciones_nat else 0
                     nueva_nat = st.selectbox("Columna contable", opciones_nat, index=idx_nat, key=f"ed_nat_{doc_key}_{idx}")
                     monto_inicial = row['monto'] if pd.notna(row['monto']) else 0.0
-                    nuevo_monto = st.number_input("Monto", value=float(monto_inicial), format="%.0f", key=f"ed_monto_{doc_key}_{idx}")
+                    periodos_edicion = _periodos_seleccionados()
+                    etiqueta_monto = f"Monto ({periodos_edicion[0]})" if periodos_edicion else "Monto"
+                    nuevo_monto = st.number_input(etiqueta_monto, value=float(monto_inicial), format="%.0f", key=f"ed_monto_{doc_key}_{idx}")
 
                     if st.button("💾 Guardar corrección", key=f"ed_guardar_{doc_key}_{idx}", use_container_width=True):
                         df_mod = st.session_state.resultados[archivo_nombre]
@@ -3335,19 +5825,44 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                             codigo_final = sel_clave if sel_clave not in ('', '➕ NUEVA CATEGORÍA', '🚫 NO INCLUIR') else ''
                             codigo_final = codigo_final or str(row.get('codigo_clasificado') or '')
                             if codigo_final and not _codigo_compatible_con_origen(
-                                codigo_final, nueva_nat, nuevo_monto, nuevo_nombre, catalogo,
+                                codigo_final, nueva_nat, nuevo_monto,
+                                _nombre_con_contexto(
+                                    nuevo_nombre, row.get('jerarquia_contable'),
+                                ), catalogo,
                             ):
                                 st.error('La corrección contradice la clasificación actual. Seleccione una categoría compatible antes de guardarla.')
                                 st.stop()
+                            _persist_streamlit_correction(
+                                archivo_nombre, row_reference=idx,
+                                classification_code=(
+                                    codigo_final or "PENDING_REVIEW"
+                                ),
+                                action="account-edit",
+                            )
                             _registrar_decision(archivo_nombre, idx, row.copy(), codigo_final, 'Corrección de datos de la cuenta')
                             df_mod.at[idx, 'nombre_original'] = nuevo_nombre
                             df_mod.at[idx, 'nombre_revision_usuario'] = ''
                             df_mod.at[idx, 'origen_columna'] = nueva_nat.lower()
-                            df_mod.at[idx, 'monto'] = nuevo_monto
+                            _aplicar_edicion_monto_periodos(
+                                df_mod, idx, nuevo_monto,
+                                periodo_activo=_periodos_seleccionados()[0] if _periodos_seleccionados() else None,
+                                periodos=_periodos_seleccionados(),
+                            )
+                            if nueva_nat.lower() in df_mod.columns:
+                                df_mod.at[idx, nueva_nat.lower()] = nuevo_monto
+                                old_nat_col = str(row.get('origen_columna') or '').lower()
+                                if old_nat_col and old_nat_col != nueva_nat.lower() and old_nat_col in df_mod.columns:
+                                    df_mod.at[idx, old_nat_col] = 0.0
+                            df_mod.attrs.pop("certification_binding", None)
+
                             df_mod.at[idx, 'origen_columna_efectiva'] = _origen_efectivo(
-                                nueva_nat, nuevo_monto, nuevo_nombre)
+                                nueva_nat, nuevo_monto, _nombre_con_contexto(
+                                    nuevo_nombre, row.get('jerarquia_contable'),
+                                ))
                             df_mod.at[idx, 'origen_columna_display'] = _etiqueta_origen(
-                                nueva_nat, nuevo_monto, nuevo_nombre)
+                                nueva_nat, nuevo_monto, _nombre_con_contexto(
+                                    nuevo_nombre, row.get('jerarquia_contable'),
+                                ))
                             if codigo_final:
                                 df_mod.at[idx, 'codigo_clasificado'] = codigo_final
                             df_mod.at[idx, 'metodo'] = 'manual_revision'
@@ -3357,9 +5872,22 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                             df_mod.at[idx, 'origen'] = 'Manual'
                             df_mod.at[idx, 'regla'] = 'manual_revision'
                             df_mod.at[idx, 'evidencia'] = 'Corrección manual de extracción'
+                            _registrar_evento_auditoria(
+                                "Invalidación de certificación", archivo_nombre,
+                                "Edición manual de monto u origen",
+                                f"Fila {idx}; cuenta {nuevo_nombre}", df_mod,
+                            )
                             # Una corrección de extracción es local y debe confirmarse.
                             st.toast(f"'{nuevo_nombre[:35]}' corregida ✅", icon="✅")
                         else:
+                            _persist_streamlit_correction(
+                                archivo_nombre, row_reference=idx,
+                                classification_code=(
+                                    str(row.get('codigo_clasificado') or '')
+                                    or "UNCLASSIFIED"
+                                ),
+                                action="display-name-edit",
+                            )
                             df_mod.at[idx, 'nombre_revision_usuario'] = nuevo_nombre
                             df_mod.at[idx, 'tipo_revision'] = 'visual'
                             st.toast(f"'{nuevo_nombre[:35]}' nombre visual actualizado ✏️", icon="✏️")
@@ -3378,18 +5906,29 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                 if (not mostrar_todas and sugerido
                         and not _codigo_compatible_con_origen(
                             sugerido, row.get('origen_columna'), row.get('monto'),
-                            _nombre_mostrar(row), catalogo)):
+                            _nombre_contable_fila(row), catalogo)):
                     sugerido = ''
                 st.write(f"Sugerido: **{sugerido or '(ninguno)'}**")
 
-                alternativas = _alternativas_revision(
-                    nombre=_nombre_mostrar(row),
-                    sugerido=sugerido,
-                    confianza=float(row.get('confianza') or 0.0),
-                    origen_columna=row.get('origen_columna'),
-                    monto=row.get('monto'),
-                    catalogo=catalogo,
-                    motor=motor,
+                requiere_decision = (
+                    bool(row.get('requiere_revision', False)) or not sugerido
+                )
+                if sugerido and not requiere_decision and not mostrar_todas:
+                    st.caption(
+                        "Clasificación automática confirmada · "
+                        f"{float(row.get('confianza') or 0.0):.0%}"
+                    )
+                alternativas = (
+                    _alternativas_revision(
+                        nombre=_nombre_contable_fila(row),
+                        sugerido=sugerido,
+                        confianza=float(row.get('confianza') or 0.0),
+                        origen_columna=row.get('origen_columna'),
+                        monto=row.get('monto'),
+                        catalogo=catalogo,
+                        motor=motor,
+                    )
+                    if requiere_decision or mostrar_todas else []
                 )
                 if alternativas:
                     st.caption("Alternativas compatibles · selección asistida, no automática")
@@ -3402,24 +5941,25 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                             "Señales contradictorias: los dos primeros candidatos "
                             "tienen relevancia similar. Requiere criterio del analista."
                         )
-                    alt_cols = st.columns(len(alternativas))
-                    for alt_col, alternativa in zip(alt_cols, alternativas):
-                        with alt_col:
-                            st.markdown(
-                                f"**`{alternativa['codigo']}`**  \n"
-                                f"{alternativa['nombre']}"
-                            )
+                    for alternativa in alternativas:
+                        alt_name, alt_score, alt_action = st.columns([4, 1, 1])
+                        alt_name.markdown(
+                            f"**`{alternativa['codigo']}` {alternativa['nombre']}**"
+                        )
+                        alt_score.markdown(f"**{alternativa['score']:.0%}**")
+                        selection_key = f"sel_{doc_key}_{idx}"
+                        alt_action.button(
+                            "Usar",
+                            key=f"usar_alt_{doc_key}_{idx}_{alternativa['codigo']}",
+                            use_container_width=True,
+                            on_click=_asignar_estado_widget,
+                            args=(selection_key, alternativa['codigo']),
+                        )
+                    with st.expander("Ver fundamento de las sugerencias"):
+                        for alternativa in alternativas:
                             st.caption(
-                                f"{alternativa['score']:.0%} · {alternativa['fuente']}  \n"
+                                f"{alternativa['codigo']} · {alternativa['fuente']} · "
                                 f"{alternativa['evidencia']}"
-                            )
-                            selection_key = f"sel_{doc_key}_{idx}"
-                            st.button(
-                                "Usar",
-                                key=f"usar_alt_{doc_key}_{idx}_{alternativa['codigo']}",
-                                use_container_width=True,
-                                on_click=_asignar_estado_widget,
-                                args=(selection_key, alternativa['codigo']),
                             )
 
                 if mostrar_todas:
@@ -3431,7 +5971,7 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                         if codigo in ('➕ NUEVA CATEGORÍA', '🚫 NO INCLUIR')
                         or _codigo_compatible_con_origen(
                             codigo, row.get('origen_columna'), row.get('monto'),
-                            _nombre_mostrar(row), catalogo)
+                            _nombre_contable_fila(row), catalogo)
                     ]
                 default_idx = (opciones_fila.index(sugerido)
                                if sugerido in opciones_fila else 0)
@@ -3520,19 +6060,24 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                                     f'{nuevo_cat}. La categoría no fue creada.'
                                 )
                                 st.stop()
-                            if not _codigo_compatible_con_origen(candidato, row.get('origen_columna'), row.get('monto'), _nombre_mostrar(row), {**catalogo, candidato: nueva_entrada}):
+                            if not _codigo_compatible_con_origen(candidato, row.get('origen_columna'), row.get('monto'), _nombre_contable_fila(row), {**catalogo, candidato: nueva_entrada}):
                                 st.error('La nueva categoría contradice la naturaleza de esta cuenta. No fue creada.')
                                 st.stop()
                             catalogo[nuevo_codigo.strip().upper()] = nueva_entrada
-                            if not _persistir_catalogo(nueva_entrada):
-                                with open(BASE_DIR / 'catalogo_maestro.json', 'w', encoding='utf-8') as f:
-                                    json.dump(catalogo, f, ensure_ascii=False, indent=2)
+                            if (not _persistir_catalogo(nueva_entrada)
+                                    and _legacy_json_fallback_allowed()):
+                                _write_legacy_packaged_catalog(catalogo)
                             codigo_final = nuevo_codigo.strip().upper()
                             st.toast(f"Nueva categoría '{nuevo_nombre_cat}' ({codigo_final}) creada ✨", icon="🆕")
                         else:
                             st.error("Debes ingresar código y nombre.")
 
                     elif seleccion == '🚫 NO INCLUIR':
+                        _persist_streamlit_correction(
+                            archivo_nombre, row_reference=idx,
+                            classification_code="__EXCLUIR__",
+                            action="classification-exclude",
+                        )
                         _registrar_decision(archivo_nombre, idx, row.copy(), '__EXCLUIR__', 'Exclusión por analista')
                         st.session_state.resultados[archivo_nombre].at[idx, 'codigo_clasificado'] = '__EXCLUIR__'
                         st.session_state.resultados[archivo_nombre].at[idx, 'metodo'] = 'excluido_analista'
@@ -3553,9 +6098,9 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                             metodo=row['metodo'], confianza=float(row['confianza']),
                             archivo=archivo_nombre,
                         )
-                        if "diccionario" in alcance and not persistido:
-                            with open(BASE_DIR / 'diccionario.json', 'w', encoding='utf-8') as f:
-                                json.dump(st.session_state.diccionario, f, ensure_ascii=False, indent=2)
+                        if ("diccionario" in alcance and not persistido
+                                and _legacy_json_fallback_allowed()):
+                            _write_legacy_packaged_dictionary(st.session_state.diccionario)
                         if "diccionario" in alcance:
                             propagar_clasificacion_resultados(row['nombre_original'], '__EXCLUIR__', 'excluido_analista_propagado')
                         st.session_state.lote_seleccion.discard(idx)
@@ -3566,9 +6111,14 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                         codigo_final = seleccion
 
                     if codigo_final:
-                        if not _codigo_compatible_con_origen(codigo_final, row.get('origen_columna'), row.get('monto'), _nombre_mostrar(row), catalogo):
+                        if not _codigo_compatible_con_origen(codigo_final, row.get('origen_columna'), row.get('monto'), _nombre_contable_fila(row), catalogo):
                             st.error('La categoría contradice la naturaleza contable. No se cambió la cuenta ni se guardó en el diccionario.')
                             st.stop()
+                        _persist_streamlit_correction(
+                            archivo_nombre, row_reference=idx,
+                            classification_code=codigo_final,
+                            action="classification-individual",
+                        )
                         _registrar_decision(archivo_nombre, idx, row.copy(), codigo_final, 'Confirmación individual')
                         st.session_state.resultados[archivo_nombre].at[idx, 'codigo_clasificado'] = codigo_final
                         st.session_state.resultados[archivo_nombre].at[idx, 'metodo'] = 'validacion_humana'
@@ -3591,9 +6141,8 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                             }
                             st.session_state.diccionario.append(nuevo_dic)
                             st.session_state.correcciones.append(nuevo_dic)
-                            if not persistido:
-                                with open(BASE_DIR / 'diccionario.json', 'w', encoding='utf-8') as f:
-                                    json.dump(st.session_state.diccionario, f, ensure_ascii=False, indent=2)
+                            if not persistido and _legacy_json_fallback_allowed():
+                                _write_legacy_packaged_dictionary(st.session_state.diccionario)
                             st.toast(f"'{_nombre_mostrar(row)[:35]}' → {codigo_final} guardado 📚", icon="✅")
                         else:
                             st.toast(f"'{_nombre_mostrar(row)[:35]}' → {codigo_final} (solo este caso)", icon="✅")
@@ -3617,7 +6166,7 @@ def _diagnosticar_cuadratura(
         ~clasificadas.apply(
             lambda row: _codigo_compatible_con_origen(
                 row.get('codigo_clasificado'), row.get('origen_columna'),
-                row.get('monto'), row.get('nombre_original'),
+                row.get('monto'), _nombre_contable_fila(row),
             ),
             axis=1,
         )
@@ -3787,27 +6336,36 @@ def _mostrar_control_calidad_operativo(control) -> None:
         )
 
 
-def _control_emision(df, catalogo, diagnostico, quality_control=None):
+def _control_emision(
+        df, catalogo, diagnostico, quality_control=None,
+        extraction_certification=None):
     """Control independiente, sin mutar decisiones ni importes del analista."""
     incidencias = []
     for idx, row in df[~df['es_total']].iterrows():
         codigo = str(row.get('codigo_clasificado') or '')
         monto = pd.to_numeric(row.get('monto'), errors='coerce')
         motivos = []
+        if row.get('requiere_revision', False):
+            motivos.append('Decisión pendiente de confirmación')
         if pd.isna(monto) or not math.isfinite(float(monto)):
             motivos.append('Importe ausente o no válido')
         elif monto == 0:
+            if motivos:
+                incidencias.append({
+                    'Fila': str(idx), 'Cuenta': row.get('nombre_original', ''),
+                    'Clasificación': codigo,
+                    'Columna original': row.get('origen_columna', ''),
+                    'Monto': monto, 'Qué corregir': '; '.join(motivos),
+                })
             continue
         if codigo == '__EXCLUIR__':
             motivos.append('Cuenta con saldo excluida; revise si debe reincorporarse')
         elif codigo not in catalogo:
             motivos.append('Sin clasificación válida')
         elif not _codigo_compatible_con_origen(
-            codigo, row.get('origen_columna'), monto, row.get('nombre_original'), catalogo,
+            codigo, row.get('origen_columna'), monto, _nombre_contable_fila(row), catalogo,
         ):
             motivos.append('La categoría contradice la naturaleza efectiva de la cuenta')
-        if row.get('requiere_revision', False):
-            motivos.append('Decisión pendiente de confirmación')
         if motivos:
             incidencias.append({
                 'Fila': str(idx), 'Cuenta': row.get('nombre_original', ''),
@@ -3820,8 +6378,32 @@ def _control_emision(df, catalogo, diagnostico, quality_control=None):
         motivos.append(f'{len(incidencias)} cuenta(s) requieren corregir o confirmar su clasificación')
     if not diagnostico['cuadra']:
         motivos.append('Activo no coincide con Pasivo más Patrimonio')
-    if quality_control is not None and not quality_control.export_allowed:
-        motivos.extend(quality_control.reasons or ['El control posterior no autoriza la emisión definitiva'])
+    estado_certificacion = getattr(
+        extraction_certification, 'estado', None,
+    )
+    if estado_certificacion != 'certificada':
+        if estado_certificacion:
+            motivos.append(
+                'La extracción documental no está certificada '
+                f'(estado: {estado_certificacion})'
+            )
+        else:
+            motivos.append('No existe una certificación documental válida para emitir')
+        motivos.extend(
+            str(reason) for reason in (
+                getattr(extraction_certification, 'razones', None) or []
+            ) if str(reason) not in motivos
+        )
+    elif not _certificacion_coincide_contenido(extraction_certification, df):
+        motivos.append('La certificación documental no corresponde al contenido actual; recertifique después de editar montos u origen de columnas')
+    if quality_control is not None:
+        razones_calidad = list(getattr(quality_control, 'reasons', None) or [])
+        marcadores_duros = ('sin clasificación', 'no cuadra', 'crítico', 'critico', 'rechaz', 'fallid', 'incompatib')
+        bloqueadores_duros = [r for r in razones_calidad if any(m in str(r).lower() for m in marcadores_duros)]
+        if not getattr(quality_control, 'export_allowed', False):
+            motivos.extend(razones_calidad or ['El control posterior no autoriza la emisión definitiva'])
+        elif bloqueadores_duros:
+            motivos.extend(bloqueadores_duros)
     return {'definitivo': not motivos, 'motivos': motivos,
             'incidencias': pd.DataFrame(incidencias), 'resultado': resultado}
 
@@ -3873,6 +6455,10 @@ def _gestionar_reclasificacion_depreciacion(
         "No se detectó una cuenta separada de Depreciación y Amortización en uno o "
         "más períodos. Confirme que no corresponde o informe su distribución. El "
         "ajuste sólo abre el gasto: no cambia la utilidad del período."
+    )
+    st.caption(
+        "Depreciación Acumulada (ANC.01.01) es una contra-cuenta del activo y no "
+        "sustituye la Depreciación del Ejercicio (ER.07) del estado de resultados."
     )
     opciones = {
         "pending": "Pendiente de revisar en las notas",
@@ -3929,7 +6515,10 @@ def _gestionar_reclasificacion_depreciacion(
                 if modo == "pending":
                     ajustes_documento.pop(periodo, None)
                 elif modo == "none":
-                    ajustes_documento[periodo] = {"mode": "none"}
+                    ajustes_documento[periodo] = {"mode": "none", "decision": "No existe o no aplica depreciación por separar", "evidence": "Confirmación manual tras revisar el estado y sus notas", "source": "manual_confirmation", "decided_at": datetime.now().astimezone().isoformat(), "analyst": _actor_audit_fields()["Actor"]}
+                    _registrar_evento_auditoria(
+                        "Decisión de depreciación", archivo_nombre,
+                        "No existe o no aplica depreciación por separar", f"Período {periodo}")
                 else:
                     errores = validar_reclasificacion_depreciacion(
                         total, costo, administracion,
@@ -3946,7 +6535,16 @@ def _gestionar_reclasificacion_depreciacion(
                             "cost_of_sales": float(costo),
                             "administration": float(administracion),
                             "source": "manual_notes",
+                            "decision": "Depreciación informada desde notas",
+                            "evidence": "Monto y distribución ingresados manualmente desde notas",
+                            "decided_at": datetime.now().astimezone().isoformat(),
+                            "analyst": _actor_audit_fields()["Actor"],
                         }
+                        _registrar_evento_auditoria(
+                            "Decisión de depreciación", archivo_nombre,
+                            "Depreciación informada desde notas",
+                            f"Período {periodo}; total {float(total):.2f}; costo {float(costo):.2f}; administración {float(administracion):.2f}",
+                        )
                 if errores:
                     for error in errores:
                         st.error(error)
@@ -3954,6 +6552,12 @@ def _gestionar_reclasificacion_depreciacion(
                     st.rerun()
 
         guardado = ajustes_documento.get(periodo)
+        if guardado and guardado.get("mode") == "none" and not guardado.get("decided_at"):
+            guardado.update({"decision": "No existe o no aplica depreciación por separar", "evidence": "Confirmación manual tras revisar el estado y sus notas", "source": "manual_confirmation", "decided_at": datetime.now().astimezone().isoformat(), "analyst": _actor_audit_fields()["Actor"]})
+            _registrar_evento_auditoria(
+                "Decisión de depreciación", archivo_nombre,
+                guardado["decision"], f"Período {periodo}",
+            )
         if not guardado:
             pendientes.append(
                 f"Período {periodo}: falta confirmar la depreciación del ejercicio"
@@ -3979,6 +6583,7 @@ def _gestionar_reclasificacion_depreciacion(
                     f"{guardado['administration']:,.2f} desde Gastos de Administración."
                 )
         else:
+            ajustes_aplicables[periodo] = guardado
             st.caption(f"Período {periodo}: confirmado sin depreciación por separar.")
     return ajustes_aplicables, pendientes
 
@@ -4123,7 +6728,7 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
         } for reporte in reportes_periodo]), hide_index=True, use_container_width=True)
     from pipeline.operational_quality import analyze_operational_quality
     enforce_export = os.environ.get(
-        "QUALITY_CONTROL_ENFORCE_EXPORT", "false",
+        "QUALITY_CONTROL_ENFORCE_EXPORT", "true",
     ).strip().lower() in {"1", "true", "yes", "on"}
     quality_control = analyze_operational_quality(
         df, balance_squared=diagnostico['cuadra'],
@@ -4132,7 +6737,42 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
     st.session_state.setdefault("quality_controls", {})[archivo_nombre] = quality_control
     _mostrar_control_calidad_operativo(quality_control)
 
-    emision = _control_emision(df, catalogo, diagnostico, quality_control)
+    extraction_certification = st.session_state.get(
+        "extraction_certifications", {},
+    ).get(archivo_nombre)
+    extraction_certification = _recertificar_balance_clasificado(
+        archivo_nombre, df, extraction_certification, catalogo=catalogo,
+    )
+    st.session_state.setdefault("extraction_certifications", {})[archivo_nombre] = extraction_certification
+    if (
+        extraction_certification is not None
+        and getattr(extraction_certification, "metodo", "") == "classified_final_detail"
+        and extraction_certification.estado != "certificada"
+        and st.button("Verificar detalle clasificado corregido", key=f"verify_classified_{archivo_nombre}")
+    ):
+        extraction_certification = _recertificar_balance_clasificado(
+            archivo_nombre, df, extraction_certification, force=True, catalogo=catalogo,
+        )
+        st.session_state.extraction_certifications[archivo_nombre] = extraction_certification
+    emision = _control_emision(
+        df, catalogo, diagnostico, quality_control,
+        extraction_certification=extraction_certification,
+    )
+    comparacion_cuadre = compare_pre_post(
+        extraction_certification, df.to_dict('records'),
+        late_difference=diagnostico['diferencia'],
+        tolerance=diagnostico['tolerancia'],
+    )
+    if comparacion_cuadre['classification_degradation']:
+        emision['definitivo'] = False
+        emision['motivos'].append(
+            'La extracción cuadraba antes de clasificar, pero el balance homologado no cuadra; '
+            'la degradación fue introducida durante la clasificación'
+        )
+        responsables = comparacion_cuadre['responsible_changes']
+        if responsables:
+            st.error('La clasificación degradó una cuadratura documental válida.')
+            st.dataframe(pd.DataFrame(responsables), hide_index=True, use_container_width=True)
     if pendientes_depreciacion:
         emision["definitivo"] = False
         emision["motivos"].extend(pendientes_depreciacion)
@@ -4150,6 +6790,19 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
                 f"Período {reporte['periodo']}: {problema}"
                 for problema in problemas_resultado
             )
+    motivo_vinculo = next((motivo for motivo in emision["motivos"]
+        if "no corresponde al contenido actual" in motivo), None)
+    otros_bloqueadores = [motivo for motivo in emision["motivos"] if motivo != motivo_vinculo]
+    if motivo_vinculo and not otros_bloqueadores:
+        st.warning(
+            "El contenido fue editado después de certificarse. Antes de emitir, "
+            "confirme que ya comparó las filas corregidas con el documento original."
+        )
+        if st.button("Recertificar contenido corregido", type="primary"):
+            extraction_certification = _ejecutar_recertificar_contenido_corregido(
+                archivo_nombre, df, extraction_certification, catalogo=catalogo,
+            )
+            st.rerun()
     amount_columns = [column for _, column in period_columns]
     income_available = {
         column: reporte["conciliacion"]["resultado_homologado"] is not None
@@ -4172,8 +6825,11 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
         st.success('Controles de emisión aprobados para este reporte.')
     else:
         st.error('Sólo se permite descargar un BORRADOR. Corrija los motivos antes de emitir el reporte definitivo.')
-        for motivo in emision['motivos']:
-            st.write(motivo)
+        st.subheader('Resumen previo a exportación')
+        st.dataframe(
+            _resumen_bloqueadores_emision(emision['motivos']),
+            hide_index=True, use_container_width=True,
+        )
         if not emision['incidencias'].empty:
             st.dataframe(emision['incidencias'], hide_index=True, use_container_width=True)
         st.caption('Pulse Revisar o cambiar clasificaciones, seleccione Todas y busque la cuenta. Puede modificar decisiones manuales y recuperar cuentas excluidas.')
@@ -4243,6 +6899,11 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
     ]].copy()
     meta = st.session_state.get('metadata_files', {}).get(archivo_nombre)
     unidad = (getattr(meta, 'moneda', None) or 'unidad original')
+    report_actor = _authenticated_actor()
+    report_identity = _actor_audit_fields()
+    report_analyst_name = (
+        report_actor.display_name if report_actor is not None else ""
+    )
     columnas_exportacion = ["Código", "Cuenta Estándar"] + [
         f"Monto Total ({unidad})" if len(period_columns) == 1
         else f"Monto Total {label} ({unidad})"
@@ -4267,26 +6928,60 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
         ws['F1'].font = Font(bold=True, color='008000' if emision['definitivo'] else 'C00000')
         control_filas = [
             {'Control': 'Estado de emisión', 'Valor': estado_emision},
+            {'Control': 'Versión de contenido certificado', 'Valor': getattr(
+                extraction_certification, 'contenido_certificado_version', '')},
+            {'Control': 'Digest de contenido certificado', 'Valor': getattr(
+                extraction_certification, 'contenido_certificado_digest', '')},
             {'Control': 'Resultado según columnas originales', 'Valor': conciliacion['resultado_origen']},
             {'Control': 'Resultado según categorías homologadas', 'Valor': conciliacion['resultado_homologado']},
             {'Control': 'Diferencia de resultado', 'Valor': conciliacion['diferencia']},
             {'Control': 'Diferencia Activo menos Pasivo y Patrimonio', 'Valor': diagnostico['diferencia']},
+            {'Control': 'Cuadre temprano disponible', 'Valor': comparacion_cuadre['early']['available']},
+            {'Control': 'Cuadre temprano aprobado', 'Valor': comparacion_cuadre['early']['squared']},
+            {'Control': 'Degradación introducida por clasificación',
+             'Valor': comparacion_cuadre['classification_degradation']},
         ]
         for periodo, ajuste in ajustes_depreciacion.items():
-            control_filas.extend([
+            if ajuste.get('mode') == 'notes':
+                control_filas.extend([
                 {'Control': f'Depreciación informada desde notas ({periodo})',
                  'Valor': ajuste['total']},
                 {'Control': f'Rebaja de Costo de Ventas ({periodo})',
                  'Valor': ajuste['cost_of_sales']},
                 {'Control': f'Rebaja de Gastos de Administración ({periodo})',
                  'Valor': ajuste['administration']},
-            ])
+                ])
+            else:
+                control_filas.append({'Control': f'Decisión sobre depreciación ({periodo})', 'Valor': ajuste.get('decision', 'No existe o no aplica')})
         control_filas += [
             {'Control': 'Pendiente de resolver', 'Valor': m} for m in emision['motivos']
         ]
         pd.DataFrame(control_filas).to_excel(writer, sheet_name='Control de emisión', index=False)
+        eventos_auditoria = [
+            evento for evento in st.session_state.get('audit_events', [])
+            if evento.get('Archivo') == archivo_nombre
+        ]
+        for evento in df.attrs.get('audit_events', []):
+            if evento not in eventos_auditoria:
+                eventos_auditoria.append(evento)
+        if eventos_auditoria:
+            pd.DataFrame(eventos_auditoria).to_excel(
+                writer, sheet_name='Auditoría de emisión', index=False,
+            )
+        if ajustes_depreciacion:
+            pd.DataFrame([{'Período': periodo, 'Decisión': ajuste.get('decision', ''),
+                'Evidencia': ajuste.get('evidence', ''), 'Fecha/hora': ajuste.get('decided_at', ''),
+                'Analista': ajuste.get('analyst', ''), 'Fuente': ajuste.get('source', ''),
+                'Depreciación total': ajuste.get('total'), 'Costo de ventas': ajuste.get('cost_of_sales'),
+                'Gastos de administración': ajuste.get('administration')}
+                for periodo, ajuste in ajustes_depreciacion.items()]).to_excel(
+                    writer, sheet_name='Decisiones depreciación', index=False)
         if not emision['incidencias'].empty:
             emision['incidencias'].to_excel(writer, sheet_name='Cuentas a corregir', index=False)
+        if comparacion_cuadre['responsible_changes']:
+            pd.DataFrame(comparacion_cuadre['responsible_changes']).to_excel(
+                writer, sheet_name='Cambios de cuadratura', index=False,
+            )
         historial = [h for h in st.session_state.get('historial_decisiones', []) if h['Archivo'] == archivo_nombre]
         if historial:
             pd.DataFrame(historial).to_excel(writer, sheet_name='Decisiones de esta sesión', index=False)
@@ -4456,6 +7151,10 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
             definitive=emision["definitivo"], reasons=emision["motivos"],
             tolerance=diagnostico["tolerancia"],
             period_columns=period_columns,
+            analyst_name=report_analyst_name,
+            actor_id=str(report_identity["Actor"] or ""),
+            organization_id=str(report_identity["Organización"] or ""),
+            roles=tuple(str(role) for role in report_identity["Roles"]),
         )
 
     buf.seek(0)
@@ -4467,8 +7166,32 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
     if not emision['definitivo']:
         nombre_archivo = 'BORRADOR-' + nombre_archivo
 
+    report_content = buf.getvalue()
+    if emision['definitivo']:
+        certified = bool(
+            getattr(extraction_certification, "estado", None) == "certificada"
+            and _certificacion_coincide_contenido(extraction_certification, df)
+        )
+        if not certified:
+            st.error(
+                "El estado visual indicó emisión definitiva, pero no existe una "
+                "certificación vinculada al contenido actual. Descarga bloqueada."
+            )
+            return
+        try:
+            report_content = _persist_streamlit_definitive_report(
+                archivo_nombre, content=report_content,
+                report_name=f"{nombre_archivo}.xlsx", certified=certified,
+            )
+        except (ProcessPersistenceError, AuthorizationDenied, ValueError, OSError) as exc:
+            st.error(
+                "El reporte certificado no pudo conciliarse con la persistencia "
+                f"durable y no se habilitará su descarga: {exc}"
+            )
+            return
+
     st.download_button(
-        'Descargar reporte definitivo (Excel)' if emision['definitivo'] else 'Descargar BORRADOR con diagnóstico (Excel)', data=buf.getvalue(),
+        'Descargar reporte definitivo (Excel)' if emision['definitivo'] else 'Descargar BORRADOR con diagnóstico (Excel)', data=report_content,
         file_name=f"{nombre_archivo}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 
@@ -4522,8 +7245,8 @@ def _tab_diccionario():
 
 def _tab_aprendizaje():
     st.subheader("🧠 Autoaprendizaje — Gold Standard")
-    store = NeonKnowledgeStore()
     if _neon_disponible():
+        store = _legacy_neon_store()
         try:
             stats = store.learning_statistics()
             c1, c2, c3, c4 = st.columns(4)
@@ -4578,14 +7301,42 @@ def _tab_aprendizaje():
     st.subheader("🔄 Promoción al Gold Standard (Learning Loop)")
     st.caption(
         "Promueve las revisiones humanas (gold_records) a una base RUNTIME separada "
-        "(`gold_standard_runtime.db`). La base del benchmark (2660/2662) NO se modifica. "
-        "Ver `reports/product/P1_learning_loop_design.md`."
+        "(`gold_standard_runtime.db`). La base empaquetada del benchmark no se modifica. "
+        "La política predeterminada exige aprobación manual de supervisor, evidencia "
+        "mínima, ausencia de conflictos, vigencia definida y capacidad de reversión."
+    )
+    promotion_actor = _authenticated_actor()
+    if promotion_actor is None:
+        st.info(
+            "No hay un supervisor autenticado. Puede previsualizar, pero no aplicar "
+            "una promoción en este modo."
+        )
+    else:
+        st.caption(
+            f"Supervisor autenticado: {promotion_actor.actor_id} · "
+            f"Organización: {promotion_actor.organization_id}"
+        )
+    evidence_confirmed = st.checkbox(
+        "Confirmo documento fuente, decisión humana y razón de clasificación",
+        value=False, key="promotion_evidence",
+    )
+    approved = st.checkbox(
+        "Aprobar manualmente esta promoción", value=False, key="promotion_approved",
+    )
+    expiration_days = st.number_input(
+        "Vigencia antes de revisión", min_value=1, max_value=3650,
+        value=DEFAULT_EXPIRATION_DAYS, step=30,
+    )
+    st.caption(
+        "Toda promoción es reversible. Al vencer su vigencia debe revisarse; "
+        "los conflictos nunca se promueven automáticamente."
     )
     pc1, pc2, pc3 = st.columns(3)
     with pc1:
         if st.button("🔍 Previsualizar promoción", use_container_width=True):
             try:
-                res = promover_revisiones(dry_run=True)
+                rm = RuntimeManager(_gold_runtime_path())
+                res = rm.promote(_gold_benchmark_path(), dry_run=True)
                 st.success(
                     f"Candidatos: {res.candidates} · Promovibles: {res.promotable} · "
                     f"Conflictos: {res.conflicts} · Duplicados: {res.duplicates} · "
@@ -4600,26 +7351,64 @@ def _tab_aprendizaje():
     with pc2:
         if st.button("✅ Aplicar a runtime", use_container_width=True):
             try:
-                res = promover_revisiones(dry_run=False)
-                st.success(
-                    f"Promovidos: {res.promoted} · Conflictos omitidos: {res.conflicts} · "
-                    f"Duplicados: {res.duplicates} · Reservados: {res.reserved}"
+                actor = _require_app_role("supervisor")
+                if actor is None:
+                    raise AuthenticationRequired(
+                        "Se requiere un supervisor autenticado incluso en staging; "
+                        "no se acepta atribución por texto libre"
+                    )
+                rm = RuntimeManager(_gold_runtime_path())
+                benchmark_path = _gold_benchmark_path()
+                preview = rm.promote(benchmark_path, dry_run=True)
+                repository = build_persistence().promotions
+                record, res = _aplicar_promocion_durable(
+                    preview=preview, actor=actor,
+                    evidence_confirmed=evidence_confirmed, approved=approved,
+                    expiration_days=int(expiration_days), repository=repository,
+                    apply_callback=lambda durable_record: rm.promote(
+                        benchmark_path, dry_run=False,
+                        usuario=actor.actor_id,
+                        origen=durable_record.reversal_reference,
+                    ),
+                    promotion_ids_resolver=lambda _result, durable_record: _runtime_promotion_ids(
+                        rm, durable_record,
+                    ),
+                    source_path=benchmark_path,
                 )
+                if not record.allowed:
+                    st.error(
+                        "Promoción bloqueada por política. Evaluación durable "
+                        f"{record.evaluation_id}: " + "; ".join(record.decision_reasons)
+                    )
+                else:
+                    assert res is not None
+                    _registrar_evento_auditoria(
+                        "Promoción de diccionario", "gold_standard_runtime.db",
+                        f"Evaluación durable permitida: {record.evaluation_id}",
+                        f"Promovidos {res.promoted}; subject {record.subject_id}; "
+                        f"expira {record.expires_at.isoformat()}; reversión "
+                        f"{record.reversal_reference}",
+                    )
+                    st.success(
+                        f"Promovidos: {res.promoted} · Conflictos omitidos: {res.conflicts} · "
+                        f"Duplicados: {res.duplicates} · Evaluación: {record.evaluation_id} · "
+                        f"Vigencia hasta: {record.expires_at.isoformat()} · Reversión: "
+                        f"{record.reversal_reference}."
+                    )
+            except (AuthenticationRequired, AuthorizationDenied) as e:
+                st.error(f"Promoción bloqueada por autorización: {e}")
             except Exception as e:
                 st.error(f"No se pudo aplicar: {e}")
     with pc3:
-        if st.button("🧹 Borrar runtime", use_container_width=True):
-            try:
-                rt = RuntimeGoldStorage()
-                rt.close()
-                rt.path.unlink(missing_ok=True)
-                st.success("Runtime eliminado. El benchmark sigue intacto.")
-            except Exception as e:
-                st.error(f"No se pudo borrar: {e}")
+        st.info(
+            "La reversión se ejecuta por cuenta desde Knowledge Manager y conserva "
+            "el promotion_id original. No se elimina el runtime completo."
+        )
 
 
 def _km_usuario() -> str:
-    return str(st.session_state.get("km_usuario", "analista"))
+    actor = _authenticated_actor()
+    return actor.actor_id if actor is not None else ""
 
 
 def _tab_knowledge_manager() -> None:
@@ -4631,6 +7420,11 @@ def _tab_knowledge_manager() -> None:
     Toda acción (promover, rechazar, rollback) requiere aprobación explícita.
     """
     st.subheader("🧠 Knowledge Manager")
+    try:
+        _require_app_role("supervisor")
+    except (AuthenticationRequired, AuthorizationDenied) as exc:
+        st.error(f"Knowledge Manager bloqueado por autorización: {exc}")
+        return
     if _neon_disponible():
         _tab_neon_knowledge_manager()
         return
@@ -4641,8 +7435,8 @@ def _tab_knowledge_manager() -> None:
         "REJECTED / ROLLED_BACK."
     )
 
-    runtime_path = BASE_DIR / "gold_standard_runtime.db"
-    gold_path = BASE_DIR / "gold_standard.db"
+    runtime_path = _gold_runtime_path()
+    gold_path = _gold_benchmark_path()
     rm = RuntimeManager(runtime_path)
 
     tab_pend, tab_conf, tab_run, tab_hist, tab_stat, tab_an = st.tabs(
@@ -4666,7 +7460,7 @@ def _tab_knowledge_manager() -> None:
 
 def _tab_neon_knowledge_manager() -> None:
     """Gobernanza durable del diccionario cuando Neon es la fuente activa."""
-    store = NeonKnowledgeStore()
+    store = _legacy_neon_store()
     st.caption(
         "Fuente durable: Neon. El rollback solo se permite si el cambio elegido "
         "continúa siendo el estado vigente de la cuenta."

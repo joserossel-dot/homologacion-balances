@@ -26,12 +26,17 @@ from parsers.account_type_resolver import (
     is_contra_asset_name,
     is_equity_account_name,
     is_patrimonial_reserve_name,
+    is_ppe_depreciation_name,
 )
 from reglas_especiales import ProcesadorReglasEspeciales
 from decision.engine import DecisionEngine
 from semantic.semantic_engine import SemanticEngine
 from semantic.matcher import SemanticMatcher
 from reporting_integrity import resultado_compatible
+from validation.classification_metrics import (
+    RESIDUAL_CLASSIFICATION_METHODS, account_metrics, document_family,
+)
+from validation.prepost_balance import compare_pre_post
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +87,7 @@ class HomologationPipeline:
     # del signo ni de que el PDF haya impreso una columna explícita.
     _AUDITED_STATEMENT_LABELS: list[tuple[re.Pattern, str, set[str] | None]] = [
         (re.compile(r"efectivo y (?:efectivo )?equivalente(?:s)?(?: al efectivo)?", re.I), "AC.01", {"ACTIVO"}),
-        (re.compile(r"otros activos financieros(?: corrientes)?", re.I), "AC.02", {"ACTIVO"}),
+        (re.compile(r"otros activos financieros(?: corrientes?)?", re.I), "AC.08", {"ACTIVO"}),
         (re.compile(r"deudores comerciales y otras cuentas por cobrar(?: corrientes)?", re.I), "AC.03", {"ACTIVO"}),
         (re.compile(r"cuentas por cobrar a entidades relacionadas corrientes", re.I), "AC.06", {"ACTIVO"}),
         (re.compile(r"inventarios(?: corrientes)?", re.I), "AC.05", {"ACTIVO"}),
@@ -92,23 +97,26 @@ class HomologationPipeline:
         (re.compile(r"activos intangibles distintos de la plusval[ií]a", re.I), "ANC.03", {"ACTIVO"}),
         (re.compile(r"inversiones contabilizadas utilizando el m[eé]todo de la participaci[oó]n", re.I), "ANC.04", {"ACTIVO"}),
         (re.compile(r"cuentas por cobrar a entidades relacionadas no corrientes", re.I), "ANC.05", {"ACTIVO"}),
-        (re.compile(r"(?:activos por impuestos diferidos|otros activos no financieros)(?: no corrientes)?", re.I), "ANC.06", {"ACTIVO"}),
+        (re.compile(r"activos por impuestos diferidos(?: no corrientes)?", re.I), "ANC.09", {"ACTIVO"}),
+        (re.compile(r"otros activos no financieros(?: no corrientes)?", re.I), "ANC.06", {"ACTIVO"}),
         (re.compile(r"cuentas comerciales y otras cuentas por pagar(?: corrientes)?", re.I), "PC.01", {"PASIVO"}),
         (re.compile(r"(?:otros )?pasivos financieros(?: corrientes)?", re.I), "PC.02", {"PASIVO"}),
         (re.compile(r"pasivos por impuestos(?: corrientes)?", re.I), "PC.05", {"PASIVO"}),
         (re.compile(r"(?:provisi[oó]n |provisiones por )?beneficios a los empleados(?: corrientes)?", re.I), "PC.06", {"PASIVO"}),
         (re.compile(r"cuentas por pagar a entidades relacionadas corrientes", re.I), "PC.07", {"PASIVO"}),
-        (re.compile(r"(?:otras provisiones|otros pasivos no financieros)", re.I), "PC.08", {"PASIVO"}),
-        (re.compile(r"(?:otros )?pasivos financieros no corrientes", re.I), "PNC.01", {"PASIVO"}),
+        (re.compile(r"otras provisiones", re.I), "PC.09", {"PASIVO"}),
+        (re.compile(r"otros pasivos no financieros", re.I), "PC.08", {"PASIVO"}),
+        (re.compile(r"otros pasivos financieros no corrientes?", re.I), "PNC.05", {"PASIVO"}),
+        (re.compile(r"pasivos financieros no corrientes?", re.I), "PNC.01", {"PASIVO"}),
         (re.compile(r"cuentas por pagar a entidades relacionadas no corrientes", re.I), "PNC.04", {"PASIVO"}),
-        (re.compile(r"pasivo por impuestos diferidos", re.I), "PNC.05", {"PASIVO"}),
+        (re.compile(r"pasivos? por impuestos diferidos", re.I), "PNC.06", {"PASIVO"}),
         (re.compile(r"capital emitido", re.I), "PAT.01", {"PATRIMONIO"}),
         (re.compile(r"(?:otras )?reservas", re.I), "PAT.02", {"PATRIMONIO"}),
         (re.compile(r"ganancias? p[eé]rdidas? acumuladas", re.I), "PAT.03", {"PATRIMONIO"}),
         (re.compile(r"ingresos de (?:actividades ordinarias|explotaci[oó]n)", re.I), "ER.01", None),
         (re.compile(r"costo de (?:ventas|explotaci[oó]n)", re.I), "ER.02", None),
         (re.compile(r"gastos? de administraci[oó]n", re.I), "ER.04", None),
-        (re.compile(r"costos? de distribuci[oó]n", re.I), "ER.05", None),
+        (re.compile(r"costos? de distribuci[oó]n", re.I), "ER.04", {"PERDIDA", "GANANCIA", "DESCONOCIDO", None}),
         (re.compile(r"costos? financieros", re.I), "ER.09", None),
         (re.compile(r"gasto o utilidad por impuestos a las ganancias", re.I), "ER.10", None),
         (re.compile(r"gasto por impuestos a las ganancias", re.I), "ER.10", None),
@@ -194,7 +202,7 @@ class HomologationPipeline:
         for entry in self._dictionary:
             if self._normalize_name(entry["cuenta_original"]) == normalized:
                 code = (
-                    "ANC.01.01" if is_contra_asset_name(account_name)
+                    "ANC.01.01" if is_ppe_depreciation_name(account_name)
                     else entry["codigo_estandar"]
                 )
                 return {
@@ -205,6 +213,34 @@ class HomologationPipeline:
                 }
         return None
 
+    def _classify_by_hierarchy(
+        self, account_hierarchy: str | None, account_tipo: str | None,
+        account_section: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Hereda sólo categorías inequívocas desde un subtotal reconocido."""
+        hierarchy = self._normalize_name(account_hierarchy or "")
+        rules = (
+            (r"(?:caja y )?bancos?", "AC.01", {"ACTIVO"}),
+            (r"efectivo y equivalentes(?: al efectivo)?", "AC.01", {"ACTIVO"}),
+            (r"depreciaci(?:o|ó)n acumulada", "ANC.01.01", {"ACTIVO", "PASIVO"}),
+            (r"proveedores", "PC.01", {"PASIVO"}),
+            (r"capital social", "PAT.01", {"PASIVO", "PATRIMONIO"}),
+        )
+        for pattern, code, allowed_types in rules:
+            if re.fullmatch(pattern, hierarchy) and account_tipo in allowed_types:
+                if not self._is_code_allowed_for_section(code, account_section):
+                    continue
+                return {
+                    "standard_code": code,
+                    "confidence": 0.99,
+                    "method": "hierarchy_inheritance",
+                    "reason": (
+                        f"Detalle contenido en subtotal inequívoco "
+                        f"'{account_hierarchy}' → {code}"
+                    ),
+                }
+        return None
+
     def _classify_audited_statement_label(
         self, account_name: str, account_tipo: str | None,
         account_section: str | None = None,
@@ -212,21 +248,32 @@ class HomologationPipeline:
         """Resuelve nombres completos estandarizados de estados auditados."""
         normalized = self._normalize_name(account_name)
         normalized_section = self._normalize_name(account_section or "")
+        sec_code = self._normalize_section_code(account_section)
+        is_no_corriente = "no corrient" in normalized_section or sec_code in {"ANC", "PNC"}
+        # Política global aprobada el 2026-09-07: no trasladar una etiqueta
+        # de activo corriente a AC.08 cuando la sección acredita largo plazo.
+        if (
+            re.fullmatch(r"otros activos financieros(?: corrientes?)?", normalized)
+            and (is_no_corriente or sec_code == "ANC")
+        ):
+            return None
         if (
             re.fullmatch(r"(?:otros )?pasivos financieros", normalized)
-            and "no corrient" in normalized_section
+            and (is_no_corriente or sec_code == "PNC")
             and account_tipo == "PASIVO"
         ):
             return {
-                "standard_code": "PNC.01",
+                "standard_code": "PNC.05" if normalized.startswith("otros ") else "PNC.01",
                 "confidence": 0.96,
                 "method": "audited_statement_label",
-                "reason": "Etiqueta exacta en sección de pasivos no corrientes → PNC.01",
+                "reason": "Etiqueta exacta en sección de pasivos no corrientes",
             }
         for pattern, code, allowed_types in self._AUDITED_STATEMENT_LABELS:
             if not pattern.fullmatch(normalized):
                 continue
             if allowed_types is not None and account_tipo not in allowed_types:
+                continue
+            if not self._is_code_allowed_for_section(code, account_section):
                 continue
             return {
                 "standard_code": code,
@@ -249,7 +296,7 @@ class HomologationPipeline:
         if best_score >= 90 and best_entry is not None:
             confidence = min(0.80 + (best_score - 90) * 0.01, 0.97)
             code = (
-                "ANC.01.01" if is_contra_asset_name(account_name)
+                "ANC.01.01" if is_ppe_depreciation_name(account_name)
                 else best_entry["codigo_estandar"]
             )
             return {
@@ -276,12 +323,20 @@ class HomologationPipeline:
                 f"{result.get('reason', 'Clasificación previa')}; "
                 f"código histórico {previous_code} normalizado a {canonical_code}"
             )
-        if (is_contra_asset_name(account_name)
+        if (is_ppe_depreciation_name(account_name)
                 and result.get("standard_code") == "ANC.01"):
             result = {**result, "standard_code": "ANC.01.01"}
             result["reason"] = (
                 f"{result.get('reason', 'Clasificación previa')}; "
                 "contra-activo normalizado a ANC.01.01"
+            )
+        elif (result.get("standard_code") == "ANC.01.01"
+              and not is_ppe_depreciation_name(account_name)):
+            result = {**result, "standard_code": None, "confidence": 0.0,
+                      "method": "unclassified"}
+            result["reason"] = (
+                f"{result.get('reason', 'Clasificación previa')}; "
+                "ANC.01.01 incompatible con la etiqueta; requiere revisión sin sustitución automática"
             )
         return result
 
@@ -292,6 +347,8 @@ class HomologationPipeline:
         for pat, cod, conf in self._REGEX_FALLBACK:
             if pat.search(normalized):
                 if account_tipo and not self._is_code_allowed_for_tipo(cod, account_tipo):
+                    continue
+                if not self._is_valid_ppe_depreciation(cod, account_name):
                     continue
                 return {
                     "standard_code": cod,
@@ -308,7 +365,7 @@ class HomologationPipeline:
         if not account_name or not account_tipo:
             return None
         normalized = self._normalize_name(account_name)
-        if account_tipo == "ACTIVO" and is_contra_asset_name(account_name):
+        if account_tipo == "ACTIVO" and is_ppe_depreciation_name(account_name):
             return {
                 "standard_code": "ANC.01.01",
                 "confidence": 0.84,
@@ -320,7 +377,8 @@ class HomologationPipeline:
             }
         for pattern, code, confidence in self._REGEX_CONTEXTUAL:
             if (pattern.search(normalized)
-                    and self._is_code_allowed_for_tipo(code, account_tipo)):
+                    and self._is_code_allowed_for_tipo(code, account_tipo)
+                    and self._is_valid_ppe_depreciation(code, account_name)):
                 return {
                     "standard_code": code,
                     "confidence": min(confidence, 0.84),
@@ -358,16 +416,75 @@ class HomologationPipeline:
             ),
         }
 
-    def _is_code_allowed(self, code: str | None, tipo: str | None) -> bool:
-        if not self._features.ENABLE_ACCOUNT_TYPE_FILTER or not code or not tipo:
+    @staticmethod
+    def _normalize_section_code(section: str | None) -> str | None:
+        if not section:
+            return None
+        raw = re.sub(r"\s+", " ", str(section).strip()).lower()
+        raw = re.sub(r"^(?:total(?:es)?\s+(?:de\s+)?)", "", raw).strip()
+        raw = re.sub(r"\s+(?:total|totales)$", "", raw).strip()
+        if raw in {"ac", "activo corriente", "activos corrientes", "activo circulante", "activos circulantes"}:
+            return "AC"
+        if raw in {"anc", "activo no corriente", "activos no corrientes", "activo fijo", "activos fijos"}:
+            return "ANC"
+        if raw in {"pc", "pasivo corriente", "pasivos corrientes", "pasivo circulante", "pasivos circulantes"}:
+            return "PC"
+        if raw in {"pnc", "pasivo no corriente", "pasivos no corrientes", "pasivo a largo plazo", "pasivos a largo plazo"}:
+            return "PNC"
+        if raw in {"pat", "patrimonio", "patrimonio neto"}:
+            return "PAT"
+        if raw in {"er", "estado de resultados", "resultado", "resultados", "perdidas y ganancias"}:
+            return "ER"
+        return None
+
+    @classmethod
+    def _is_code_allowed_for_section(cls, code: str | None, section: str | None) -> bool:
+        if not code or not section:
             return True
-        return self._is_code_allowed_for_tipo(code, tipo)
+        sec = cls._normalize_section_code(section)
+        if not sec:
+            return True
+        if sec == "AC":
+            return not (code.startswith("ANC.") or code.startswith("PNC.") or code.startswith("PC.") or code.startswith("PAT.") or code.startswith("ER."))
+        if sec == "ANC":
+            return not (code.startswith("AC.") or code.startswith("PNC.") or code.startswith("PC.") or code.startswith("PAT.") or code.startswith("ER."))
+        if sec == "PC":
+            return not (code.startswith("PNC.") or code.startswith("ANC.") or code.startswith("AC.") or code.startswith("PAT.") or code.startswith("ER."))
+        if sec == "PNC":
+            return not (code.startswith("PC.") or code.startswith("ANC.") or code.startswith("AC.") or code.startswith("PAT.") or code.startswith("ER."))
+        if sec == "PAT":
+            return code.startswith("PAT.")
+        if sec == "ER":
+            return code.startswith("ER.")
+        return True
+
+    @staticmethod
+    def _is_valid_ppe_depreciation(code: str | None, account_name: str) -> bool:
+        if code == "ANC.01.01":
+            return is_ppe_depreciation_name(account_name)
+        return True
+
+    def _is_code_allowed(
+        self,
+        code: str | None,
+        tipo: str | None,
+        section: str | None = None,
+    ) -> bool:
+        if not code:
+            return True
+        if self._features.ENABLE_ACCOUNT_TYPE_FILTER and tipo:
+            if not self._is_code_allowed_for_tipo(code, tipo):
+                return False
+        if section and not self._is_code_allowed_for_section(code, section):
+            return False
+        return True
 
     def _classify_account(
         self, account_code: str, account_name: str,
         account_tipo: str | None = None,
         store_cmcc_shadow: bool = True,
         account_section: str | None = None,
+        account_hierarchy: str | None = None,
     ) -> dict[str, Any]:
         # Las etiquetas canónicas completas de estados auditados son evidencia
         # más fuerte que similitudes históricas. Se resuelven antes del motor
@@ -378,18 +495,27 @@ class HomologationPipeline:
         if audited_result is not None:
             return self._canonicalize_special_code(audited_result, account_name)
 
+        hierarchy_result = self._classify_by_hierarchy(
+            account_hierarchy, account_tipo, account_section,
+        )
+        if hierarchy_result is not None:
+            return self._canonicalize_special_code(hierarchy_result, account_name)
+
         learning_result = self._learning_engine.best_match(account_name)
         if learning_result["source"] != "none":
-            return self._canonicalize_special_code({
-                "standard_code": learning_result["code"],
-                "confidence": learning_result["confidence"],
-                "method": f"learning_{learning_result['source']}",
-                "reason": (
-                    f"Gold Standard ({learning_result['source']}) → "
-                    f"{learning_result['code']} "
-                    f"(matched: {learning_result['matched_name']})"
-                ),
-            }, account_name)
+            l_code = learning_result["code"]
+            if (self._is_code_allowed(l_code, account_tipo, account_section)
+                    and self._is_valid_ppe_depreciation(l_code, account_name)):
+                return self._canonicalize_special_code({
+                    "standard_code": l_code,
+                    "confidence": learning_result["confidence"],
+                    "method": f"learning_{learning_result['source']}",
+                    "reason": (
+                        f"Gold Standard ({learning_result['source']}) → "
+                        f"{l_code} "
+                        f"(matched: {learning_result['matched_name']})"
+                    ),
+                }, account_name)
 
         cmcc_raw: dict[str, Any] | None = None
         cmcc_score = -1.0
@@ -400,7 +526,13 @@ class HomologationPipeline:
 
         result: dict[str, Any] | None = None
 
-        if self._features.ENABLE_CMCC_PRODUCTION and cmcc_score >= self._features.CMCC_THRESHOLD:
+        if (
+            self._features.ENABLE_CMCC_PRODUCTION
+            and cmcc_score >= self._features.CMCC_THRESHOLD
+            and cmcc_raw is not None
+            and self._is_code_allowed(cmcc_raw.get("code"), account_tipo, account_section)
+            and self._is_valid_ppe_depreciation(cmcc_raw.get("code"), account_name)
+        ):
             result = {
                 "standard_code": cmcc_raw["code"],
                 "confidence": cmcc_score,
@@ -416,8 +548,15 @@ class HomologationPipeline:
         if self._features.ENABLE_DECISION_ENGINE:
             result = self._classify_with_decision_engine(
                 account_code, account_name, account_tipo,
+                account_section=account_section,
             )
             result = self._canonicalize_special_code(result, account_name)
+            if (not self._is_code_allowed(result.get("standard_code"), account_tipo, account_section)
+                    or not self._is_valid_ppe_depreciation(result.get("standard_code"), account_name)):
+                result["standard_code"] = None
+                result["confidence"] = 0.0
+                result["method"] = "unclassified"
+                result["reason"] = f"Filtrado: código incompatible con sección {account_section} o tipo {account_tipo}"
             result["_cmcc_score"] = cmcc_score
             if cmcc_raw is not None:
                 result["cmcc_detail"] = cmcc_raw
@@ -426,23 +565,26 @@ class HomologationPipeline:
             return result
 
         # --- Original first-match-wins path (DE disabled) ---
-        result = (
-            result
-            or self._classify_by_code(account_code)
-            or self._classify_audited_statement_label(account_name, account_tipo)
-            or self._classify_by_dictionary_exact(account_name)
-            or self._classify_by_dictionary_fuzzy(account_name)
-        )
-
-        if (result is not None and account_tipo
-                and not self._is_code_allowed_for_tipo(
-                    result.get("standard_code"), account_tipo
-                )):
-            result = None
+        candidates = [
+            result,
+            self._classify_by_code(account_code),
+            self._classify_audited_statement_label(account_name, account_tipo, account_section),
+            self._classify_by_dictionary_exact(account_name),
+            self._classify_by_dictionary_fuzzy(account_name),
+        ]
+        result = None
+        for cand in candidates:
+            if (cand
+                    and self._is_code_allowed(cand.get("standard_code"), account_tipo, account_section)
+                    and self._is_valid_ppe_depreciation(cand.get("standard_code"), account_name)):
+                result = cand
+                break
 
         if result is None and self._features.ENABLE_SEMANTIC_MATCHER and self._semantic_matcher is not None:
             sm_result = self._semantic_matcher.match(account_name, account_tipo)
-            if not sm_result.is_unknown:
+            if (not sm_result.is_unknown
+                    and self._is_code_allowed(sm_result.expected_cmcc, account_tipo, account_section)
+                    and self._is_valid_ppe_depreciation(sm_result.expected_cmcc, account_name)):
                 result = {
                     "standard_code": sm_result.expected_cmcc,
                     "confidence": min(sm_result.score, 0.99),
@@ -456,13 +598,25 @@ class HomologationPipeline:
                 }
 
         if result is None and self._features.ENABLE_REGEX_FALLBACK:
-            result = self._classify_by_regex(account_name, account_tipo)
+            reg_cand = self._classify_by_regex(account_name, account_tipo)
+            if (reg_cand
+                    and self._is_code_allowed(reg_cand.get("standard_code"), account_tipo, account_section)
+                    and self._is_valid_ppe_depreciation(reg_cand.get("standard_code"), account_name)):
+                result = reg_cand
 
         if result is None and not account_code:
-            result = self._classify_by_regex_contextual(account_name, account_tipo)
+            reg_cand = self._classify_by_regex_contextual(account_name, account_tipo)
+            if (reg_cand
+                    and self._is_code_allowed(reg_cand.get("standard_code"), account_tipo, account_section)
+                    and self._is_valid_ppe_depreciation(reg_cand.get("standard_code"), account_name)):
+                result = reg_cand
 
         if result is None:
-            result = self._classify_by_origin_fallback(account_code, account_tipo)
+            orig_cand = self._classify_by_origin_fallback(account_code, account_tipo)
+            if (orig_cand
+                    and self._is_code_allowed(orig_cand.get("standard_code"), account_tipo, account_section)
+                    and self._is_valid_ppe_depreciation(orig_cand.get("standard_code"), account_name)):
+                result = orig_cand
 
         if result is None:
             result = {
@@ -487,15 +641,23 @@ class HomologationPipeline:
         account_code: str,
         account_name: str,
         account_tipo: str | None = None,
+        account_section: str | None = None,
     ) -> dict[str, Any]:
         from decision.models import DecisionResult as DEResult
 
         code_r = self._classify_by_code(account_code)
+        if code_r and (not self._is_code_allowed(code_r.get("standard_code"), account_tipo, account_section)
+                       or not self._is_valid_ppe_depreciation(code_r.get("standard_code"), account_name)):
+            code_r = None
+
         dict_r = (
-            self._classify_audited_statement_label(account_name, account_tipo)
+            self._classify_audited_statement_label(account_name, account_tipo, account_section)
             or self._classify_by_dictionary_exact(account_name)
             or self._classify_by_dictionary_fuzzy(account_name)
         )
+        if dict_r and (not self._is_code_allowed(dict_r.get("standard_code"), account_tipo, account_section)
+                       or not self._is_valid_ppe_depreciation(dict_r.get("standard_code"), account_name)):
+            dict_r = None
 
         sm_match = None
         sm_code = None
@@ -504,7 +666,9 @@ class HomologationPipeline:
         sm_confidence = None
         if self._features.ENABLE_SEMANTIC_MATCHER and self._semantic_matcher is not None:
             sm_match = self._semantic_matcher.match(account_name, account_tipo)
-            if not sm_match.is_unknown and self._is_code_allowed(sm_match.expected_cmcc, account_tipo):
+            if (not sm_match.is_unknown
+                    and self._is_code_allowed(sm_match.expected_cmcc, account_tipo, account_section)
+                    and self._is_valid_ppe_depreciation(sm_match.expected_cmcc, account_name)):
                 sm_code = sm_match.expected_cmcc
                 sm_score = sm_match.score
                 sm_tier = sm_match.match_tier
@@ -513,6 +677,9 @@ class HomologationPipeline:
         regex_r = None
         if self._features.ENABLE_REGEX_FALLBACK:
             regex_r = self._classify_by_regex(account_name, account_tipo)
+            if regex_r and (not self._is_code_allowed(regex_r.get("standard_code"), account_tipo, account_section)
+                            or not self._is_valid_ppe_depreciation(regex_r.get("standard_code"), account_name)):
+                regex_r = None
 
         # Collect inputs
         de_sm_code = sm_code
@@ -604,6 +771,7 @@ class HomologationPipeline:
 
         classified: list[dict[str, Any]] = []
         ignored: list[dict[str, Any]] = []
+        controls_count = 0
         unclassified_count = 0
         learning_hits = 0
         learning_exact = 0
@@ -643,6 +811,16 @@ class HomologationPipeline:
             ab: AccountBalance = AccountAdapter.from_cuenta_raw(cr)
             interp = BalanceInterpreter(ab)
 
+            if cr.es_total:
+                controls_count += 1
+                ignored.append({
+                    "account_code": ab.account_code,
+                    "account_name": ab.account_name,
+                    "ignored_reason": "control_total",
+                    "is_total": True,
+                })
+                continue
+
             classification_amount = interp.classification_amount
             # Los estados financieros auditados suelen traer sólo importes
             # comparativos y no las ocho columnas del balance tributario. En
@@ -662,7 +840,10 @@ class HomologationPipeline:
                 codigo=cr.codigo,
             )
             account_tipo = tipo_result.account_type.value
-            if account_tipo == "PASIVO" and is_contra_asset_name(ab.account_name):
+            contextual_name = " ".join(filter(None, (
+                cr.jerarquia_contable, ab.account_name,
+            )))
+            if account_tipo == "PASIVO" and is_contra_asset_name(contextual_name):
                 account_tipo = "ACTIVO"
             if is_equity_account_name(ab.account_name):
                 account_tipo = "PATRIMONIO"
@@ -683,16 +864,22 @@ class HomologationPipeline:
                 account_tipo=account_tipo,
                 store_cmcc_shadow=store_shadow,
                 account_section=cr.seccion_contable,
+                account_hierarchy=cr.jerarquia_contable,
             )
 
-            if enable_type_filter and account_tipo and classification.get("standard_code"):
-                if not self._is_code_allowed_for_tipo(classification["standard_code"], account_tipo):
+            if classification.get("standard_code"):
+                code_cand = classification["standard_code"]
+                tipo_invalido = bool(enable_type_filter and account_tipo and not self._is_code_allowed_for_tipo(code_cand, account_tipo))
+                seccion_invalida = bool(cr.seccion_contable and not self._is_code_allowed_for_section(code_cand, cr.seccion_contable))
+                ppe_invalido = bool(not self._is_valid_ppe_depreciation(code_cand, ab.account_name))
+                if tipo_invalido or seccion_invalida or ppe_invalido:
+                    motivo = ("tipo " + str(account_tipo)) if tipo_invalido else (
+                        ("sección " + str(cr.seccion_contable)) if seccion_invalida else "restricción ANC.01.01 de PPE"
+                    )
                     classification["standard_code"] = None
                     classification["confidence"] = 0.0
                     classification["method"] = "unclassified"
-                    classification["reason"] = (
-                        f"Filtrado: código incompatible con tipo {account_tipo}"
-                    )
+                    classification["reason"] = f"Filtrado: código incompatible con {motivo}"
                     tipo_filtered += 1
 
             if classification.get("method") == "regex_fallback":
@@ -797,7 +984,10 @@ class HomologationPipeline:
                 "method": classification.get("method", "unknown"),
                 "reason": classification.get("reason", ""),
                 "special_rule": adjustment.nota if adjustment.aplica else None,
-                "review_required": adjustment.requiere_revision,
+                "review_required": (
+                    adjustment.requiere_revision
+                    or classification.get("method") in RESIDUAL_CLASSIFICATION_METHODS
+                ),
                 "source_file": path.name,
                 "source_page": ab.source_page,
                 "semantic_result": semantic_result,
@@ -805,7 +995,8 @@ class HomologationPipeline:
                 "cmcc_decision": classification.get("cmcc_detail"),
             })
 
-        accounts_classified = len(classified)
+        metric_contract = account_metrics(classified, controls_count)
+        accounts_classified = metric_contract["accounts_classified"]
         accounts_ignored = len(ignored)
         accounts_without_dictionary_match = unclassified_count
 
@@ -813,14 +1004,18 @@ class HomologationPipeline:
 
         summary = {
             "source_file": path.name,
+            "ocr": bool(getattr(resultado, "requirio_ocr", False)),
+            "requirio_ocr": bool(getattr(resultado, "requirio_ocr", False)),
             "accounts_total": accounts_total,
             "accounts_classified": accounts_classified,
             "accounts_ignored": accounts_ignored,
             "accounts_without_dictionary_match": accounts_without_dictionary_match,
+            **metric_contract,
             "learning_hits": learning_hits,
             "learning_exact": learning_exact,
             "learning_fuzzy": learning_fuzzy,
             "fallback_classifier": fallback_classifier,
+            "fallback_classifier_legacy": fallback_classifier,
             "semantic_total": semantic_total,
             "semantic_matches": semantic_matches,
             "semantic_unknown": semantic_unknown,
@@ -844,11 +1039,21 @@ class HomologationPipeline:
             "classified": classified,
             "ignored": ignored,
         }
+        summary["document_family"] = document_family(
+            {"requirio_ocr": getattr(resultado, "requirio_ocr", False)}, classified,
+        )
+        summary["balance_reconciliation"] = compare_pre_post(
+            getattr(resultado, "certificacion_extraccion", None), classified,
+        )
+        summary["export_blocked_by_classification_degradation"] = bool(
+            summary["balance_reconciliation"]["classification_degradation"]
+        )
 
         logger.info(
-            "total=%d classified=%d ignored=%d unmatched=%d (%.3fs)",
-            accounts_total, accounts_classified, accounts_ignored,
-            accounts_without_dictionary_match, elapsed,
+            "total=%d specific=%d residual=%d unclassified=%d controls=%d ignored=%d (%.3fs)",
+            accounts_total, metric_contract["accounts_classified_specific"],
+            metric_contract["accounts_classified_residual"], metric_contract["accounts_unclassified"],
+            metric_contract["accounts_controls"], accounts_ignored, elapsed,
         )
 
         return summary

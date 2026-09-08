@@ -80,7 +80,8 @@ def test_no_habilita_filas_sin_respaldo(defecto):
         del c.montos_columnas["saldo_deudor"]
     elif defecto == "omitida":
         cuentas.append(parser.parsear_linea("Sin codigo 10 0 10 0 10 0 0 0", 10, parser.FormatoCodigo.COMPACTO, "."))
-    assert not parser.certificar_extraccion_columnas(cuentas).columnas_finales_validadas
+    # Este contrato exige igualdad exacta, no una diferencia dentro de tolerancia.
+    assert not parser.certificar_extraccion_columnas(cuentas, tolerancia_absoluta=0).columnas_finales_validadas
 
 
 def test_no_basta_que_los_errores_se_compensen_en_los_totales():

@@ -4,12 +4,24 @@ import pandas as pd
 import pytest
 
 from scripts.certify_local_corpus import (
+    _account_snapshot,
+    _classify,
+    _detected_dimensions,
+    _has_execution_failure,
+    build_corpus_measurement,
+    certify_isolated,
     evaluate_gold_rows,
     evaluate_expectations,
     load_gold_rows,
     load_manifest,
     resolve_manifest_cases,
     write_gold_candidate,
+)
+from parser_universal import CuentaRaw, OrigenColumna
+from pipeline.homologation_pipeline import HomologationPipeline
+from scripts.migrate_gold_workbook import (
+    build_gold_review_package,
+    migrate_gold_workbook,
 )
 
 
@@ -45,6 +57,7 @@ def _result(*, valid=True, result=100, unclassified=0):
                 "line": 1,
                 "account_code": "2301001",
                 "name": "Capital Social",
+                "accounting_hierarchy": "Patrimonio",
                 "origin": "pasivo",
                 "amount": 1500,
                 "period_amounts": {"2024": 1500, "2023": 1400},
@@ -89,6 +102,38 @@ def test_expectations_validate_totals_result_and_account():
     assert all(check["passed"] for check in checks)
 
 
+def test_document_dimensions_survive_when_accounts_have_no_period_map():
+    account = CuentaRaw(
+        linea=1,
+        codigo="110101",
+        nombre="Caja",
+        monto=100,
+        origen_columna=OrigenColumna.ACTIVO,
+        montos_columnas={"activo": 100},
+    )
+
+    periods, currencies = _detected_dimensions(
+        [account], ["2024"], ["CLP"],
+    )
+
+    assert periods == ["2024"]
+    assert currencies == ["CLP"]
+
+
+def test_document_dimensions_trust_header_hints_and_limit_to_two_periods():
+    account = CuentaRaw(
+        linea=1, codigo="110101", nombre="Caja", monto=100,
+        origen_columna=OrigenColumna.ACTIVO,
+        montos_periodos={"2010": 5, "2022": 80, "2023": 100},
+    )
+
+    periods, _ = _detected_dimensions(
+        [account], ["2024", "2023", "2010"], [],
+    )
+
+    assert periods == ["2024", "2023"]
+
+
 def test_expectations_expose_release_failure():
     checks, passed = evaluate_expectations(
         _result(valid=False, result=99, unclassified=1),
@@ -110,6 +155,126 @@ def test_expectations_expose_release_failure():
     }
 
 
+def test_expectations_never_hide_failed_certification():
+    checks, passed = evaluate_expectations(
+        _result(valid=False),
+        {"certification_must_not_fail": True},
+    )
+
+    assert not passed
+    check = next(
+        row for row in checks
+        if row["name"] == "certification_must_not_fail"
+    )
+    assert check == {
+        "name": "certification_must_not_fail",
+        "actual": "fallida",
+        "expected": True,
+        "passed": False,
+    }
+
+
+def test_timeout_y_falla_contable_quedan_separados_en_medicion():
+    measurement = build_corpus_measurement([
+        {
+            "file": "timeout.pdf", "status": "timeout",
+            "certification": {"state": "timeout"},
+            "family_metrics": {"family": "not_processed"},
+        },
+        {
+            "file": "fallida.pdf", "status": "ok",
+            "certification": {"state": "fallida"},
+            "family_metrics": {"family": "escaneado_ocr"},
+        },
+        {
+            "file": "pendiente.pdf", "status": "not_processed",
+            "certification": None,
+        },
+    ])
+
+    assert measurement["timeout_documents"] == 1
+    assert measurement["not_processed_documents"] == 1
+    assert measurement["failed_certification_documents"] == 1
+    assert measurement["status_counts"] == {
+        "not_processed": 1, "ok": 1, "timeout": 1,
+    }
+    assert _has_execution_failure([
+        {"status": "ok"}, {"status": "timeout"},
+    ])
+
+
+def test_certificacion_aislada_termina_worker_al_exceder_presupuesto(
+    monkeypatch, tmp_path,
+):
+    class FakeProcess:
+        exitcode = None
+
+        def __init__(self):
+            self.alive = True
+            self.terminated = False
+
+        def start(self):
+            return None
+
+        def join(self, timeout=None):
+            return None
+
+        def is_alive(self):
+            return self.alive
+
+        def terminate(self):
+            self.terminated = True
+            self.alive = False
+
+    process = FakeProcess()
+
+    class FakeContext:
+        @staticmethod
+        def Process(**kwargs):
+            return process
+
+    monkeypatch.setattr(
+        "scripts.certify_local_corpus.multiprocessing.get_context",
+        lambda method: FakeContext(),
+    )
+
+    result = certify_isolated(
+        tmp_path / "lento.pdf", timeout_seconds=1, exchange_dir=tmp_path,
+    )
+
+    assert process.terminated is True
+    assert result["status"] == "timeout"
+    assert result["processing_state"] == "timed_out"
+    assert result["certification"]["state"] == "timeout"
+    assert result["certification"]["final_totals_valid"] is None
+    assert result["accounts"] == []
+
+
+@pytest.mark.parametrize("state", ["parcial", "no_evaluable", "timeout", None])
+def test_required_certification_rejects_non_certified_states(state):
+    result = _result()
+    result["certification"]["state"] = state
+
+    checks, passed = evaluate_expectations(
+        result, {"certification_must_not_fail": True},
+    )
+
+    assert not passed
+    assert checks[0]["passed"] is False
+
+
+def test_final_totals_none_does_not_prove_true_even_when_state_is_certified():
+    result = _result()
+    result["certification"]["final_totals_valid"] = None
+
+    checks, passed = evaluate_expectations(
+        result, {"final_totals_valid": True},
+    )
+
+    assert not passed
+    assert checks[0]["actual"] is None
+
+
 def test_expectations_accept_declared_human_review_row():
     checks, passed = evaluate_expectations(
         _result(valid=False),
@@ -129,7 +294,16 @@ def test_expectations_accept_declared_human_review_row():
 def test_manifest_rejects_duplicate_files(tmp_path):
     manifest = tmp_path / "matrix.json"
     manifest.write_text(
-        json.dumps({"cases": [{"file": "a.pdf"}, {"file": "a.pdf"}]}),
+        json.dumps({"cases": [
+            {
+                "file": "a.pdf",
+                "expect": {"certification_must_not_fail": True},
+            },
+            {
+                "file": "a.pdf",
+                "expect": {"certification_must_not_fail": True},
+            },
+        ]}),
         encoding="utf-8",
     )
     with pytest.raises(ValueError, match="duplicados"):
@@ -142,7 +316,11 @@ def test_manifest_resolves_unique_document_and_pages(tmp_path):
     source.write_bytes(b"not parsed in this unit test")
     manifest = tmp_path / "matrix.json"
     manifest.write_text(
-        json.dumps({"cases": [{"file": "a.pdf", "pages": [1, 3]}]}),
+        json.dumps({"cases": [{
+            "file": "a.pdf",
+            "pages": [1, 3],
+            "expect": {"certification_must_not_fail": True},
+        }]}),
         encoding="utf-8",
     )
     cases = load_manifest(manifest)
@@ -162,6 +340,77 @@ def test_gold_rows_compare_every_account_field():
     )
     assert not mismatch["passed"]
     assert "period_amounts" in mismatch["actual"][0]["differences"]
+
+
+def test_classifier_reproduces_hierarchy_context_used_by_ui(tmp_path):
+    accounts = [
+        CuentaRaw(
+            linea=1,
+            codigo="1101201",
+            nombre="BANCOESTADO 1",
+            monto=60,
+            origen_columna=OrigenColumna.ACTIVO,
+            montos_columnas={
+                "debe": 60, "saldo_deudor": 60, "activo": 60,
+            },
+            jerarquia_contable="BANCOS",
+        ),
+        CuentaRaw(
+            linea=2,
+            codigo="1201201",
+            nombre="DEPRECIACIONES",
+            monto=25,
+            origen_columna=OrigenColumna.PASIVO,
+            montos_columnas={
+                "haber": 25, "saldo_acreedor": 25, "pasivo": 25,
+            },
+            jerarquia_contable="DEPRECIACIÓN ACUMULADA",
+        ),
+    ]
+    classified = _classify(
+        accounts, HomologationPipeline(db_path=tmp_path / "gold.db"),
+    )
+    by_name = {row["name"]: row for row in classified["rows"]}
+
+    assert by_name["BANCOESTADO 1"]["code"] == "AC.01"
+    assert by_name["BANCOESTADO 1"]["method"] == "hierarchy_inheritance"
+    assert by_name["DEPRECIACIONES"]["code"] == "ANC.01.01"
+    assert by_name["DEPRECIACIONES"]["method"] == "hierarchy_inheritance"
+
+
+def test_gold_snapshot_marks_filtered_unclassified_row_for_review():
+    account = CuentaRaw(
+        linea=104,
+        codigo="3204006",
+        nombre="CORREO",
+        monto=109371,
+        origen_columna=OrigenColumna.PERDIDA,
+        montos_columnas={"perdida": 109371},
+        jerarquia_contable="3204 - SERVICIOS BASICOS",
+    )
+
+    snapshot = _account_snapshot([account], {"rows": []})
+
+    assert snapshot[0]["standard_code"] == ""
+    assert snapshot[0]["requires_review"] is True
+
+
+def test_gold_snapshot_does_not_require_classification_for_control_without_code():
+    control = CuentaRaw(
+        linea=171,
+        codigo="",
+        nombre="Sumas",
+        monto=1231044771,
+        origen_columna=OrigenColumna.ACTIVO,
+        montos_columnas={"activo": 1231044771},
+        es_total=True,
+    )
+
+    snapshot = _account_snapshot([control], {"rows": []})
+
+    assert snapshot[0]["is_total"] is True
+    assert snapshot[0]["standard_code"] == ""
+    assert snapshot[0]["requires_review"] is False
 
 
 def test_gold_rows_detect_duplicate_occurrence():
@@ -205,6 +454,10 @@ def test_gold_candidate_requires_explicit_approval(tmp_path):
         frame.to_excel(writer, sheet_name="Cuentas", index=False)
     loaded = load_gold_rows(candidate)
     assert loaded[0]["name"] == "Capital Social"
+    assert loaded[0]["accounting_hierarchy"] == "Patrimonio"
+    assert loaded[0]["classification_method"] == "dictionary_exact"
+    assert loaded[0]["confidence"] == 1.0
+    assert loaded[0]["derived_columns"] == []
     assert loaded[0]["period_amounts"] == {"2023": 1400, "2024": 1500}
 
 
@@ -231,11 +484,177 @@ def test_gold_candidate_exclusion_makes_parser_noise_visible(tmp_path):
     assert extra["actual"]
 
 
+def test_gold_migration_requires_review_for_new_protected_metadata(tmp_path):
+    result = _result()
+    result.update({"selected_pages": [1], "warnings": [], "expectation_checks": []})
+    candidate = write_gold_candidate(result, tmp_path / "candidate")
+    legacy = tmp_path / "legacy.xlsx"
+    frame = pd.read_excel(candidate, sheet_name="Cuentas")
+    frame["Estado_revision"] = "APROBADO"
+    frame = frame.drop(columns=["Jerarquia_contable"])
+    summary = pd.read_excel(candidate, sheet_name="Resumen").drop(
+        columns=["Gold_schema_version"],
+    )
+    with pd.ExcelWriter(legacy, engine="openpyxl") as writer:
+        summary.to_excel(writer, sheet_name="Resumen", index=False)
+        frame.to_excel(writer, sheet_name="Cuentas", index=False)
+
+    migrated = migrate_gold_workbook(
+        legacy, candidate, tmp_path / "migrated.xlsx",
+    )
+    migrated_frame = pd.read_excel(migrated, sheet_name="Cuentas")
+    migrated_summary = pd.read_excel(migrated, sheet_name="Resumen")
+
+    assert migrated_summary.iloc[0]["Gold_schema_version"] == 2
+    assert migrated_frame.iloc[0]["Estado_revision"] == "CORREGIR"
+    assert "Jerarquia_contable" in migrated_frame.iloc[0]["Observacion_analista"]
+
+
+def test_review_package_groups_differences_without_approving(tmp_path):
+    report = tmp_path / "gold-report.json"
+    report.write_text(json.dumps([{
+        "file": "auditado.pdf",
+        "selected_pages": [5, 6],
+        "certification": {"state": "parcial"},
+        "expectations_passed": False,
+        "gold_candidate": "/private/auditado.gold-candidate.xlsx",
+        "expectation_checks": [
+            {
+                "name": "allowed_certification_states", "passed": False,
+                "actual": "parcial", "expected": ["certificada"],
+            },
+            {
+                "name": "gold_mismatched_rows", "passed": False,
+                "actual": [{
+                    "key": ["", "caja", 1],
+                    "actual_line": 12,
+                    "expected_line": 10,
+                    "differences": {
+                        "accounting_hierarchy": ["Activo > Caja", ""],
+                        "amount": [101, 100],
+                    },
+                }],
+                "expected": [],
+            },
+        ],
+    }]), encoding="utf-8")
+
+    package = build_gold_review_package(report, tmp_path / "review")
+
+    assert package["summary"]["release_blocked"] is True
+    assert package["summary"]["differences"] == 2
+    assert package["summary"]["autofillable_without_ambiguity"] == 1
+    assert {row["review_state"] for row in package["differences"]} == {"CORREGIR"}
+    hierarchy = next(
+        row for row in package["differences"]
+        if row["field"] == "accounting_hierarchy"
+    )
+    assert hierarchy["proposed_value"] == "Activo > Caja"
+    assert hierarchy["actual_line"] == 12
+    assert hierarchy["expected_line"] == 10
+    assert (tmp_path / "review" / "CHECKLIST.md").exists()
+    assert (tmp_path / "review" / "revision_gold_schema2.xlsx").exists()
+
+
 def test_manifest_rejects_gold_path_outside_matrix(tmp_path):
     manifest = tmp_path / "matrix.json"
     manifest.write_text(
-        json.dumps({"cases": [{"file": "a.pdf", "gold_file": "../gold.xlsx"}]}),
+        json.dumps({"cases": [{
+            "file": "a.pdf",
+            "gold_file": "../gold.xlsx",
+            "gold_schema_version": 2,
+            "expect": {"certification_must_not_fail": True},
+        }]}),
         encoding="utf-8",
     )
     with pytest.raises(ValueError, match="Ruta Gold inválida"):
+        load_manifest(manifest)
+
+
+def test_manifest_requires_explicit_certification_expectation(tmp_path):
+    manifest = tmp_path / "matrix.json"
+    manifest.write_text(
+        json.dumps({"cases": [{
+            "file": "a.pdf",
+            "required_for_release": True,
+            "expect": {"max_unclassified": 0},
+        }]}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="certification_state"):
+        load_manifest(manifest)
+
+
+@pytest.mark.parametrize("state", ["parcial", "no_evaluable", "fallida"])
+def test_manifest_forbids_non_certified_required_state(tmp_path, state):
+    manifest = tmp_path / "matrix.json"
+    manifest.write_text(
+        json.dumps({"cases": [{
+            "file": "a.pdf",
+            "required_for_release": True,
+            "expect": {"certification_state": state},
+        }]}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="sólo puede aceptar"):
+        load_manifest(manifest)
+
+
+def test_gold_schema_two_compares_hierarchy_method_confidence_and_derived():
+    actual = _result()["accounts"]
+    expected = [dict(actual[0], _gold_schema_version=2)]
+    expected[0]["accounting_hierarchy"] = "Otra jerarquía"
+    expected[0]["classification_method"] = "manual"
+    expected[0]["confidence"] = 0.5
+    expected[0]["derived_columns"] = ["activo"]
+
+    checks = evaluate_gold_rows(actual, expected)
+    mismatches = next(row for row in checks if row["name"] == "gold_mismatched_rows")
+
+    assert not mismatches["passed"]
+    fields = mismatches["actual"][0]["differences"]
+    assert set(fields) >= {
+        "accounting_hierarchy", "classification_method", "confidence",
+        "derived_columns",
+    }
+
+
+def test_classify_omits_recognized_total(tmp_path):
+    total = CuentaRaw(
+        linea=99, codigo=None, nombre="Total activos", monto=100,
+        origen_columna=OrigenColumna.ACTIVO, es_total=True,
+        montos_columnas={"activo": 100},
+    )
+
+    result = _classify(
+        [total], HomologationPipeline(db_path=tmp_path / "totals.db"),
+    )
+
+    assert result["eligible"] == 0
+    assert result["rows"] == []
+
+
+@pytest.mark.parametrize(
+    "expectation",
+    [
+        {"certification_state": "fallida"},
+        {"certification_must_not_fail": False},
+    ],
+)
+def test_manifest_forbids_accepting_failed_certification(
+    tmp_path, expectation,
+):
+    manifest = tmp_path / "matrix.json"
+    manifest.write_text(
+        json.dumps({"cases": [{
+            "file": "a.pdf",
+            "required_for_release": True,
+            "expect": expectation,
+        }]}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="sólo puede aceptar|debe exigir"):
         load_manifest(manifest)

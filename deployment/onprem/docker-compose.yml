@@ -1,0 +1,183 @@
+name: ${COMPOSE_PROJECT_NAME:-homologacion-balances}
+
+services:
+  db:
+    profiles: ["legacy-postgres"]
+    image: ${POSTGRES_IMAGE:-postgres:16-alpine}
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-homologacion}
+      POSTGRES_USER: ${POSTGRES_USER:-homologacion_app}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "1.00"
+          memory: 1G
+        reservations:
+          memory: 256M
+
+  bootstrap:
+    image: ${APP_IMAGE_REFERENCE:-homologacion-balances:onprem-local}
+    user: "10001:10001"
+    entrypoint: ["/usr/local/bin/run-bootstrap"]
+    environment: &app_environment
+      MASTER_BUNDLE_VERSION: ${MASTER_BUNDLE_VERSION:-embedded}
+      PERSISTENCE_MODE: local
+      LOCAL_PERSISTENCE_ROOT: /var/lib/homologacion/runtime
+      LOCAL_CATALOG_SEED: /app/catalogo_maestro.json
+      LOCAL_DICTIONARY_SEED: /app/diccionario.json
+      LOCAL_MASTER_BUNDLE_VERSION: ${MASTER_BUNDLE_VERSION:-embedded}
+      ONPREM_JSON_FALLBACK: disabled
+      ONPREM_DEPLOYMENT_MODE: ${ONPREM_DEPLOYMENT_MODE:-production}
+      APP_IMAGE_REFERENCE: ${APP_IMAGE_REFERENCE:-homologacion-balances:onprem-local}
+      POSTGRES_IMAGE: ${POSTGRES_IMAGE:-postgres:16-alpine}
+      CADDY_IMAGE: ${CADDY_IMAGE:-caddy:2.8-alpine}
+      CADDY_INIT_IMAGE: ${CADDY_INIT_IMAGE:-alpine:3.20}
+      AUTH_ENFORCEMENT: ${AUTH_ENFORCEMENT:-deny}
+      CADDYFILE_PATH: ${CADDYFILE_PATH:-./Caddyfile.production}
+      BACKUP_ENCRYPTION_REQUIRED: ${BACKUP_ENCRYPTION_REQUIRED:-true}
+    volumes:
+      - app_runtime:/var/lib/homologacion
+    network_mode: none
+    depends_on:
+      app-volume-init:
+        condition: service_completed_successfully
+    read_only: true
+    tmpfs:
+      - /tmp:size=128M,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    restart: "no"
+
+  app:
+    image: ${APP_IMAGE_REFERENCE:-homologacion-balances:onprem-local}
+    user: "10001:10001"
+    environment:
+      <<: *app_environment
+      PORT: "8501"
+      APP_RELEASE_BRANCH: ${APP_RELEASE_BRANCH:-onprem}
+      APP_BUILD_DATE: ${APP_BUILD_DATE:-desarrollo-onprem}
+      QUALITY_CONTROL_ENFORCE_EXPORT: ${QUALITY_CONTROL_ENFORCE_EXPORT:-true}
+      STREAMLIT_SERVER_MAX_UPLOAD_SIZE: ${MAX_UPLOAD_MB:-50}
+      STREAMLIT_SERVER_ENABLE_XSRF_PROTECTION: "true"
+      STREAMLIT_SERVER_ENABLE_CORS: "true"
+    volumes:
+      - app_runtime:/var/lib/homologacion
+    read_only: true
+    tmpfs:
+      - /tmp:size=1G,mode=1777
+    networks:
+      - frontend
+    expose:
+      - "8501"
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8501/_stcore/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 45s
+    restart: unless-stopped
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "2.00"
+          memory: 4G
+        reservations:
+          memory: 512M
+
+  app-volume-init:
+    image: ${CADDY_INIT_IMAGE:-alpine:3.20}
+    user: "0:0"
+    command: ["sh", "-c", "mkdir -p /var/lib/homologacion/runtime && chown -R 10001:10001 /var/lib/homologacion"]
+    volumes:
+      - app_runtime:/var/lib/homologacion
+    network_mode: none
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    restart: "no"
+
+  caddy-volume-init:
+    image: ${CADDY_INIT_IMAGE:-alpine:3.20}
+    user: "0:0"
+    command: ["sh", "-c", "chown -R 10001:10001 /data /config"]
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    network_mode: none
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    restart: "no"
+
+  reverse-proxy:
+    image: ${CADDY_IMAGE:-caddy:2.8-alpine}
+    user: "10001:10001"
+    environment:
+      CADDY_HOSTNAME: ${CADDY_HOSTNAME:-localhost}
+      AUTH_GATEWAY_URL: ${AUTH_GATEWAY_URL:-http://127.0.0.1:1}
+      AUTH_GATEWAY_VERIFY_PATH: ${AUTH_GATEWAY_VERIFY_PATH:-/verify}
+    volumes:
+      - ${CADDYFILE_PATH:-./Caddyfile.production}:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - frontend
+    ports:
+      - "${HTTP_PORT:-80}:8080"
+      - "${HTTPS_PORT:-443}:8443"
+    depends_on:
+      caddy-volume-init:
+        condition: service_completed_successfully
+      app:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:size=64M,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 256M
+
+networks:
+  frontend:
+    driver: bridge
+    internal: true
+  data:
+    driver: bridge
+    internal: true
+
+volumes:
+  postgres_data:
+  app_runtime:
+  caddy_data:
+  caddy_config:
+
+secrets:
+  postgres_password:
+    file: ${ONPREM_POSTGRES_PASSWORD_FILE:-./secrets/postgres_password.txt}

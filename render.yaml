@@ -14,4 +14,4 @@ services:
       - key: APP_RELEASE_BRANCH
         value: codex/mejoras-pendientes-20260826
       - key: QUALITY_CONTROL_ENFORCE_EXPORT
-        value: "false"
+        value: "true"

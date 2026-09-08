@@ -7,9 +7,9 @@ from reporting_integrity import (
 )
 from report_presentation import (
     add_report_sheets, apply_depreciation_reclassification, complete_catalog,
-    ER_ORDER,
+    BALANCE_ORDER, ER_ORDER,
 )
-from test_report_integrity import report_app, afuminsal
+from test_report_integrity import _actor, report_app, afuminsal
 
 
 def test_complete_catalog_includes_empty_categories_and_calculates_once():
@@ -32,6 +32,30 @@ def test_complete_catalog_includes_empty_categories_and_calculates_once():
     assert not set(formulas["ER.11"]).intersection({"ER.03", "ER.06", "ER.08", "ER.19", "ER.11"})
     assert table[table.categoria == "resultado"].codigo_clasificado.tolist() == list(ER_ORDER)
     pd.testing.assert_frame_equal(original, grouped)
+
+
+def test_specific_balance_categories_precede_residual_other_categories():
+    table, _ = complete_catalog(pd.DataFrame(columns=[
+        "codigo_clasificado", "monto_total", "num_cuentas",
+    ]), catalogo_local(), False)
+
+    for category, expected_order in BALANCE_ORDER.items():
+        actual = table.loc[
+            table.categoria.eq(category)
+            & table.codigo_clasificado.isin(expected_order),
+            "codigo_clasificado",
+        ].tolist()
+        assert actual == list(expected_order)
+
+    assert table.index[table.codigo_clasificado.eq("ANC.09")][0] < table.index[
+        table.codigo_clasificado.eq("ANC.06")
+    ][0]
+    assert table.index[table.codigo_clasificado.eq("PC.09")][0] < table.index[
+        table.codigo_clasificado.eq("PC.08")
+    ][0]
+    assert table.index[table.codigo_clasificado.eq("PNC.06")][0] < table.index[
+        table.codigo_clasificado.eq("PNC.05")
+    ][0]
 
 
 def test_depreciation_from_notes_is_reclassified_without_changing_net_income():
@@ -114,6 +138,7 @@ def test_export_has_summary_metadata_units_formulas_and_full_income():
     assert summary["B5"].value == "$"
     assert summary["B6"].value
     assert summary["B7"].value is None
+    assert workbook["Balance Normalizado"]["F3"].value is None
     assert [summary.cell(26, column).value for column in range(1, 7)] == [
         "codigo_homologado", "nombre_homologado", "codigo_original",
         "nombre_original", "valor_extraido", "valor_homologado",
@@ -135,10 +160,42 @@ def test_export_has_summary_metadata_units_formulas_and_full_income():
     assert income["C3"].number_format.startswith("#,##0")
     assert income["C3"].value.startswith("='Balance Normalizado'!")
     assert "Control de emisión" in workbook.sheetnames
+    controls = {
+        row[0]: row[1] for row in workbook["Control de emisión"].iter_rows(
+            min_row=2, values_only=True,
+        ) if row[0]
+    }
+    assert controls["Analista"] is None
+    assert controls["Actor autenticado (ID inmutable)"] is None
+    assert controls["Organización"] is None
+    assert controls["Roles autenticados"] is None
     first_stamp = summary["B6"].value
     at.run(timeout=20)
     second = load_workbook(BytesIO(at.session_state.export_kwargs["data"]))
     assert second["Resumen"]["B6"].value == first_stamp
+
+
+def test_export_authenticated_actor_is_visible_and_auditable():
+    actor = _actor("analyst", "supervisor")
+    at = AppTest.from_function(
+        report_app,
+        args=(afuminsal(False), "__resolved_without_adjustment__",
+              "certificada", None, actor),
+    ).run(timeout=20)
+
+    assert not at.exception
+    workbook = load_workbook(BytesIO(at.session_state.export_kwargs["data"]))
+    assert workbook["Resumen"]["B7"].value == "Analista Uno"
+    assert workbook["Balance Normalizado"]["F3"].value == "Analista Uno"
+    controls = {
+        row[0]: row[1] for row in workbook["Control de emisión"].iter_rows(
+            min_row=2, values_only=True,
+        ) if row[0]
+    }
+    assert controls["Analista"] == "Analista Uno"
+    assert controls["Actor autenticado (ID inmutable)"] == "actor-1"
+    assert controls["Organización"] == "org-1"
+    assert controls["Roles autenticados"] == "analyst, supervisor"
 
 
 def test_comparative_report_keeps_two_periods_in_summary_detail_and_income():

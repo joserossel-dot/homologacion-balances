@@ -12,6 +12,7 @@ from .equation_validator import validate_balance_equation
 from .missing_account_detector import detect_missing_accounts
 from .integrity_score import compute_integrity_score
 from .report_generator import ReportGenerator
+from .classification_metrics import account_metrics
 
 
 class BalanceValidator:
@@ -42,11 +43,17 @@ class BalanceValidator:
         )
 
         if accounts_classified is not None:
-            result.accounts_classified = len(accounts_classified)
+            contract = account_metrics(accounts_classified)
+            for key, value in contract.items():
+                setattr(result, key, value)
         if accounts_ignored is not None:
             result.accounts_ignored = len(accounts_ignored)
 
         result.accounts_total = len(accounts_raw)
+        if not result.accounts_total_detail:
+            result.accounts_total_detail = max(
+                result.accounts_total - result.accounts_ignored - result.accounts_controls, 0,
+            )
 
         tree = build_hierarchy(accounts_raw, accounts_classified)
         result.hierarchy_tree = tree
@@ -67,8 +74,9 @@ class BalanceValidator:
             tree,
             result.subtotal_results,
             result.equation_results,
-            result.accounts_classified,
-            result.accounts_ignored,
+            result.accounts_classified_specific,
+            0,
+            result.accounts_total_detail,
         )
 
         return result
@@ -85,9 +93,9 @@ class BalanceValidator:
         source_file = pipeline_result.get("source_file", "")
         classified = pipeline_result.get("classified", [])
         ignored = pipeline_result.get("ignored", [])
-        accounts_raw = classified + ignored
+        accounts_raw = pipeline_result.get("raw_accounts") or classified + ignored
 
-        return self.validate(
+        result = self.validate(
             source_file=source_file,
             accounts_raw=accounts_raw,
             accounts_classified=classified,
@@ -95,9 +103,17 @@ class BalanceValidator:
             company=company,
             year=year,
             pages=pages,
-            format_family=format_family,
+            format_family=format_family or pipeline_result.get("document_family", ""),
             layout_type=layout_type,
         )
+        for key in (
+            "accounts_classified", "accounts_classified_specific",
+            "accounts_classified_residual", "accounts_unclassified",
+            "accounts_pending_review", "accounts_controls", "accounts_total_detail",
+        ):
+            if key in pipeline_result:
+                setattr(result, key, int(pipeline_result[key]))
+        return result
 
     def validate_batch(
         self,
@@ -132,6 +148,12 @@ class BalanceValidator:
                     "source_file": result.source_file,
                     "accounts_total": result.accounts_total,
                     "accounts_classified": result.accounts_classified,
+                    "accounts_classified_specific": result.accounts_classified_specific,
+                    "accounts_classified_residual": result.accounts_classified_residual,
+                    "accounts_unclassified": result.accounts_unclassified,
+                    "accounts_pending_review": result.accounts_pending_review,
+                    "accounts_controls": result.accounts_controls,
+                    "accounts_total_detail": result.accounts_total_detail,
                     "accounts_ignored": result.accounts_ignored,
                     "format_family": result.format_family,
                     "layout_type": result.layout_type,

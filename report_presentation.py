@@ -15,6 +15,21 @@ ER_ORDER = (
     "ER.17", "ER.18", "ER.19", "ER.10", "ER.11", "ER.20", "ER.21",
 )
 CALCULATED = {"ER.03", "ER.06", "ER.08", "ER.19", "ER.11"}
+BALANCE_ORDER = {
+    # Las categorías específicas se presentan antes de la bolsa residual
+    # "Otros", aunque el código haya sido creado con posterioridad.
+    "activo_no_corriente": (
+        "ANC.01", "ANC.01.01", "ANC.02", "ANC.03", "ANC.08",
+        "ANC.04", "ANC.05", "ANC.07", "ANC.09", "ANC.06",
+    ),
+    "pasivo_corriente": (
+        "PC.01", "PC.02", "PC.03", "PC.04", "PC.05", "PC.06",
+        "PC.07", "PC.09", "PC.08",
+    ),
+    "pasivo_no_corriente": (
+        "PNC.01", "PNC.02", "PNC.03", "PNC.04", "PNC.06", "PNC.05",
+    ),
+}
 
 
 def apply_depreciation_reclassification(grouped, adjustment, *, amount_column="monto_total"):
@@ -101,14 +116,20 @@ def complete_catalog(grouped, catalog, has_income_detail, amount_columns=None):
         code = row["codigo_clasificado"]
         # Categorías nuevas de resultado se presentan antes del cierre.
         er_index = ER_ORDER.index(code) if code in ER_ORDER else ER_ORDER.index("ER.19") - 0.5
+        balance_codes = BALANCE_ORDER.get(category, ())
+        balance_index = (
+            balance_codes.index(code) if code in balance_codes
+            else len(balance_codes)
+        )
         return (CATEGORY_ORDER.index(category) if category in CATEGORY_ORDER else 99,
-                er_index if category == "resultado" else 0, code)
+                er_index if category == "resultado" else balance_index, code)
     return pd.DataFrame(sorted(rows, key=order)), formulas
 
 
 def add_report_sheets(workbook, complete, formulas, *, account_detail, start_row, unit,
                       meta, processed_at, source_name, pages, definitive, reasons,
-                      tolerance=1000, period_columns=None):
+                      tolerance=1000, period_columns=None, analyst_name="",
+                      actor_id="", organization_id="", roles=()):
     """Extiende el exportador operativo, con fórmulas auditables y datos separados."""
     from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
     from openpyxl.utils import get_column_letter
@@ -146,7 +167,7 @@ def add_report_sheets(workbook, complete, formulas, *, account_detail, start_row
     balance.cell(start_row, 5 + len(period_columns), "Grupo")
     balance.cell(start_row, 6 + len(period_columns), "Estado")
     balance["E2"], balance["F2"] = "Fecha de proceso", processed_at
-    balance["E3"], balance["F3"] = "Analista", None
+    balance["E3"], balance["F3"] = "Analista", analyst_name or None
 
     summary = workbook.create_sheet("Resumen")
     workbook.move_sheet(summary, offset=-len(workbook.sheetnames) + 1)
@@ -156,7 +177,7 @@ def add_report_sheets(workbook, complete, formulas, *, account_detail, start_row
         ("RUT", getattr(meta, "rut", "") or ""),
         ("Período", f'{getattr(meta, "periodo_desde", "") or ""} al {getattr(meta, "periodo_hasta", "") or ""}'),
         ("Moneda/unidad", unit), ("Fecha de proceso", processed_at),
-        ("Analista", None), ("Documento fuente", source_name),
+        ("Analista", analyst_name or None), ("Documento fuente", source_name),
         ("Páginas analizadas", ", ".join(map(str, pages)) if pages else "Documento completo"),
         ("Criterio", "Cero = sin cuentas asignadas. No acredita que falte o no exista una cuenta en el original."),
     ]
@@ -258,6 +279,13 @@ def add_report_sheets(workbook, complete, formulas, *, account_detail, start_row
     income.append(["", "EBITDA: ventas + costo de ventas + gastos de administración + gastos de venta (importes con signo)."])
     # La validez del resultado se contrasta en Control de emisión, no se deduce
     # de la mera igualdad entre dos celdas calculadas desde la misma fuente.
+
+    if "Control de emisión" in workbook.sheetnames:
+        control = workbook["Control de emisión"]
+        control.append(["Analista", analyst_name or None])
+        control.append(["Actor autenticado (ID inmutable)", actor_id or None])
+        control.append(["Organización", organization_id or None])
+        control.append(["Roles autenticados", ", ".join(sorted(set(roles))) or None])
 
     for sheet in (summary, income, balance):
         sheet.sheet_view.showGridLines = False

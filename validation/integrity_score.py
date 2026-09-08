@@ -26,8 +26,9 @@ def compute_classification_score(
     hierarchy_tree: HierarchyTree,
     total_classified: int,
     total_ignored: int,
+    total_detail: int | None = None,
 ) -> float:
-    total = hierarchy_tree.total_accounts
+    total = hierarchy_tree.total_accounts if total_detail is None else total_detail
     if total == 0:
         return 100.0
 
@@ -99,12 +100,13 @@ def compute_integrity_score(
     equation_results: list[EquationResult],
     total_classified: int = 0,
     total_ignored: int = 0,
+    total_detail: int | None = None,
 ) -> IntegrityScore:
     score = IntegrityScore()
 
     score.extraction_score = compute_extraction_score(hierarchy_tree)
     score.classification_score = compute_classification_score(
-        hierarchy_tree, total_classified, total_ignored,
+        hierarchy_tree, total_classified, total_ignored, total_detail,
     )
     score.hierarchy_score = compute_hierarchy_score(hierarchy_tree)
     score.subtotal_score = compute_subtotal_score(subtotal_results)

@@ -30,6 +30,29 @@ CMCC_THRESHOLD = 0.95
 _print = lambda *a, **k: print(*a, **k, flush=True)
 
 
+def _classification_totals(result: dict[str, Any]) -> dict[str, int]:
+    """Adapta resultados actuales o legados sin confundir asignación con especificidad."""
+    assigned = int(result.get("accounts_classified", 0))
+    specific = int(result.get("accounts_classified_specific", assigned))
+    residual = int(result.get("accounts_classified_residual", 0))
+    unclassified = int(result.get(
+        "accounts_unclassified", result.get("accounts_without_dictionary_match", 0),
+    ))
+    detail = int(result.get(
+        "accounts_total_detail", specific + residual + unclassified,
+    ))
+    return {
+        "input": int(result.get("accounts_total", detail)),
+        "detail": detail,
+        "specific": specific,
+        "residual": residual,
+        "assigned": specific + residual,
+        "unclassified": unclassified,
+        "pending": int(result.get("accounts_pending_review", unclassified + residual)),
+        "controls": int(result.get("accounts_controls", 0)),
+    }
+
+
 def _infer_company(source_file: str) -> str:
     name = Path(source_file).stem
     name = re.sub(r"^\d+\s*", "", name)
@@ -93,9 +116,7 @@ def run_pipeline_for_review(
     _print(f"  [{label}] Processing {len(all_files)} files...")
 
     all_accounts: list[dict[str, Any]] = []
-    total_unknown = 0
-    total_classified = 0
-    total_accounts = 0
+    totals = Counter()
     method_counter: Counter = Counter()
     t0 = time.perf_counter()
 
@@ -106,9 +127,7 @@ def run_pipeline_for_review(
             _print(f"    ERROR {dfile.path.name}: {e}")
             continue
 
-        total_accounts += result.get("accounts_total", 0)
-        total_classified += result.get("accounts_classified", 0)
-        total_unknown += result.get("accounts_without_dictionary_match", 0)
+        totals.update(_classification_totals(result))
         for acct in result.get("classified", []):
             all_accounts.append(acct)
             method_counter[acct.get("method", "unknown")] += 1
@@ -116,15 +135,26 @@ def run_pipeline_for_review(
     elapsed = time.perf_counter() - t0
 
     review_queue = extract_review_queue({"classified": all_accounts})
+    total_accounts = totals["detail"]
+    total_classified = totals["assigned"]
+    total_unknown = totals["unclassified"]
 
     summary = {
         "label": label,
         "files": len(all_files),
         "total_accounts": total_accounts,
+        "total_input_accounts": totals["input"],
         "total_classified": total_classified,
+        "total_classified_specific": totals["specific"],
+        "total_classified_residual": totals["residual"],
         "total_unknown": total_unknown,
+        "total_pending_review": totals["pending"],
+        "total_controls": totals["controls"],
         "total_review": len(review_queue),
+        # Compatibilidad: coverage_pct conserva cobertura asignada, no específica.
         "coverage_pct": round(total_classified / max(total_accounts, 1) * 100, 2),
+        "assigned_coverage_pct": round(total_classified / max(total_accounts, 1) * 100, 2),
+        "specific_coverage_pct": round(totals["specific"] / max(total_accounts, 1) * 100, 2),
         "unknown_pct": round(total_unknown / max(total_accounts, 1) * 100, 2),
         "review_pct_of_unknown": round(
             len(review_queue) / max(total_unknown, 1) * 100, 2
@@ -202,6 +232,15 @@ def generate_reports(
         {"metric": "Total accounts", "value": summary["total_accounts"]},
         {"metric": "Classified accounts", "value": summary["total_classified"]},
         {"metric": "Coverage %", "value": f"{summary['coverage_pct']}%"},
+        {"metric": "Specific classifications", "value": summary.get(
+            "total_classified_specific", summary["total_classified"],
+        )},
+        {"metric": "Residual classifications", "value": summary.get(
+            "total_classified_residual", 0,
+        )},
+        {"metric": "Pending review", "value": summary.get("total_pending_review", 0)},
+        {"metric": "Controls", "value": summary.get("total_controls", 0)},
+        {"metric": "Specific coverage %", "value": f"{summary.get('specific_coverage_pct', summary['coverage_pct'])}%"},
         {"metric": "Elapsed (s)", "value": summary["elapsed_seconds"]},
     ]
     pd.DataFrame(stat_rows).to_excel(REPORTS_DIR / "review_statistics.xlsx", index=False)
@@ -268,7 +307,10 @@ def generate_markdown(
     L(f"**REVIEW % of UNKNOWN:** {stats['review_pct']}%")
     L(f"**Files processed:** {summary['files']}")
     L(f"**Total accounts:** {summary['total_accounts']}")
-    L(f"**Coverage:** {summary['coverage_pct']}%")
+    L(f"**Assigned coverage:** {summary.get('assigned_coverage_pct', summary['coverage_pct'])}%")
+    L(f"**Specific coverage:** {summary.get('specific_coverage_pct', summary['coverage_pct'])}%")
+    L(f"**Residual classifications:** {summary.get('total_classified_residual', 0)}")
+    L(f"**Pending review:** {summary.get('total_pending_review', 0)}")
     L("")
 
     # ── 2. Per-company ──

@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "families": {
+    "escaneado_ocr": "Documento cuya extracción requirió OCR.",
+    "codificado": "Al menos la mitad de las filas de detalle conserva código fuente.",
+    "ifrs_sin_codigo": "Sin códigos fuente y con al menos una clasificación audited_statement_label.",
+    "otro": "Documento evaluable que no satisface las reglas anteriores."
+  },
+  "required_metrics": [
+    "raw_detail_rows",
+    "coded_rows",
+    "suspicious_rows",
+    "audited_statement_label_rows",
+    "classified_rows",
+    "automatic_rows",
+    "review_rows"
+  ]
+}

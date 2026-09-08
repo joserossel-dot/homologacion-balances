@@ -6,6 +6,7 @@ from typing import Any
 
 from document_context import DocumentContext
 from document_context.models import KnowledgeData
+from validation.classification_metrics import account_metrics, document_family
 
 
 class KBAdapter:
@@ -25,13 +26,19 @@ class KBAdapter:
             ctx.set_custom("ignored", [])
             knowledge = KnowledgeData()
             ctx.set_knowledge(knowledge, module="kb_adapter")
+            ctx.set_custom("pipeline_v1_result", self._build_v1_summary(
+                ctx, [], [], accounts_total=0,
+            ))
             return ctx
 
         start = time.perf_counter()
         classified = self._classify_accounts(ctx, raw_accounts)
         elapsed = time.perf_counter() - start
 
-        ignored = [c for c in classified if c.get("standard_code") is None and c.get("method") == "ignored"]
+        ignored = [
+            c for c in classified
+            if c.get("method") in {"ignored", "control"}
+        ]
         classified_filtered = [c for c in classified if c not in ignored]
 
         cmcc_matches = [c for c in classified_filtered if c.get("cmcc_shadow") is not None or c.get("cmcc_decision") is not None]
@@ -54,25 +61,20 @@ class KBAdapter:
             1 for c in classified_filtered
             if not c.get("method", "").startswith("learning_")
         )
-        accounts_without_dictionary_match = sum(1 for c in classified_filtered if c.get("standard_code") is None)
         cmcc_shadow_hits = sum(1 for c in classified_filtered if c.get("cmcc_shadow") is not None)
         cmcc_production_hits = sum(1 for c in classified_filtered if c.get("cmcc_decision") is not None)
 
-        v1_result = {
-            "source_file": Path(ctx.source_file).name,
-            "accounts_total": len(classified_filtered) + len(ignored),
-            "accounts_classified": len(classified_filtered),
-            "accounts_ignored": len(ignored),
-            "accounts_without_dictionary_match": accounts_without_dictionary_match,
+        v1_result = self._build_v1_summary(
+            ctx, classified_filtered, ignored, accounts_total=len(raw_accounts),
+        )
+        v1_result.update({
             "learning_hits": len(learning_hits_list),
             "learning_exact": learning_exact,
             "learning_fuzzy": learning_fuzzy,
             "fallback_classifier": fallback_classifier,
             "cmcc_shadow_hits": cmcc_shadow_hits,
             "cmcc_production_hits": cmcc_production_hits,
-            "classified": classified_filtered,
-            "ignored": ignored,
-        }
+        })
         ctx.set_custom("pipeline_v1_result", v1_result)
 
         return ctx
@@ -84,8 +86,18 @@ class KBAdapter:
 
         type_resolver = AccountTypeResolver()
         classified = []
-        total_classified = 0
         for cr in raw_accounts:
+            if bool(getattr(cr, "es_total", False)):
+                classified.append({
+                    "account_code": getattr(cr, "codigo", "") or "",
+                    "account_name": getattr(cr, "nombre", "") or "",
+                    "standard_code": None,
+                    "method": "control",
+                    "ignored_reason": "control_total",
+                    "is_total": True,
+                    "source_file": Path(ctx.source_file).name,
+                })
+                continue
             ab = AccountAdapter.from_cuenta_raw(cr)
             interp = BalanceInterpreter(ab)
             classification_amount = interp.classification_amount
@@ -133,8 +145,6 @@ class KBAdapter:
                 else classification.get("standard_code")
             )
 
-            total_classified += 1
-
             classified.append({
                 "account_code": ab.account_code,
                 "account_name": ab.account_name,
@@ -162,11 +172,40 @@ class KBAdapter:
             return dict(result)
         classified = ctx.get_custom("classified", [])
         ignored = ctx.get_custom("ignored", [])
+        return KBAdapter._build_v1_summary(
+            ctx, classified, ignored,
+            accounts_total=len(classified) + len(ignored),
+        )
+
+    @staticmethod
+    def _build_v1_summary(
+        ctx: DocumentContext,
+        classified: list[dict[str, Any]],
+        ignored: list[dict[str, Any]],
+        *,
+        accounts_total: int,
+    ) -> dict[str, Any]:
+        controls = sum(
+            1 for row in ignored
+            if row.get("is_total") or row.get("es_total") or row.get("method") == "control"
+        )
+        contract = account_metrics(classified, controls)
+        parser_result = ctx.get_custom("parser_resultado")
+        ocr = bool(getattr(parser_result, "requirio_ocr", False))
+        family_rows = classified + [
+            row for row in ignored
+            if not (row.get("is_total") or row.get("es_total")
+                    or row.get("method") == "control")
+        ]
         return {
             "source_file": Path(ctx.source_file).name,
-            "accounts_total": len(classified) + len(ignored),
-            "accounts_classified": len(classified),
+            "ocr": ocr,
+            "requirio_ocr": ocr,
+            "document_family": document_family({"requirio_ocr": ocr}, family_rows),
+            "accounts_total": accounts_total,
             "accounts_ignored": len(ignored),
+            "accounts_without_dictionary_match": contract["accounts_unclassified"],
+            **contract,
             "classified": classified,
             "ignored": ignored,
         }

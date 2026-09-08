@@ -83,6 +83,13 @@ def test_no_activa_ocr_selectivo_en_tabla_nativa_legible():
     )
 
 
+def test_detecta_mapa_cid_como_texto_nativo_inutilizable():
+    page = FakePage([])
+    texto = " ".join(f"(cid:{index})" for index in range(1, 25))
+
+    assert parser._pagina_comparativa_con_texto_nativo_corrupto(page, texto)
+
+
 def test_extractor_coordenadas_preserva_codigo_nombre_y_ocho_columnas():
     page = FakePage([
         _header(),
@@ -210,6 +217,105 @@ def test_moneda_de_cabecera_prevalece_sobre_leyenda_de_portada():
 
     assert years == ["2018", "2017"]
     assert currencies == ["USD"]
+
+
+@pytest.mark.parametrize(
+    ("header", "expected_unit", "expected_currency"),
+    [
+        ("$", "$", None),
+        ("M M", "M$", "CLP"),
+        ("MM MM", "MM$", "CLP"),
+        ("M$ M$", "M$", "CLP"),
+        ("USD USD", "USD", "USD"),
+        ("US$ US$", "USD", "USD"),
+        ("CLP CLP", "CLP", "CLP"),
+    ],
+)
+def test_detecta_unidades_monetarias_de_encabezados_comparativos(
+    header, expected_unit, expected_currency,
+):
+    lines = ["Al 31 de diciembre de 2024 y 2023", header]
+
+    years, currencies = parser.detectar_años_y_monedas(lines)
+    units = parser.detectar_unidades_monetarias(lines)
+
+    assert years == ["2024", "2023"]
+    assert currencies == ([expected_currency] if expected_currency else [])
+    assert units == [expected_unit]
+
+
+@pytest.mark.parametrize("label", ["Dólar", "dólares", "DOLARES ESTADOUNIDENSES"])
+def test_detecta_dolar_declarado_como_usd(label):
+    years, currencies = parser.detectar_años_y_monedas([
+        "Al 31 de diciembre de 2024 y 2023",
+        f"Nota {label} {label}",
+    ])
+
+    assert years == ["2024", "2023"]
+    assert currencies == ["USD"]
+
+
+def test_periodos_ignoran_anos_historicos_fuera_de_cabecera():
+    years, _ = parser.detectar_años_y_monedas([
+        "Sociedad constituida en 1987 y reorganizada en 2010",
+        "Estado de situación financiera",
+        "Al 31 de diciembre de 2024 y 2023",
+        "Nota M$ M$",
+    ])
+
+    assert years == ["2024", "2023"]
+
+
+def test_nota_de_tres_digitos_no_se_convierte_en_monto():
+    lines = ["2024 2023", "Nota M$ M$"]
+    account = parser.parsear_linea(
+        "Propiedades planta y equipo 123 1.500 1.400", 1,
+        parser.FormatoCodigo.SIN_CODIGO, ".",
+        periodo_comparativo=True, years=["2024", "2023"],
+        currencies=["CLP"], leading_note_column=True,
+    )
+
+    assert account is not None
+    assert account.monto == 1500
+    assert account.montos_periodos["2024"] == 1500
+    assert account.montos_periodos["2023"] == 1400
+
+
+def test_detecta_periodo_simple_desde_rango_de_fechas():
+    lines = ["BALANCE TRIBUTARIO", "01/01/2024 a 31/12/2024"]
+
+    years, currencies = parser.detectar_años_y_monedas(lines)
+
+    assert years == ["2024"]
+    assert currencies == []
+
+
+def test_recupera_fecha_y_unidad_desde_encabezado_fuera_de_tabla(
+    monkeypatch, tmp_path,
+):
+    class FakePdf:
+        pages = [SimpleNamespace(extract_text=lambda: (
+            "ESTADO DE SITUACIÓN FINANCIERA\n"
+            "Al 31 de diciembre de 2024 y 2023\n"
+            "Nota MM MM\n"
+            "Cuenta 100 90"
+        ))]
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    monkeypatch.setattr(parser.pdfplumber, "open", lambda _path: FakePdf())
+
+    headers = parser.extraer_encabezados_documento_pdf(tmp_path / "x.pdf")
+    years, currencies = parser.detectar_años_y_monedas(headers)
+    units = parser.detectar_unidades_monetarias(headers)
+
+    assert years == ["2024", "2023"]
+    assert currencies == ["CLP"]
+    assert units == ["MM$"]
 
 
 def test_balance_auditado_descarta_nota_parentetica_y_conserva_ambos_periodos():
@@ -529,7 +635,7 @@ def test_codigo_compacto_120_clasifica_activo_fijo_y_depreciacion():
     assert asset.confianza == 0.96
 
 
-def test_certificacion_codificada_ignora_ruido_sin_codigo():
+def test_certificacion_codificada_no_descarta_fila_monetaria_por_etiqueta():
     values = {
         "debitos": 100.0, "creditos": 0.0,
         "saldo_deudor": 100.0, "saldo_acreedor": 0.0,
@@ -552,8 +658,44 @@ def test_certificacion_codificada_ignora_ruido_sin_codigo():
 
     result = parser.certificar_extraccion_columnas([*detalles, ruido, subtotal])
 
-    assert result.estado == "certificada"
-    assert result.filas_evaluadas == 3
+    # Una etiqueta documental con importes requiere revisión; no borrarla para cuadrar.
+    assert result.estado == "fallida"
+    assert not result.columnas_finales_validadas
+    assert result.filas_evaluadas == 4
+
+
+def test_detalles_heredan_contexto_del_subtotal_mas_cercano_sin_duplicarlo():
+    cuentas = [
+        parser.CuentaRaw(
+            1, "11012", "BANCOS", 100,
+            origen_columna=parser.OrigenColumna.ACTIVO, es_total=True,
+        ),
+        parser.CuentaRaw(
+            2, "1101201", "BANCOESTADO 1", 60,
+            origen_columna=parser.OrigenColumna.ACTIVO,
+        ),
+        parser.CuentaRaw(
+            3, "1101202", "BANCOESTADO 2", 40,
+            origen_columna=parser.OrigenColumna.ACTIVO,
+        ),
+        parser.CuentaRaw(
+            4, "12012", "DEPRECIACIÓN ACUMULADA", 25,
+            origen_columna=parser.OrigenColumna.PASIVO, es_total=True,
+        ),
+        parser.CuentaRaw(
+            5, "1201203", "DEPRECIACIONES", 25,
+            origen_columna=parser.OrigenColumna.PASIVO,
+        ),
+    ]
+
+    annotated = parser.anotar_jerarquia_contable(cuentas)
+
+    assert annotated == 3
+    assert cuentas[1].jerarquia_contable == "BANCOS"
+    assert cuentas[2].jerarquia_contable == "BANCOS"
+    assert cuentas[4].jerarquia_contable == "DEPRECIACIÓN ACUMULADA"
+    assert cuentas[0].jerarquia_contable is None
+    assert cuentas[0].es_total is True
 
 
 def test_parsear_linea_reconstruye_movimiento_ocr_desde_saldo_consistente():
@@ -910,7 +1052,7 @@ def test_extractor_acepta_sinonimos_y_filas_sin_codigo():
 def test_extractor_acepta_encabezado_ocr_con_plural_y_debitos_deformado():
     page = FakePage([
         (10, [
-            (120, 190, "CUENTA"), (236, 250, "pEBITOS"),
+            (120, 190, "CUENTAS"), (236, 250, "pEBITOS"),
             (268, 283, "CREDITOS"), (301, 314, "DEUDOR"),
             (331, 348, "ACREEDOR"), (366, 378, "ACTIVOS"),
             (399, 411, "PASIVOS"), (428, 444, "PERDIDA"),
@@ -927,6 +1069,79 @@ def test_extractor_acepta_encabezado_ocr_con_plural_y_debitos_deformado():
     assert lines == [
         "11010100 Fondo Fijo 400.000 0 400.000 0 400.000 0 0 0",
     ]
+
+
+def test_extractor_acepta_activo_fragmentado_en_fuente_nativa():
+    page = FakePage([
+        (10, [
+            (120, 190, "Cuenta"), (236, 250, "Debe"),
+            (268, 283, "Haber"), (301, 314, "Deudor"),
+            (331, 348, "Acreedor"), (366, 378, "Ac?vo"),
+            (399, 411, "Pasivo"), (428, 444, "Perdidas"),
+            (457, 475, "Ganancias"),
+        ]),
+        (20, [
+            (120, 190, "Banco"), (245, 257, "100"), (277, 289, "90"),
+            (309, 321, "10"), (341, 353, "0"), (374, 386, "10"),
+            (407, 419, "0"), (437, 449, "0"), (467, 479, "0"),
+        ]),
+    ])
+
+    lines, centers = parser._extraer_tabla_balance_por_coordenadas(page)
+
+    assert centers is not None
+    assert lines == ["Banco 100 90 10 0 10 0 0 0"]
+
+
+def test_extractor_usa_bordes_de_importes_en_tabla_ancha():
+    # Las glosas de cabecera están centradas y no comparten el borde derecho
+    # de sus columnas. Dos filas alineadas permiten inferir los ocho bordes
+    # monetarios sin desplazar Activo/Pasivo/Pérdidas/Ganancias.
+    amount_edges = [300, 370, 440, 510, 580, 650, 720, 790]
+
+    def wide_row(top, name, amounts):
+        cells = [(20, 210, name)]
+        cells.extend(
+            (edge - max(12, len(value) * 7), edge, value)
+            for edge, value in zip(amount_edges, amounts)
+        )
+        return top, cells
+
+    page = FakePage([
+        (10, [
+            (20, 100, "Cuenta"), (250, 275, "Debe"),
+            (315, 350, "Haber"), (380, 420, "Deudor"),
+            (445, 495, "Acreedor"), (515, 555, "Activo"),
+            (585, 625, "Pasivo"), (655, 705, "Perdidas"),
+            (725, 785, "Ganancias"),
+        ]),
+        wide_row(20, "Caja", ["100", "0", "100", "0", "100", "0", "0", "0"]),
+        wide_row(30, "Proveedores", ["0", "60", "0", "60", "0", "60", "0", "0"]),
+    ])
+
+    lines, centers = parser._extraer_tabla_balance_por_coordenadas(page)
+
+    assert centers is not None
+    assert centers[1:] == pytest.approx(amount_edges)
+    assert lines == [
+        "Caja 100 0 100 0 100 0 0 0",
+        "Proveedores 0 60 0 60 0 60 0 0",
+    ]
+
+
+def test_extractor_descarta_pie_posterior_al_control_final():
+    page = FakePage([
+        _header(),
+        _row(20, "110101", "Caja", ["100", "0", "100", "0", "100", "0", "0", "0"]),
+        _row(30, "", "TOTALES", ["100", "100", "100", "100", "100", "100", "0", "0"]),
+        (40, [(120, 300, "Antecedentes aportados por el contribuyente")]),
+        (50, [(120, 250, "REPRESENTANTE LEGAL")]),
+    ])
+
+    lines, _ = parser._extraer_tabla_balance_por_coordenadas(page)
+
+    assert len(lines) == 2
+    assert lines[-1].startswith("TOTALES ")
 
 
 def test_extractor_detecta_encabezado_distribuido_en_dos_lineas():
@@ -1093,6 +1308,156 @@ def test_certificacion_ocr_reconcilia_control_con_dos_copias_concordantes():
     }
     assert rows[2].montos_columnas["debitos"] == 100
     assert rows[3].montos_columnas["saldo_deudor"] == 100
+
+
+def test_certificacion_acepta_movimientos_cerrados_no_desglosados_si_finales_cuadran():
+    rows = [
+        parser.parsear_linea(
+            "110101 CAJA 100 0 100 0 100 0 0 0",
+            1, parser.FormatoCodigo.COMPACTO, ".",
+        ),
+        parser.parsear_linea(
+            "210101 PROVEEDORES 0 100 0 100 0 100 0 0",
+            2, parser.FormatoCodigo.COMPACTO, ".",
+        ),
+        parser.parsear_linea(
+            "SUMAS 200 200 100 100 100 100 0 0",
+            3, parser.FormatoCodigo.SIN_CODIGO, ".",
+        ),
+        parser.parsear_linea(
+            "TOTALES 200 200 100 100 100 100 0 0",
+            4, parser.FormatoCodigo.SIN_CODIGO, ".",
+        ),
+    ]
+
+    certification = parser.certificar_extraccion_columnas(
+        [row for row in rows if row is not None], metodo="coordinates_10_columns",
+    )
+
+    assert certification.estado == "certificada"
+    assert certification.diferencias["debitos"] == -100
+    assert certification.diferencias["creditos"] == -100
+    assert certification.columnas_finales_validadas is True
+    assert any("movimientos cerrados" in reason for reason in certification.razones)
+
+
+def test_certificacion_ocr_reconcilia_una_fila_y_conserva_trazabilidad():
+    rows = [
+        parser.parsear_linea(
+            "110101 CAJA 100 0 100 0 100 0 0 0",
+            1, parser.FormatoCodigo.COMPACTO, ".",
+        ),
+        parser.parsear_linea(
+            "210101 IMPTOS POR PAGAR 20 62 0 100 0 100 0 0",
+            2, parser.FormatoCodigo.COMPACTO, ".",
+        ),
+        parser.parsear_linea(
+            "SUBTOTAL 120 120 100 100 100 100 0 0",
+            3, parser.FormatoCodigo.SIN_CODIGO, ".",
+        ),
+        parser.parsear_linea(
+            "TOTALES 120 120 100 100 100 100 0 0",
+            4, parser.FormatoCodigo.SIN_CODIGO, ".",
+        ),
+    ]
+
+    certification = parser.certificar_extraccion_columnas(
+        [row for row in rows if row is not None], metodo="ocr_coordinates_8_amounts",
+    )
+
+    assert certification.estado == "parcial"
+    assert certification.diferencias == {
+        column: 0.0 for column in parser.RAW_MONETARY_COLUMNS
+    }
+    assert certification.filas_inconsistentes == [2]
+    assert rows[1].montos_columnas["creditos"] == 120
+    assert "creditos" in rows[1].columnas_derivadas
+    assert any(
+        "valor leído 62" in reason and "valor reconciliado 120" in reason
+        for reason in certification.razones
+    )
+    assert any(
+        "Valor OCR original: 62" in item["Detalle"]
+        for item in certification.observaciones_auxiliares
+    )
+
+
+def test_certificacion_ocr_no_reconcilia_sin_subtotal_impreso():
+    detail = parser.parsear_linea(
+        "210101 IMPTOS POR PAGAR 20 62 0 100 0 100 0 0",
+        1, parser.FormatoCodigo.COMPACTO, ".",
+    )
+
+    certification = parser.certificar_extraccion_columnas(
+        [detail], metodo="ocr_coordinates_8_amounts",
+    )
+
+    assert certification.estado == "fallida"
+    assert detail.montos_columnas["creditos"] == 62
+    assert detail.columnas_derivadas == []
+
+
+def test_certificacion_ocr_no_reconcilia_si_dos_columnas_resuelven_la_fila():
+    detail = parser.CuentaRaw(
+        linea=1, codigo="110101", nombre="CAJA", monto=100,
+        origen_columna=parser.OrigenColumna.ACTIVO,
+        montos_columnas={
+            "debitos": 100, "creditos": 50,
+            "saldo_deudor": 100, "saldo_acreedor": 0,
+            "activo": 100, "pasivo": 0, "perdida": 0, "ganancia": 0,
+        },
+    )
+    subtotal = parser.parsear_linea(
+        "SUBTOTAL 150 0 100 0 100 0 0 0",
+        2, parser.FormatoCodigo.SIN_CODIGO, ".",
+    )
+
+    certification = parser.certificar_extraccion_columnas(
+        [detail, subtotal], metodo="ocr_coordinates_8_amounts",
+    )
+
+    assert certification.estado == "fallida"
+    assert detail.montos_columnas["debitos"] == 100
+    assert detail.montos_columnas["creditos"] == 50
+    assert detail.columnas_derivadas == []
+
+
+def test_certificacion_ocr_no_reconcilia_mas_de_una_fila_inconsistente():
+    rows = [
+        parser.CuentaRaw(
+            linea=1, codigo="110101", nombre="CAJA", monto=100,
+            origen_columna=parser.OrigenColumna.ACTIVO,
+            montos_columnas={
+                "debitos": 50, "creditos": 0,
+                "saldo_deudor": 100, "saldo_acreedor": 0,
+                "activo": 100, "pasivo": 0, "perdida": 0, "ganancia": 0,
+            },
+        ),
+        parser.CuentaRaw(
+            linea=2, codigo="110102", nombre="BANCO", monto=100,
+            origen_columna=parser.OrigenColumna.ACTIVO,
+            montos_columnas={
+                "debitos": 50, "creditos": 0,
+                "saldo_deudor": 100, "saldo_acreedor": 0,
+                "activo": 100, "pasivo": 0, "perdida": 0, "ganancia": 0,
+            },
+        ),
+        parser.parsear_linea(
+            "SUBTOTAL 200 0 200 0 200 0 0 0",
+            3, parser.FormatoCodigo.SIN_CODIGO, ".",
+        ),
+    ]
+
+    certification = parser.certificar_extraccion_columnas(
+        rows, metodo="ocr_coordinates_8_amounts",
+    )
+
+    assert certification.estado == "fallida"
+    assert certification.filas_inconsistentes == [1, 2]
+    assert rows[0].montos_columnas["debitos"] == 50
+    assert rows[1].montos_columnas["debitos"] == 50
+    assert rows[0].columnas_derivadas == []
+    assert rows[1].columnas_derivadas == []
 
 
 def test_sin_subtotal_no_bloquea_formatos_legacy():

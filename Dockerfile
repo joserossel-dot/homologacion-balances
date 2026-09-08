@@ -1,11 +1,16 @@
-# Usamos Python 3.12 como requiere tu pyproject.toml
-FROM python:3.12-slim
+# Desarrollo admite la etiqueta multi-arquitectura. Un build de release debe
+# sobrescribir PYTHON_BUILD_IMAGE con `python:...@sha256:<digest verificado>`.
+ARG PYTHON_BUILD_IMAGE=python:3.12-slim-bookworm
+FROM ${PYTHON_BUILD_IMAGE}
+
+ARG TESSERACT_OCR_VERSION=5.3.0-2
+ARG TESSERACT_SPA_VERSION=1:4.1.0-2
 
 # Instalar librerías del sistema (Poppler, Tesseract y herramientas esenciales)
 RUN apt-get update && apt-get install -y \
     poppler-utils \
-    tesseract-ocr \
-    tesseract-ocr-spa \
+    "tesseract-ocr=${TESSERACT_OCR_VERSION}" \
+    "tesseract-ocr-spa=${TESSERACT_SPA_VERSION}" \
     curl \
     git \
     build-essential \
@@ -24,10 +29,11 @@ RUN poetry config virtualenvs.create false \
 
 # Copiar el código y registrar la fecha UTC del artefacto desplegado.
 COPY . .
-RUN date -u +%Y-%m-%dT%H:%M:%SZ > /app/.build_date
+RUN date -u +%Y-%m-%dT%H:%M:%SZ > /app/.build_date \
+    && python scripts/ocr_preflight.py --require-spa --output /app/.ocr_runtime.json
 
 # Forzamos a Python a mirar tanto en la raíz como en la carpeta src
 ENV PYTHONPATH="/app:/app/src"
 
 # CAMBIO CRUCIAL: Arrancamos con 'streamlit run', asignando el puerto 10000 de Render
-CMD ["sh", "-c", "streamlit run app_validacion.py --server.port=${PORT:-10000} --server.address=0.0.0.0"]
+CMD ["sh", "-c", "python scripts/ocr_preflight.py --require-spa --compare /app/.ocr_runtime.json && streamlit run app_validacion.py --server.port=${PORT:-10000} --server.address=0.0.0.0"]

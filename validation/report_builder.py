@@ -69,9 +69,12 @@ class ReportBuilder:
         lines.append("")
         lines.append("## Cuentas")
         lines.append("")
-        lines.append(f"- **Cuentas totales:** {metrics['accounts_total']}")
-        lines.append(f"- **Clasificadas:** {metrics['accounts_classified']}")
-        lines.append(f"- **Sin clasificar:** {metrics['accounts_manual']}")
+        lines.append(f"- **Cuentas de detalle:** {metrics['accounts_total_detail']}")
+        lines.append(f"- **Clasificadas específicas:** {metrics['accounts_classified_specific']}")
+        lines.append(f"- **Clasificadas residuales:** {metrics['accounts_classified_residual']}")
+        lines.append(f"- **Sin clasificar:** {metrics['accounts_unclassified']}")
+        lines.append(f"- **Pendientes de revisión:** {metrics['accounts_pending_review']}")
+        lines.append(f"- **Controles:** {metrics['accounts_controls']}")
         lines.append("")
         lines.append("## Métodos de clasificación")
         lines.append("")
@@ -97,6 +100,14 @@ class ReportBuilder:
         for group, count in sorted(metrics.get("files_by_group", {}).items()):
             lines.append(f"- **{group}:** {count} documento(s)")
         lines.append("")
+        lines.append("## Cobertura por familia documental")
+        lines.append("")
+        for family, values in sorted(metrics.get("families", {}).items()):
+            lines.append(
+                f"- **{family}:** específica={values['specific_coverage']:.1%}; "
+                f"asignada={values['assigned_coverage']:.1%}; métodos={values['methods']}"
+            )
+        lines.append("")
         (out / "summary.md").write_text("\n".join(lines), encoding="utf-8")
 
     # ------------------------------------------------------------------
@@ -115,7 +126,9 @@ class ReportBuilder:
     def _write_benchmark_csv(self, out: Path, session: ValidationSession) -> None:
         path = out / "benchmark.csv"
         fields = [
-            "source_file", "accounts_total", "accounts_classified",
+            "source_file", "accounts_total_detail", "accounts_classified_specific",
+            "accounts_classified_residual", "accounts_unclassified",
+            "accounts_pending_review", "accounts_controls", "accounts_classified",
             "accounts_ignored", "accounts_without_dictionary_match",
             "learning_hits", "learning_exact", "learning_fuzzy",
             "fallback_classifier", "elapsed_seconds",
@@ -180,7 +193,9 @@ class ReportBuilder:
 
     def _write_timings_csv(self, out: Path, session: ValidationSession) -> None:
         path = out / "timings.csv"
-        fields = ["source_file", "elapsed_seconds", "accounts_total", "accounts_classified"]
+        fields = ["source_file", "elapsed_seconds", "accounts_total_detail",
+                  "accounts_classified_specific", "accounts_classified_residual",
+                  "accounts_unclassified", "accounts_pending_review", "accounts_controls"]
         with open(path, "w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=fields)
             writer.writeheader()

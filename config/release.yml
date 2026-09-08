@@ -16,7 +16,9 @@ gates:
 stages:
   run_tests: true
   parser_validation: true
-  scientific_validation: true
+  # No existe un ejecutor productivo para esta etapa. Debe permanecer inactiva
+  # hasta que un entrypoint verificable y sus pruebas formen parte del release.
+  scientific_validation: false
   knowledge_evolution: true
   quality_snapshot: true
   drift_detection: true

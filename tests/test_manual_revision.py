@@ -320,6 +320,17 @@ class TestOrigenContableEnRevision:
             'ANC.01.01', 'pasivo', 8371044, 'Depreciación Acumulada'
         )
 
+    def test_detalle_generico_bajo_depreciacion_acumulada_es_contra_activo(self):
+        nombre_contable = 'DEPRECIACIÓN ACUMULADA DEPRECIACIONES'
+
+        assert _origen_efectivo('pasivo', 8371044, nombre_contable) == 'activo'
+        assert _codigo_compatible_con_origen(
+            'ANC.01.01', 'pasivo', 8371044, nombre_contable,
+        )
+        assert _etiqueta_origen(
+            'pasivo', 8371044, nombre_contable,
+        ) == 'PASIVO → ACTIVO (contra-activo)'
+
     def test_pasivo_comun_no_permite_activo_fijo(self):
         assert not _codigo_compatible_con_origen(
             'ANC.01', 'pasivo', 8371044, 'Proveedores nacionales'
@@ -544,6 +555,11 @@ class TestPresentacionYResultado:
 
     def test_activo_fijo_comun_conserva_signo(self):
         assert _monto_presentacion('ANC.01', 23871062, 'Vehículos') == 23871062
+
+    def test_subcodigo_depreciacion_acumulada_resta_aunque_glosa_sea_generica(self):
+        assert _monto_presentacion(
+            'ANC.01.01', 324775262, 'DEPRECIACIONES',
+        ) == -324775262
 
     def test_resultado_usa_columna_efectiva(self):
         df = pd.DataFrame([

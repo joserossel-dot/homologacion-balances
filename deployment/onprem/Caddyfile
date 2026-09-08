@@ -1,0 +1,25 @@
+{
+	admin off
+	auto_https disable_redirects
+	http_port 8080
+	https_port 8443
+}
+
+http://{$CADDY_HOSTNAME:localhost} {
+	redir https://{host}{uri} permanent
+}
+
+https://{$CADDY_HOSTNAME:localhost} {
+	tls internal
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+
+	reverse_proxy app:8501
+}

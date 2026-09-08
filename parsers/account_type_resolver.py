@@ -31,6 +31,21 @@ def is_contra_asset_name(name: str | None) -> bool:
     )
 
 
+def is_ppe_depreciation_name(name: str | None) -> bool:
+    """True únicamente para depreciación acumulada de PPE/activo fijo (ANC.01.01).
+
+    Condición 7: ANC.01.01 es estrictamente para depreciación acumulada de PPE.
+    No debe extenderse a amortización acumulada de intangibles ni deterioro.
+    """
+    normalized = re.sub(r"\s+", " ", str(name or "").lower()).strip()
+    if re.search(r"\b(?:amortizaci[oó]n|intangibl)", normalized):
+        return False
+    return bool(
+        re.search(r"\bdepreciaci[oó]n(?:es)?\s+acumulad[ao]s?\b", normalized)
+        or re.fullmatch(r"depreciaci[oó]n(?:es)?", normalized)
+    )
+
+
 def is_patrimonial_reserve_name(name: str | None) -> bool:
     """True para reservas de patrimonio, no para provisiones de activos."""
     normalized = re.sub(r"\s+", " ", str(name or "").lower()).strip()

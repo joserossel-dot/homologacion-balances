@@ -51,7 +51,15 @@ class ValidationSession:
             "fallback_classifier": result.get("fallback_classifier", 0),
             "elapsed_seconds": result.get("elapsed_seconds", 0.0),
         }
-        for extra in ("group", "ocr", "file_type"):
+        for metric in (
+            "accounts_classified_specific", "accounts_classified_residual",
+            "accounts_unclassified", "accounts_pending_review", "accounts_controls",
+            "accounts_total_detail", "document_family", "balance_reconciliation",
+            "export_blocked_by_classification_degradation",
+        ):
+            if metric in result:
+                entry[metric] = result[metric]
+        for extra in ("group", "ocr", "file_type", "requirio_ocr"):
             if extra in result:
                 entry[extra] = result[extra]
         self.processed_files.append(entry)
@@ -59,14 +67,19 @@ class ValidationSession:
     def counts_by_method(self) -> dict[str, int]:
         counts: dict[str, int] = {}
         for acct in self.processed_accounts:
-            m = acct.get("method", "unknown")
+            code = (acct.get("standard_code") or acct.get("final_code")
+                    or acct.get("codigo_clasificado"))
+            if acct.get("es_total") or acct.get("is_total") or code == "__EXCLUIR__":
+                continue
+            m = acct.get("method") or acct.get("metodo") or "unknown"
             counts[m] = counts.get(m, 0) + 1
         return counts
 
     def unclassified_accounts(self) -> list[dict[str, Any]]:
         return [
             a for a in self.processed_accounts
-            if a.get("standard_code") is None
+            if not (a.get("standard_code") or a.get("final_code")
+                    or a.get("codigo_clasificado"))
         ]
 
     def accounts_by_group(self, group: str) -> list[dict[str, Any]]:

@@ -4,6 +4,7 @@ import statistics
 from typing import Any
 
 from validation.validation_session import ValidationSession
+from validation.classification_metrics import account_metrics, family_metrics
 
 
 class MetricsEngine:
@@ -17,9 +18,11 @@ class MetricsEngine:
         excel_count = sum(1 for f in files if f.get("source_file", "").lower().endswith((".xls", ".xlsx")))
         ocr_count = sum(1 for f in files if f.get("ocr", False))
 
-        accounts_total = len(accounts)
-        accounts_classified = sum(1 for a in accounts if a.get("standard_code") is not None)
-        accounts_manual = len(session.unclassified_accounts())
+        controls = sum(int(f.get("accounts_controls", 0)) for f in files)
+        controls_in_rows = sum(
+            1 for row in accounts if row.get("es_total") or row.get("is_total")
+        )
+        contract = account_metrics(accounts, max(controls - controls_in_rows, 0))
 
         method_counts = session.counts_by_method()
         learning_hits = method_counts.get("learning_exact", 0) + method_counts.get("learning_fuzzy", 0)
@@ -39,10 +42,9 @@ class MetricsEngine:
             "pdf_count": pdf_count,
             "excel_count": excel_count,
             "ocr_count": ocr_count,
-            "accounts_total": accounts_total,
-            "accounts_classified": accounts_classified,
-            "accounts_manual": accounts_manual,
-            "accounts_unclassified": accounts_manual,
+            "accounts_total": contract["accounts_total_detail"],
+            **contract,
+            "accounts_manual": contract["accounts_unclassified"],
             "learning_hits": learning_hits,
             "dictionary_hits": dictionary_hits,
             "code_hits": code_hits,
@@ -53,6 +55,7 @@ class MetricsEngine:
             "p95_time": round(p95_time, 4),
             "files_by_group": self._files_by_group(files),
             "methods_distribution": method_counts,
+            "families": family_metrics(files, accounts),
         }
 
     @staticmethod

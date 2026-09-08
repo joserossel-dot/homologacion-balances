@@ -100,8 +100,105 @@ def test_parseo_sin_texto_expone_advertencia_ocr(monkeypatch, tmp_path):
     resultado = parser.ParserPDF().parsear(pdf)
 
     assert resultado.requirio_ocr is True
+    assert resultado.certificacion_extraccion.estado == "fallida"
+    assert resultado.certificacion_extraccion.metodo == "ocr_runtime_gate"
     assert "Página 1: OCR sin texto utilizable" in resultado.advertencias
     assert "No se pudo extraer texto" in resultado.advertencias[-1]
+
+
+def test_timeout_ocr_selectivo_marca_pagina_como_incompleta(
+    monkeypatch, tmp_path,
+):
+    pdf = tmp_path / "comparativo.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n")
+    instance = parser.ParserPDF()
+    instance._ocr_advertencias = []
+    instance._ocr_timeout_pages = set()
+
+    def timeout(*args, **kwargs):
+        raise subprocess.TimeoutExpired(args[0], kwargs["timeout"])
+
+    monkeypatch.setattr(parser.subprocess, "run", timeout)
+
+    assert instance._ocr_pagina_tabular(pdf, 3) == []
+    assert instance._ocr_timeout_pages == {3}
+    assert any("Página 3" in warning for warning in instance._ocr_advertencias)
+
+
+def test_timeout_de_una_pagina_prohibe_certificar_cuentas_parciales(
+    monkeypatch, tmp_path,
+):
+    pdf = tmp_path / "parcial.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n")
+    monkeypatch.setattr(parser, "validar_archivo", lambda path: (True, "OK"))
+    monkeypatch.setattr(parser.ParserPDF, "_analizar_documento", lambda self, path: None)
+    monkeypatch.setattr(parser, "extraer_encabezados_documento_pdf", lambda path: [])
+    monkeypatch.setattr(
+        parser, "verificar_runtime_ocr",
+        lambda: {"available": True, "spa_available": True},
+    )
+
+    def extraccion_parcial(self, path, context):
+        self._ocr_timeout_pages.add(2)
+        self._ocr_advertencias.append("Página 2: timeout de prueba.")
+        self._extraction_method = "ocr_test"
+        return [
+            "110101 CAJA 100 0 100 0 100 0 0 0",
+            "210101 PROVEEDORES 0 100 0 100 0 100 0 0",
+            "TOTALES 100 100 100 100 100 100 0 0",
+        ], True, 0
+
+    monkeypatch.setattr(parser.ParserPDF, "_extraer_lineas", extraccion_parcial)
+
+    result = parser.ParserPDF().parsear(pdf)
+
+    assert result.cuentas
+    assert result.certificacion_extraccion.estado == "timeout"
+    assert result.certificacion_extraccion.metodo == "ocr_page_timeout"
+    assert any("página(s): 2" in reason for reason in result.certificacion_extraccion.razones)
+    assert any("Procesamiento OCR incompleto" in warning for warning in result.advertencias)
+
+
+def test_ocr_documental_continua_tras_timeout_de_una_pagina(
+    monkeypatch, tmp_path,
+):
+    pdf = tmp_path / "dos-paginas.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n")
+    instance = parser.ParserPDF()
+    instance._ocr_advertencias = []
+    instance._ocr_timeout_pages = set()
+    instance._extraction_method = "text"
+
+    def rasterizar(command, **kwargs):
+        prefix = Path(command[-1])
+        Image.new("RGB", (20, 20), "white").save(
+            prefix.with_name(prefix.name + "-1.png")
+        )
+        return subprocess.CompletedProcess(command, 0, stdout=b"", stderr=b"")
+
+    calls = 0
+
+    def ocr_page(path, rotation, psm=6, *, timeout_events=None, page_number=None):
+        nonlocal calls
+        calls += 1
+        if page_number == 1:
+            timeout_events.append("Página 1: timeout controlado.")
+            return ""
+        return "110101 CAJA 100 0 100 0 100 0 0 0\n"
+
+    monkeypatch.setattr(parser.subprocess, "run", rasterizar)
+    monkeypatch.setattr(parser, "detectar_rotacion_osd", lambda path: 0)
+    monkeypatch.setattr(parser, "ocr_pagina", ocr_page)
+    monkeypatch.setattr(parser, "ocr_pagina_tsv", lambda *args, **kwargs: [])
+    monkeypatch.setattr(parser, "_ocr_requiere_alternativa", lambda *args: False)
+
+    lines, used_ocr, rotation = instance._ocr_documento(pdf, 2)
+
+    assert used_ocr is True
+    assert rotation == 0
+    assert calls == 2
+    assert instance._ocr_timeout_pages == {1}
+    assert any("110101 CAJA" in line for line in lines)
 
 
 def test_linea_ocr_preserva_ceros_finales_y_columna_activo():

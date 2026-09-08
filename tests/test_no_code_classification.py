@@ -78,6 +78,40 @@ def test_diccionario_migra_depreciacion_acumulada_al_subcodigo(tmp_path):
     assert result['standard_code'] == 'ANC.01.01'
 
 
+def test_subcuenta_bancaria_hereda_caja_y_bancos_del_control(tmp_path):
+    pipeline = HomologationPipeline(db_path=tmp_path / 'gold.db')
+
+    result = pipeline._classify_account(
+        '', 'BANCOESTADO 1', 'ACTIVO', account_hierarchy='BANCOS',
+    )
+
+    assert result['standard_code'] == 'AC.01'
+    assert result['method'] == 'hierarchy_inheritance'
+    assert result['confidence'] == 0.99
+
+
+def test_depreciacion_generica_bajo_acumulada_hereda_contra_activo(tmp_path):
+    pipeline = HomologationPipeline(db_path=tmp_path / 'gold.db')
+
+    result = pipeline._classify_account(
+        '', 'DEPRECIACIONES', 'ACTIVO',
+        account_hierarchy='DEPRECIACIÓN ACUMULADA',
+    )
+
+    assert result['standard_code'] == 'ANC.01.01'
+    assert result['method'] == 'hierarchy_inheritance'
+
+
+def test_depreciacion_del_ejercicio_sin_contexto_no_hereda_contra_activo(tmp_path):
+    pipeline = HomologationPipeline(db_path=tmp_path / 'gold.db')
+
+    result = pipeline._classify_account(
+        '', 'DEPRECIACIÓN EQUIPOS', 'PERDIDA', account_hierarchy=None,
+    )
+
+    assert result['standard_code'] != 'ANC.01.01'
+
+
 def test_diccionario_migra_pat09_a_resultados_acumulados_pat03(tmp_path):
     pipeline = HomologationPipeline(db_path=tmp_path / 'gold.db')
     pipeline._dictionary = [{
@@ -175,7 +209,12 @@ def test_resultado_atribuible_clasifica_sin_depender_del_signo(
 @pytest.mark.parametrize('nombre,tipo,codigo', [
     ('Efectivo y equivalentes al efectivo', 'ACTIVO', 'AC.01'),
     ('Cuentas por cobrar a entidades relacionadas, no corrientes', 'ACTIVO', 'ANC.05'),
-    ('Otros pasivos financieros, no corrientes', 'PASIVO', 'PNC.01'),
+    ('Otros pasivos financieros, no corrientes', 'PASIVO', 'PNC.05'),
+    ('Activos por impuestos diferidos', 'ACTIVO', 'ANC.09'),
+    ('Activos por impuestos diferidos, no corrientes', 'ACTIVO', 'ANC.09'),
+    ('Otras provisiones', 'PASIVO', 'PC.09'),
+    ('Pasivo por impuestos diferidos', 'PASIVO', 'PNC.06'),
+    ('Pasivos por impuestos diferidos', 'PASIVO', 'PNC.06'),
     ('Ganancias (pérdidas) acumuladas', 'PATRIMONIO', 'PAT.03'),
     ('Ingresos de actividades ordinarias', 'DESCONOCIDO', 'ER.01'),
     ('Costo de ventas', 'DESCONOCIDO', 'ER.02'),

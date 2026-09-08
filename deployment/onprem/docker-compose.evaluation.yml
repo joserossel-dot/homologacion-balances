@@ -1,0 +1,18 @@
+services:
+  bootstrap:
+    build:
+      context: ../..
+      dockerfile: deployment/onprem/Dockerfile
+      args:
+        PYTHON_BUILD_IMAGE: ${PYTHON_BUILD_IMAGE:-python:3.12-slim-bookworm}
+        TESSERACT_OCR_VERSION: ${TESSERACT_OCR_VERSION:-5.3.0-2}
+        TESSERACT_SPA_VERSION: ${TESSERACT_SPA_VERSION:-1:4.1.0-2}
+
+  app:
+    build:
+      context: ../..
+      dockerfile: deployment/onprem/Dockerfile
+      args:
+        PYTHON_BUILD_IMAGE: ${PYTHON_BUILD_IMAGE:-python:3.12-slim-bookworm}
+        TESSERACT_OCR_VERSION: ${TESSERACT_OCR_VERSION:-5.3.0-2}
+        TESSERACT_SPA_VERSION: ${TESSERACT_SPA_VERSION:-1:4.1.0-2}

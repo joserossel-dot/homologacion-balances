@@ -137,6 +137,12 @@ class ValidationResult:
     pages: int = 0
     accounts_total: int = 0
     accounts_classified: int = 0
+    accounts_classified_specific: int = 0
+    accounts_classified_residual: int = 0
+    accounts_unclassified: int = 0
+    accounts_pending_review: int = 0
+    accounts_controls: int = 0
+    accounts_total_detail: int = 0
     accounts_ignored: int = 0
     format_family: str = ""
     layout_type: str = ""

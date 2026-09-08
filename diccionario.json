@@ -1,5 +1,20 @@
 [
   {
+    "cuenta_original": "Otros activos financieros",
+    "codigo_estandar": "AC.08",
+    "fuente": "politica_global_humana_20260907"
+  },
+  {
+    "cuenta_original": "Otros pasivos financieros no corrientes",
+    "codigo_estandar": "PNC.05",
+    "fuente": "politica_global_humana_20260907"
+  },
+  {
+    "cuenta_original": "Costos de distribución",
+    "codigo_estandar": "ER.04",
+    "fuente": "politica_global_humana_20260907"
+  },
+  {
     "cuenta_original": "Banco Bci $ Egresos DSI",
     "codigo_estandar": "AC.01",
     "fuente": "balances_reales_validado"
@@ -4577,6 +4592,36 @@
   {
     "cuenta_original": "Anticipo Cliente US$",
     "codigo_estandar": "PC.01",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Activos por impuestos diferidos",
+    "codigo_estandar": "ANC.09",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Activos por impuestos diferidos, no corrientes",
+    "codigo_estandar": "ANC.09",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Pasivo por impuestos diferidos",
+    "codigo_estandar": "PNC.06",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Pasivos por impuestos diferidos",
+    "codigo_estandar": "PNC.06",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Otras provisiones",
+    "codigo_estandar": "PC.09",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Provisiones corrientes",
+    "codigo_estandar": "PC.09",
     "fuente": "validacion_humana"
   }
 ]

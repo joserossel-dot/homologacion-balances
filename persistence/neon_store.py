@@ -5,11 +5,22 @@ from __future__ import annotations
 import os
 import re
 import unicodedata
+import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
 from catalog_aliases import (
     canonical_catalog_code, canonicalize_catalog, canonicalize_dictionary,
+)
+from persistence.contracts.promotions import PromotionOutcomeRecord, PromotionPolicyRecord
+from persistence.promotion_metadata import (
+    promotion_outcome_fingerprint,
+    promotion_outcome_payload,
+    promotion_record_fingerprint,
+    promotion_record_payload,
+    validate_promotion_policy_record,
+    validate_promotion_outcome,
 )
 
 
@@ -18,6 +29,20 @@ def normalize_account_name(value: str) -> str:
     text = "".join(char for char in text if unicodedata.category(char) != "Mn")
     text = re.sub(r"[^a-z0-9 ]+", " ", text)
     return " ".join(text.split())
+
+
+def _reject_policy_promotion_through_validation(source: str) -> None:
+    """Evita usar el camino heredado, con reviewer implícito, como promoción."""
+    tokens = set(normalize_account_name(source).split())
+    if tokens.intersection({"promotion", "promocion", "manual", "supervisor"}) and (
+        "promotion" in tokens
+        or "promocion" in tokens
+        or {"manual", "supervisor"}.issubset(tokens)
+    ):
+        raise ValueError(
+            "Una promoción debe usar save_promotion_policy_metadata con actor "
+            "supervisor y organización explícitos"
+        )
 
 
 class NeonKnowledgeStore:
@@ -73,6 +98,263 @@ class NeonKnowledgeStore:
                     return cursor.fetchone()[0] == 1
         except Exception:
             return False
+
+    def initialize_promotion_policy_metadata(
+        self, migration: str | Path | None = None,
+    ) -> None:
+        """Aplica explícitamente la migración de metadata de promociones."""
+        path = Path(migration) if migration else (
+            Path(__file__).resolve().parent
+            / "migrations"
+            / "003_promotion_policy_metadata.sql"
+        )
+        sql = path.read_text(encoding="utf-8")
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(sql)
+
+    def initialize_promotion_outcomes(
+        self, migration: str | Path | None = None,
+    ) -> None:
+        """Aplica explícitamente la migración append-only de outcomes."""
+        if migration:
+            paths = [Path(migration)]
+        else:
+            root = Path(__file__).resolve().parent / "migrations"
+            paths = [
+                root / "004_promotion_outcomes.sql",
+                root / "005_promotion_outcome_batches.sql",
+            ]
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                for path in paths:
+                    cursor.execute(path.read_text(encoding="utf-8"))
+
+    def save_promotion_policy_metadata(
+        self, record: PromotionPolicyRecord,
+    ) -> PromotionPolicyRecord:
+        """Persiste sólo evidencia de política, nunca cambia el estado de cola.
+
+        No acepta un reviewer por defecto. El registro debe contener actor
+        supervisor explícito, rol y organización, construidos por el contrato
+        de identidad.
+        """
+        validate_promotion_policy_record(record)
+        fingerprint = promotion_record_fingerprint(record)
+        payload = promotion_record_payload(record)
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """INSERT INTO promotion_policy_metadata
+                       (evaluation_id, subject_id, policy_mode, decision_allowed,
+                        decision_reasons, evidence, supervisor_actor_id,
+                        supervisor_role, organization_id, conflict_count,
+                        evaluated_at, expires_at, reversal_reference,
+                        record_fingerprint)
+                       VALUES (%s::uuid, %s, %s, %s, %s::jsonb, %s::jsonb,
+                               %s, %s, %s, %s, %s, %s, %s, %s)
+                       ON CONFLICT (evaluation_id) DO NOTHING
+                       RETURNING evaluation_id""",
+                    (
+                        payload["evaluation_id"], payload["subject_id"],
+                        payload["policy_mode"], payload["allowed"],
+                        json.dumps(payload["decision_reasons"], ensure_ascii=False),
+                        json.dumps(payload["evidence"], ensure_ascii=False, sort_keys=True),
+                        payload["supervisor_actor_id"], payload["supervisor_role"],
+                        payload["organization_id"], payload["conflict_count"],
+                        record.evaluated_at, record.expires_at,
+                        payload["reversal_reference"], fingerprint,
+                    ),
+                )
+                inserted = cursor.fetchone()
+                if inserted is None:
+                    cursor.execute(
+                        """SELECT record_fingerprint
+                           FROM promotion_policy_metadata
+                           WHERE evaluation_id=%s::uuid""",
+                        (record.evaluation_id,),
+                    )
+                    existing = cursor.fetchone()
+                    if not existing or existing[0] != fingerprint:
+                        raise ValueError(
+                            "evaluation_id ya existe con metadata diferente"
+                        )
+        return record
+
+    def get_promotion_policy_metadata(
+        self, evaluation_id: str, *, organization_id: str,
+    ) -> PromotionPolicyRecord | None:
+        """Recupera una evaluación por ID sin tocar la cola de promoción."""
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """SELECT evaluation_id::text, subject_id, policy_mode,
+                              decision_allowed, decision_reasons, evidence,
+                              supervisor_actor_id, supervisor_role, organization_id,
+                              conflict_count, evaluated_at, expires_at,
+                              reversal_reference
+                       FROM promotion_policy_metadata
+                       WHERE evaluation_id=%s::uuid AND organization_id=%s""",
+                    (evaluation_id, organization_id),
+                )
+                row = cursor.fetchone()
+        if row is None:
+            return None
+        return PromotionPolicyRecord(
+            evaluation_id=row[0], subject_id=row[1], policy_mode=row[2],
+            allowed=bool(row[3]), decision_reasons=tuple(row[4]),
+            evidence=dict(row[5]), supervisor_actor_id=row[6],
+            supervisor_role=row[7], organization_id=row[8],
+            conflict_count=int(row[9]), evaluated_at=row[10], expires_at=row[11],
+            reversal_reference=row[12],
+        )
+
+    def save_promotion_outcome(
+        self, record: PromotionOutcomeRecord,
+    ) -> PromotionOutcomeRecord:
+        validate_promotion_outcome(record)
+        payload = promotion_outcome_payload(record)
+        fingerprint = promotion_outcome_fingerprint(record)
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """SELECT subject_id, organization_id, decision_allowed
+                       FROM promotion_policy_metadata
+                       WHERE evaluation_id=%s::uuid""",
+                    (record.evaluation_id,),
+                )
+                policy = cursor.fetchone()
+                if policy is None:
+                    raise ValueError("La evaluación de promoción no existe")
+                if policy[0] != record.subject_id or policy[1] != record.organization_id:
+                    raise ValueError(
+                        "El outcome no coincide con sujeto u organización"
+                    )
+                if not bool(policy[2]):
+                    raise ValueError(
+                        "No se puede aplicar outcome a una evaluación denegada"
+                    )
+                cursor.execute(
+                    """INSERT INTO promotion_outcomes
+                       (record_fingerprint, evaluation_id, subject_id,
+                        organization_id, actor_id, status, promotion_ids,
+                        occurred_at, error)
+                       VALUES (%s, %s::uuid, %s, %s, %s, %s, %s::jsonb, %s, %s)
+                       ON CONFLICT (record_fingerprint) DO NOTHING
+                       RETURNING record_fingerprint""",
+                    (
+                        fingerprint, payload["evaluation_id"],
+                        payload["subject_id"], payload["organization_id"],
+                        payload["actor_id"], payload["status"],
+                        json.dumps(payload["promotion_ids"], separators=(",", ":")),
+                        record.occurred_at, payload["error"],
+                    ),
+                )
+                inserted = cursor.fetchone()
+                if inserted is None:
+                    cursor.execute(
+                        """SELECT record_fingerprint FROM promotion_outcomes
+                           WHERE record_fingerprint=%s""",
+                        (fingerprint,),
+                    )
+                    if cursor.fetchone() is None:
+                        raise ValueError("No se pudo persistir outcome de promoción")
+        return record
+
+    def get_promotion_outcome(
+        self, evaluation_id: str, *, organization_id: str,
+    ) -> PromotionOutcomeRecord | None:
+        rows = self.list_promotion_outcomes_for_evaluation(
+            evaluation_id, organization_id=organization_id,
+        )
+        return rows[0] if rows else None
+
+    def list_promotion_outcomes_for_evaluation(
+        self, evaluation_id: str, *, organization_id: str,
+    ) -> list[PromotionOutcomeRecord]:
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """SELECT evaluation_id::text, subject_id, organization_id,
+                              actor_id, status, promotion_ids, occurred_at, error
+                       FROM promotion_outcomes
+                       WHERE evaluation_id=%s::uuid AND organization_id=%s
+                       ORDER BY occurred_at DESC, record_fingerprint DESC""",
+                    (evaluation_id, organization_id),
+                )
+                rows = cursor.fetchall()
+        return [self._promotion_outcome_from_row(row) for row in rows]
+
+    def list_promotion_outcomes_for_subject(
+        self, subject_id: str, *, organization_id: str, limit: int = 100,
+    ) -> list[PromotionOutcomeRecord]:
+        if not 1 <= int(limit) <= 1000:
+            raise ValueError("limit debe estar entre 1 y 1000")
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """SELECT evaluation_id::text, subject_id, organization_id,
+                              actor_id, status, promotion_ids, occurred_at, error
+                       FROM promotion_outcomes
+                       WHERE subject_id=%s AND organization_id=%s
+                       ORDER BY occurred_at DESC, record_fingerprint DESC LIMIT %s""",
+                    (subject_id, organization_id, int(limit)),
+                )
+                rows = cursor.fetchall()
+        return [self._promotion_outcome_from_row(row) for row in rows]
+
+    def list_unresolved_promotion_evaluations(
+        self, subject_id: str, *, organization_id: str, limit: int = 100,
+    ) -> list[PromotionPolicyRecord]:
+        if not 1 <= int(limit) <= 1000:
+            raise ValueError("limit debe estar entre 1 y 1000")
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """SELECT p.evaluation_id::text, p.subject_id,
+                              p.policy_mode, p.decision_allowed,
+                              p.decision_reasons, p.evidence,
+                              p.supervisor_actor_id, p.supervisor_role,
+                              p.organization_id, p.conflict_count,
+                              p.evaluated_at, p.expires_at,
+                              p.reversal_reference
+                       FROM promotion_policy_metadata AS p
+                       WHERE p.subject_id=%s AND p.organization_id=%s
+                         AND p.decision_allowed=TRUE
+                         AND NOT EXISTS (
+                             SELECT 1 FROM promotion_outcomes AS o
+                             WHERE o.evaluation_id=p.evaluation_id
+                               AND o.organization_id=p.organization_id
+                               AND o.status IN ('APPLIED', 'FAILED')
+                         )
+                       ORDER BY p.evaluated_at DESC, p.evaluation_id DESC
+                       LIMIT %s""",
+                    (subject_id, organization_id, int(limit)),
+                )
+                rows = cursor.fetchall()
+        return [self._promotion_policy_from_row(row) for row in rows]
+
+    @staticmethod
+    def _promotion_policy_from_row(row: tuple[Any, ...]) -> PromotionPolicyRecord:
+        return PromotionPolicyRecord(
+            evaluation_id=row[0], subject_id=row[1], policy_mode=row[2],
+            allowed=bool(row[3]), decision_reasons=tuple(row[4]),
+            evidence=dict(row[5]), supervisor_actor_id=row[6],
+            supervisor_role=row[7], organization_id=row[8],
+            conflict_count=int(row[9]), evaluated_at=row[10], expires_at=row[11],
+            reversal_reference=row[12],
+        )
+
+    @staticmethod
+    def _promotion_outcome_from_row(row: tuple[Any, ...]) -> PromotionOutcomeRecord:
+        promotion_ids = row[5]
+        if isinstance(promotion_ids, str):
+            promotion_ids = json.loads(promotion_ids)
+        return PromotionOutcomeRecord(
+            evaluation_id=row[0], subject_id=row[1], organization_id=row[2],
+            actor_id=row[3], status=row[4], promotion_ids=tuple(promotion_ids),
+            occurred_at=row[6], error=row[7],
+        )
 
     def load_catalog(self) -> dict[str, dict[str, Any]]:
         query = """SELECT codigo_estandar, nombre_estandar, categoria, tipo_estado,
@@ -151,6 +433,72 @@ class NeonKnowledgeStore:
                 )
         return len(catalog_rows), len(dictionary_rows)
 
+    def seed_baseline(
+        self,
+        catalog: dict[str, dict[str, Any]],
+        dictionary: list[dict[str, Any]],
+        *,
+        bundle_version: str,
+        bundle_checksum: str,
+    ) -> tuple[int, int]:
+        """Instala sólo filas ausentes y registra el paquete aplicado.
+
+        Los conflictos se preservan deliberadamente: una actualización de
+        maestros debe ejecutarse como migración explícita y no como bootstrap.
+        """
+        if not re.fullmatch(r"[A-Za-z0-9._-]{1,80}", bundle_version):
+            raise ValueError("bundle_version inválida")
+        if not re.fullmatch(r"[a-f0-9]{64}", bundle_checksum):
+            raise ValueError("bundle_checksum inválido")
+        catalog_rows = []
+        for code, raw in catalog.items():
+            row = {**raw, "codigo_estandar": raw.get("codigo_estandar", code)}
+            catalog_rows.append((
+                row["codigo_estandar"], row["nombre_estandar"], row["categoria"],
+                row["tipo_estado"], row["naturaleza"], row.get("signo_normal", 1),
+                row.get("es_deuda_financiera", False),
+                row.get("es_activo_liquido", False), row.get("afecta_ebitda", False),
+            ))
+        valid_codes = {row[0] for row in catalog_rows}
+        dictionary_rows = [
+            (
+                row["cuenta_original"], normalize_account_name(row["cuenta_original"]),
+                canonical_catalog_code(row["codigo_estandar"]), row.get("fuente", "seed_json"),
+            )
+            for row in dictionary
+            if canonical_catalog_code(row.get("codigo_estandar", "")) in valid_codes
+        ]
+        with self._connect() as conn:
+            with conn.cursor() as cursor:
+                self._execute_many(cursor,
+                    """INSERT INTO catalogo_maestro
+                       (codigo_estandar, nombre_estandar, categoria, tipo_estado,
+                        naturaleza, signo_normal, es_deuda_financiera,
+                        es_activo_liquido, afecta_ebitda)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                       ON CONFLICT (codigo_estandar) DO NOTHING""",
+                    catalog_rows,
+                )
+                self._execute_many(cursor,
+                    """INSERT INTO diccionario_homologacion
+                       (cuenta_original, cuenta_normalizada, codigo_estandar, fuente)
+                       VALUES (%s, %s, %s, %s)
+                       ON CONFLICT (cuenta_normalizada) DO NOTHING""",
+                    dictionary_rows,
+                )
+                cursor.execute(
+                    """INSERT INTO master_seed_history
+                       (bundle_checksum, bundle_version, applied_at,
+                        catalog_rows, dictionary_rows)
+                       VALUES (%s, %s, %s, %s, %s)
+                       ON CONFLICT (bundle_checksum) DO NOTHING""",
+                    (
+                        bundle_checksum, bundle_version,
+                        datetime.now(timezone.utc), len(catalog_rows), len(dictionary_rows),
+                    ),
+                )
+        return len(catalog_rows), len(dictionary_rows)
+
     def save_validation(
         self,
         *,
@@ -164,6 +512,7 @@ class NeonKnowledgeStore:
         source_file: str = "",
         add_to_dictionary: bool = True,
     ) -> None:
+        _reject_policy_promotion_through_validation(source)
         validated_code = canonical_catalog_code(validated_code)
         suggested_code = (
             canonical_catalog_code(suggested_code) if suggested_code else suggested_code
@@ -183,6 +532,8 @@ class NeonKnowledgeStore:
         """Guarda un lote completo usando una sola conexión y transacción."""
         if not validations:
             return
+        for validation in validations:
+            _reject_policy_promotion_through_validation(validation["source"])
         with self._connect() as conn:
             with conn.cursor() as cursor:
                 for validation in validations:
@@ -193,6 +544,7 @@ class NeonKnowledgeStore:
         account_name = validation["account_name"]
         validated_code = canonical_catalog_code(validation["validated_code"])
         source = validation["source"]
+        _reject_policy_promotion_through_validation(source)
         suggested_code = validation.get("suggested_code")
         suggested_code = (
             canonical_catalog_code(suggested_code) if suggested_code else suggested_code

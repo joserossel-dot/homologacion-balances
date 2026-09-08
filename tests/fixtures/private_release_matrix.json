@@ -4,13 +4,16 @@
   "cases": [
     {
       "file": "parque_cultural_valparaiso_2024.pdf",
+      "required_for_release": true,
       "expect": {
+        "certification_state": "certificada",
         "final_totals_valid": true
       }
     },
     {
       "file": "london38_balance.pdf",
       "pages": [1],
+      "required_for_release": true,
       "expect": {
         "certification_state": "certificada",
         "final_totals_valid": true
@@ -18,7 +21,9 @@
     },
     {
       "file": "afuminsal_2016.pdf",
+      "required_for_release": true,
       "expect": {
+        "certification_state": "certificada",
         "final_totals_valid": true,
         "result": 9910945,
         "accounts": [
@@ -31,7 +36,9 @@
     },
     {
       "file": "fundacion_arte_solidaridad_2024.pdf",
+      "required_for_release": false,
       "expect": {
+        "certification_state": "parcial",
         "final_totals_valid": true,
         "max_inconsistent_rows": 1,
         "inconsistent_account_names": ["IMPTOS POR PAGAR"]

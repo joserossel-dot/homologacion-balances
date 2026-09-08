@@ -5,13 +5,16 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import multiprocessing
 import os
 import re
+import signal
 import sys
 import tempfile
 import time
 from collections import Counter
 from pathlib import Path
+from typing import Optional
 
 # El entorno de desarrollo puede tener otra copia del proyecto instalada en
 # modo editable. La certificación debe importar exactamente el árbol donde se
@@ -34,9 +37,17 @@ from app_validacion import (
     _resolver_tipo_cuenta,
 )
 from interpreters.balance_interpreter import BalanceInterpreter
-from parser_universal import ParserPDF, certificar_extraccion_columnas, parsear_excel
+from parser_universal import (
+    ParserPDF, certificar_extraccion_columnas, certificar_clasificado_final, parsear_excel,
+)
 from pipeline.homologation_pipeline import HomologationPipeline
 from document_scope import select_pdf
+
+ALLOWED_REQUIRED_CERTIFICATION_STATES = frozenset({"certificada"})
+GOLD_SCHEMA_VERSION = 2
+DEFAULT_DOCUMENT_TIMEOUT_SECONDS = int(
+    os.environ.get("CORPUS_DOCUMENT_TIMEOUT_SECONDS", "300")
+)
 
 
 def _serializable(value):
@@ -57,6 +68,17 @@ def _normalized_text(value) -> str:
     return re.sub(r"[^a-z0-9]+", "", str(value or "").casefold())
 
 
+def _account_context_name(account) -> str:
+    """Replica el nombre contable contextual usado por la interfaz."""
+    return " ".join(
+        str(value).strip()
+        for value in (
+            getattr(account, "jerarquia_contable", None), account.nombre,
+        )
+        if value and str(value).strip()
+    )
+
+
 def _account_snapshot(accounts, classification: dict) -> list[dict]:
     """Conserva todas las filas extraídas, incluidas cuentas y controles."""
     classified_by_line = {
@@ -65,36 +87,74 @@ def _account_snapshot(accounts, classification: dict) -> list[dict]:
     snapshots = []
     for account in accounts:
         classified = classified_by_line.get(int(account.linea), {})
+        standard_code = str(classified.get("code") or "")
+        is_control = bool(account.es_total)
+        is_classifiable_detail = bool(
+            account.codigo
+            or account.montos_columnas
+            or account.monto is not None and float(account.monto) != 0
+        )
         snapshots.append({
             "line": int(account.linea),
             "account_code": str(account.codigo or ""),
             "name": str(account.nombre or ""),
+            "accounting_hierarchy": str(
+                getattr(account, "jerarquia_contable", None) or ""
+            ),
             "origin": _serializable(account.origen_columna),
             "amount": account.monto,
-            "is_total": bool(account.es_total),
+            "is_total": is_control,
             "confidence": float(account.confianza_extraccion or 0.0),
             "column_amounts": dict(account.montos_columnas or {}),
             "period_amounts": dict(account.montos_periodos or {}),
             "derived_columns": list(account.columnas_derivadas or []),
-            "standard_code": str(classified.get("code") or ""),
+            "extraction_review_reasons": list(
+                getattr(account, "razones_revision_extraccion", None) or []
+            ),
+            "standard_code": standard_code,
             "classification_method": str(classified.get("method") or ""),
-            "requires_review": bool(classified.get("review", False)),
+            # Una cuenta de detalle filtrada antes de _classify no debe quedar
+            # silenciosamente como "sin revisar". Los subtotales, resultados
+            # de cierre y controles reconocidos no requieren clasificación.
+            "requires_review": bool(
+                getattr(account, "requiere_revision_extraccion", False)
+            ) or (False if (
+                is_control or not is_classifiable_detail
+            ) else (
+                bool(classified.get("review", not standard_code))
+                or not standard_code
+            )),
         })
     return snapshots
 
 
-def _detected_dimensions(accounts) -> tuple[list[str], list[str]]:
-    periods: set[str] = set()
-    currencies: set[str] = set()
+def _detected_dimensions(
+    accounts,
+    period_hints: Optional[list[str]] = None,
+    currency_hints: Optional[list[str]] = None,
+) -> tuple[list[str], list[str]]:
+    hinted_periods = [
+        str(value) for value in (period_hints or [])
+        if re.fullmatch(r"(?:19|20)\d{2}", str(value))
+    ][:2]
+    periods: set[str] = set(hinted_periods)
+    currencies: set[str] = set(currency_hints or [])
     known_currencies = {"CLP", "USD", "EUR", "UF", "UTM", "M$", "MM$"}
     for account in accounts:
         for raw_key in (account.montos_periodos or {}):
             key = str(raw_key)
-            periods.update(re.findall(r"(?:19|20)\d{2}", key))
+            if not hinted_periods:
+                periods.update(re.findall(r"(?:19|20)\d{2}", key))
             for token in re.split(r"[_\s/-]+", key.upper()):
                 if token in known_currencies:
                     currencies.add(token)
-    return sorted(periods, reverse=True), sorted(currencies)
+    numeric_periods = {
+        period for period in periods
+        if re.fullmatch(r"(?:19|20)\d{2}", str(period))
+    }
+    if numeric_periods:
+        periods = numeric_periods
+    return sorted(periods, reverse=True)[:2], sorted(currencies)
 
 
 def _json_value(value):
@@ -124,7 +184,7 @@ def _cell_bool(value) -> bool:
     return bool(value)
 
 
-def load_gold_rows(path: Path) -> list[dict]:
+def load_gold_rows(path: Path, *, schema_version: Optional[int] = None) -> list[dict]:
     """Lee un candidato revisado y omite sólo exclusiones explícitas.
 
     ``APROBADO`` describe una fila que debe existir exactamente en la salida.
@@ -138,6 +198,19 @@ def load_gold_rows(path: Path) -> list[dict]:
         if not isinstance(rows, list):
             raise ValueError("El Gold JSON debe contener una lista de cuentas.")
         return rows
+    summary = pd.read_excel(path, sheet_name="Resumen")
+    detected_schema = 1
+    if "Gold_schema_version" in summary.columns and not summary.empty:
+        detected_schema = int(summary.iloc[0]["Gold_schema_version"])
+    if schema_version is None:
+        schema_version = detected_schema
+    if schema_version not in {1, GOLD_SCHEMA_VERSION}:
+        raise ValueError(f"Versión Gold no soportada: {schema_version}.")
+    if detected_schema != schema_version:
+        raise ValueError(
+            f"El libro declara Gold schema {detected_schema}, pero el manifiesto "
+            f"exige {schema_version}."
+        )
     frame = pd.read_excel(path, sheet_name="Cuentas")
     if "Estado_revision" not in frame.columns:
         raise ValueError("El Gold XLSX no contiene la columna Estado_revision.")
@@ -153,17 +226,28 @@ def load_gold_rows(path: Path) -> list[dict]:
     for index, source in frame.iterrows():
         if states.iloc[index] == "EXCLUIR":
             continue
+        confidence = source.get("Confianza_extraccion")
+        if confidence is None or pd.isna(confidence):
+            confidence = 0.0
+        derived_columns = _json_value(source.get("Columnas_derivadas_JSON"))
+        if not isinstance(derived_columns, list):
+            derived_columns = []
         rows.append({
+            "_gold_schema_version": schema_version,
             "line": int(source["Fila"]),
             "account_code": _cell_text(source.get("Codigo_original")),
             "name": _cell_text(source.get("Cuenta_original")),
+            "accounting_hierarchy": _cell_text(source.get("Jerarquia_contable")),
             "origin": _cell_text(source.get("Origen")),
             "amount": source.get("Monto"),
             "period_amounts": _json_value(source.get("Montos_periodos_JSON")),
             "column_amounts": _json_value(source.get("Montos_columnas_JSON")),
             "standard_code": _cell_text(source.get("Codigo_homologado")),
+            "classification_method": _cell_text(source.get("Metodo_clasificacion")),
             "requires_review": _cell_bool(source.get("Requiere_revision")),
             "is_total": _cell_bool(source.get("Es_control_total")),
+            "confidence": float(confidence),
+            "derived_columns": derived_columns,
         })
     return rows
 
@@ -196,8 +280,9 @@ def evaluate_gold_rows(
     extra = sorted(actual.keys() - expected.keys())
     mismatches = []
     fields = (
-        "origin", "period_amounts", "column_amounts", "standard_code",
-        "requires_review", "is_total",
+        "origin", "period_amounts", "column_amounts",
+        "standard_code", "classification_method", "requires_review", "is_total",
+        "confidence", "derived_columns",
     )
     for row_key in sorted(expected.keys() & actual.keys()):
         differences = {}
@@ -212,11 +297,21 @@ def evaluate_gold_rows(
         )
         if not amount_ok:
             differences["amount"] = [actual_amount, expected_amount]
-        for field in fields:
+        compared_fields = list(fields)
+        # Compatibilidad explícita: schema 1 carecía de jerarquía. Los libros
+        # nuevos (schema 2) la fijan y la comparan obligatoriamente.
+        if int(expected_row.get("_gold_schema_version") or 2) >= 2:
+            compared_fields.insert(0, "accounting_hierarchy")
+        for field in compared_fields:
             if actual_row.get(field) != expected_row.get(field):
                 differences[field] = [actual_row.get(field), expected_row.get(field)]
         if differences:
-            mismatches.append({"key": row_key, "differences": differences})
+            mismatches.append({
+                "key": row_key,
+                "actual_line": actual_row.get("line"),
+                "expected_line": expected_row.get("line"),
+                "differences": differences,
+            })
     return [
         {"name": "gold_missing_rows", "actual": missing, "expected": [],
          "passed": not missing},
@@ -238,6 +333,7 @@ def _candidate_frame(result: dict) -> pd.DataFrame:
             "Fila": row.get("line"),
             "Codigo_original": row.get("account_code"),
             "Cuenta_original": row.get("name"),
+            "Jerarquia_contable": row.get("accounting_hierarchy"),
             "Origen": row.get("origin"),
             "Monto": row.get("amount"),
             "Monto_actual": periods.get("actual"),
@@ -267,6 +363,7 @@ def write_gold_candidate(result: dict, output_dir: Path) -> Path:
     safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", Path(result["file"]).stem)
     output = output_dir / f"{safe_name}.gold-candidate.xlsx"
     summary = pd.DataFrame([{
+        "Gold_schema_version": GOLD_SCHEMA_VERSION,
         "Documento": result.get("file"),
         "SHA256": result.get("sha256"),
         "Paginas_seleccionadas": ",".join(
@@ -274,6 +371,9 @@ def write_gold_candidate(result: dict, output_dir: Path) -> Path:
         ),
         "Periodos_detectados": ",".join(result.get("detected_periods", [])),
         "Monedas_detectadas": ",".join(result.get("detected_currencies", [])),
+        "Unidades_detectadas": ",".join(
+            result.get("detected_monetary_units", [])
+        ),
         "Filas_extraidas": result.get("raw_accounts"),
         "Cuentas_calificadas": result.get("qualified_accounts"),
         "Estado_certificacion": (result.get("certification") or {}).get("state"),
@@ -311,7 +411,8 @@ def _parse(path: Path):
         certification = certificar_extraccion_columnas(
             accounts, metodo="excel_8_columns",
         )
-        return accounts, certification, [], False, 0
+        periods, currencies = _detected_dimensions(accounts)
+        return accounts, certification, [], False, 0, periods, currencies, []
     result = ParserPDF().parsear(path)
     return (
         result.cuentas,
@@ -319,12 +420,17 @@ def _parse(path: Path):
         result.advertencias,
         result.requirio_ocr,
         result.rotacion_aplicada,
+        result.periodos_detectados,
+        result.monedas_detectadas,
+        result.unidades_monetarias,
     )
 
 
 def _classify(accounts, pipeline: HomologationPipeline) -> dict:
     rows = []
     for account in accounts:
+        if account.es_total:
+            continue
         if account.monto is None and not account.codigo:
             continue
         if not account.codigo and PATRON_NO_CUENTA.match(account.nombre.strip()):
@@ -340,13 +446,14 @@ def _classify(accounts, pipeline: HomologationPipeline) -> dict:
             amount = float(account.monto)
         if amount is None:
             continue
+        contextual_name = _account_context_name(account)
         effective_origin = _origen_efectivo(
-            account.origen_columna, amount, account.nombre,
+            account.origen_columna, amount, contextual_name,
         )
         account_type = _resolver_tipo_cuenta(effective_origin, account.codigo)
-        if effective_origin == "pasivo" and _es_contra_activo(account.nombre):
+        if effective_origin == "pasivo" and _es_contra_activo(contextual_name):
             account_type = "ACTIVO"
-        if _es_partida_patrimonial(account.nombre):
+        if _es_partida_patrimonial(contextual_name):
             account_type = "PATRIMONIO"
         if (
             account.monto is not None
@@ -361,6 +468,7 @@ def _classify(accounts, pipeline: HomologationPipeline) -> dict:
             adapted.account_code, adapted.account_name,
             account_tipo=account_type,
             account_section=account.seccion_contable,
+            account_hierarchy=getattr(account, "jerarquia_contable", None),
         )
         elapsed_ms = (time.perf_counter() - started) * 1000
         adjustment = pipeline._rule_processor.aplicar(
@@ -376,7 +484,7 @@ def _classify(accounts, pipeline: HomologationPipeline) -> dict:
         compatible = bool(
             final_code
             and _codigo_compatible_con_origen(
-                final_code, account.origen_columna, amount, account.nombre,
+                final_code, account.origen_columna, amount, contextual_name,
             )
         )
         if final_code and not compatible:
@@ -387,6 +495,7 @@ def _classify(accounts, pipeline: HomologationPipeline) -> dict:
             or confidence < UMBRAL_REVISION
             or bool(adjustment.aplica and adjustment.requiere_revision)
             or bool(account.columnas_derivadas)
+            or bool(getattr(account, "requiere_revision_extraccion", False))
         )
         rows.append({
             "line": account.linea,
@@ -398,6 +507,9 @@ def _classify(accounts, pipeline: HomologationPipeline) -> dict:
             "method": classification.get("method", ""),
             "confidence": confidence,
             "review": review,
+            "extraction_review_reasons": list(
+                getattr(account, "razones_revision_extraccion", None) or []
+            ),
             "classification_ms": round(elapsed_ms, 3),
         })
     methods = Counter(row["method"] for row in rows)
@@ -412,6 +524,85 @@ def _classify(accounts, pipeline: HomologationPipeline) -> dict:
             sum(row["classification_ms"] for row in rows) / 1000, 3
         ),
         "rows": rows,
+    }
+
+
+def _document_family(accounts, *, requires_ocr: bool, classification: dict) -> str:
+    """Contrato estable de familias medibles, sin depender del nombre del archivo."""
+    details = [account for account in accounts if not account.es_total]
+    if requires_ocr:
+        return "escaneado_ocr"
+    coded = sum(bool(account.codigo) for account in details)
+    if details and coded / len(details) >= 0.5:
+        return "codificado"
+    audited = sum(
+        row.get("method") == "audited_statement_label"
+        for row in classification.get("rows", [])
+    )
+    if details and coded == 0 and audited:
+        return "ifrs_sin_codigo"
+    return "otro"
+
+
+def _family_metrics(accounts, *, requires_ocr: bool, classification: dict) -> dict:
+    family = _document_family(
+        accounts, requires_ocr=requires_ocr, classification=classification,
+    )
+    return {
+        "family": family,
+        "raw_detail_rows": sum(not account.es_total for account in accounts),
+        "coded_rows": sum(bool(account.codigo) for account in accounts if not account.es_total),
+        "suspicious_rows": sum(
+            bool(getattr(account, "requiere_revision_extraccion", False))
+            for account in accounts
+        ),
+        "audited_statement_label_rows": sum(
+            row.get("method") == "audited_statement_label"
+            for row in classification.get("rows", [])
+        ),
+        "classified_rows": int(classification.get("classified") or 0),
+        "automatic_rows": int(classification.get("automatic") or 0),
+        "review_rows": int(classification.get("review") or 0),
+    }
+
+
+def build_corpus_measurement(results: list[dict]) -> dict:
+    """Resume un corpus con denominador, hashes y familias reproducibles."""
+    documents = []
+    for result in sorted(results, key=lambda row: (row.get("file", ""), row.get("sha256", ""))):
+        metrics = result.get("family_metrics") or {}
+        documents.append({
+            "file": result.get("file", ""),
+            "sha256": result.get("sha256", ""),
+            "status": result.get("status", "error"),
+            "family": metrics.get("family", "no_evaluable"),
+            "raw_accounts": int(result.get("raw_accounts") or 0),
+            "certification_state": (
+                (result.get("certification") or {}).get("state") or "no_evaluable"
+            ),
+            "suspicious_rows": int(metrics.get("suspicious_rows") or 0),
+            "audited_statement_label_rows": int(
+                metrics.get("audited_statement_label_rows") or 0
+            ),
+        })
+    families = Counter(document["family"] for document in documents)
+    statuses = Counter(document["status"] for document in documents)
+    certification_states = Counter(
+        document["certification_state"] for document in documents
+    )
+    return {
+        "schema_version": 1,
+        "denominator_documents": len(documents),
+        "successful_documents": sum(row["status"] == "ok" for row in documents),
+        "status_counts": dict(sorted(statuses.items())),
+        "certification_state_counts": dict(sorted(certification_states.items())),
+        "timeout_documents": int(statuses.get("timeout", 0)),
+        "not_processed_documents": int(statuses.get("not_processed", 0)),
+        "failed_certification_documents": int(
+            certification_states.get("fallida", 0)
+        ),
+        "families": dict(sorted(families.items())),
+        "documents": documents,
     }
 
 
@@ -450,16 +641,25 @@ def evaluate_expectations(result: dict, expectations: dict) -> tuple[list[dict],
             expected = sorted(str(value) for value in expectations[field])
             add(field, actual, expected, actual == expected)
     if "final_totals_valid" in expectations:
-        actual = bool(
-            certification.get("state") == "certificada"
-            or certification.get("final_totals_valid")
-        )
+        actual = certification.get("final_totals_valid")
         expected = bool(expectations["final_totals_valid"])
         add("final_totals_valid", actual, expected, actual is expected)
     if "certification_state" in expectations:
         actual = certification.get("state")
         expected = expectations["certification_state"]
         add("certification_state", actual, expected, actual == expected)
+    if "certification_must_not_fail" in expectations:
+        actual = certification.get("state")
+        expected = bool(expectations["certification_must_not_fail"])
+        passed = (
+            actual in ALLOWED_REQUIRED_CERTIFICATION_STATES
+            if expected else actual == "fallida"
+        )
+        add("certification_must_not_fail", actual, expected, passed)
+    if "allowed_certification_states" in expectations:
+        actual = certification.get("state")
+        expected = list(expectations["allowed_certification_states"])
+        add("allowed_certification_states", actual, expected, actual in expected)
     if "result" in expectations:
         actual = certification.get("result")
         expected = expectations["result"]
@@ -555,6 +755,63 @@ def load_manifest(path: Path) -> list[dict]:
             Path(gold_file).is_absolute() or ".." in Path(gold_file).parts
         ):
             raise ValueError(f"Ruta Gold inválida para {case['file']}.")
+        required = bool(case.get("required_for_release", True))
+        expectations = case.get("expect")
+        if required and not isinstance(expectations, dict):
+            raise ValueError(
+                f"El caso obligatorio {case['file']} debe declarar 'expect'."
+            )
+        if required and not any(
+            key in expectations
+            for key in (
+                "certification_state", "certification_must_not_fail",
+                "allowed_certification_states",
+            )
+        ):
+            raise ValueError(
+                f"El caso obligatorio {case['file']} debe declarar "
+                "certification_state, certification_must_not_fail o "
+                "allowed_certification_states."
+            )
+        if (
+            required
+            and "certification_state" in expectations
+            and expectations.get("certification_state")
+            not in ALLOWED_REQUIRED_CERTIFICATION_STATES
+        ):
+            raise ValueError(
+                f"El caso obligatorio {case['file']} sólo puede aceptar "
+                f"{sorted(ALLOWED_REQUIRED_CERTIFICATION_STATES)}."
+            )
+        allowed_states = expectations.get("allowed_certification_states")
+        if required and allowed_states is not None and (
+            not isinstance(allowed_states, list)
+            or not allowed_states
+            or any(
+                state not in ALLOWED_REQUIRED_CERTIFICATION_STATES
+                for state in allowed_states
+            )
+        ):
+            raise ValueError(
+                f"El caso obligatorio {case['file']} sólo puede aceptar "
+                f"{sorted(ALLOWED_REQUIRED_CERTIFICATION_STATES)}."
+            )
+        if (
+            required
+            and "certification_must_not_fail" in expectations
+            and expectations["certification_must_not_fail"] is not True
+        ):
+            raise ValueError(
+                f"El caso obligatorio {case['file']} debe exigir "
+                "certification_must_not_fail=true."
+            )
+        if gold_file:
+            gold_schema = case.get("gold_schema_version")
+            if gold_schema not in {1, GOLD_SCHEMA_VERSION}:
+                raise ValueError(
+                    f"El caso Gold {case['file']} debe declarar "
+                    "gold_schema_version=1 o 2."
+                )
     if len(filenames) != len(set(filenames)):
         raise ValueError("El manifiesto contiene nombres de archivo duplicados.")
     return cases
@@ -578,7 +835,10 @@ def resolve_manifest_cases(root: Path, cases: list[dict]) -> list[tuple[Path, di
 
 def certify(path: Path, pipeline: HomologationPipeline) -> dict:
     started = time.perf_counter()
-    accounts, certification, warnings, ocr, rotation = _parse(path)
+    (
+        accounts, certification, warnings, ocr, rotation,
+        period_hints, currency_hints, monetary_units,
+    ) = _parse(path)
     parse_seconds = time.perf_counter() - started
     qualified = qualify_cuentas(accounts)
     origins = Counter(_serializable(account.origen_columna) for account in accounts)
@@ -587,7 +847,15 @@ def certify(path: Path, pipeline: HomologationPipeline) -> dict:
         for account in accounts
     )
     classification = _classify(qualified, pipeline)
-    periods, currencies = _detected_dimensions(accounts)
+    periods, currencies = _detected_dimensions(
+        accounts, period_hints, currency_hints,
+    )
+    if certification is not None and certification.metodo == "classified_totals" and certification.estado == "parcial":
+        certification = certificar_clasificado_final(
+            accounts, classification["rows"], periods, currencies,
+            codigos_validos=set(json.loads((PROJECT_ROOT / "catalogo_maestro.json").read_text(encoding="utf-8"))),
+            periodo_actual=str(period_hints[0]) if period_hints else None,
+        )
     accounts_by_line = {account.linea: account for account in accounts}
     inconsistent_accounts = []
     if certification is not None:
@@ -612,6 +880,7 @@ def certify(path: Path, pipeline: HomologationPipeline) -> dict:
         "origins": dict(origins),
         "detected_periods": periods,
         "detected_currencies": currencies,
+        "detected_monetary_units": monetary_units,
         "requires_ocr": ocr,
         "rotation": rotation,
         "parse_seconds": round(parse_seconds, 3),
@@ -633,14 +902,170 @@ def certify(path: Path, pipeline: HomologationPipeline) -> dict:
         "classification": classification,
         "elapsed_seconds": round(time.perf_counter() - started, 3),
     }
+    result["family_metrics"] = _family_metrics(
+        accounts, requires_ocr=ocr, classification=classification,
+    )
     result["accounts"] = _account_snapshot(accounts, classification)
     return result
+
+
+def _certify_worker(path_text: str, output_text: str) -> None:
+    """Ejecuta un documento fuera del proceso coordinador."""
+    if os.name == "posix":
+        # Tesseract y Poppler heredan este grupo. Así el coordinador puede
+        # terminar también los nietos si vence el presupuesto documental.
+        try:
+            os.setsid()
+        except OSError:
+            # La terminación conserva como fallback el PID del worker.
+            pass
+    path = Path(path_text)
+    output = Path(output_text)
+    try:
+        result = certify(path, HomologationPipeline())
+        envelope = {"ok": True, "result": result}
+    except BaseException as exc:  # noqa: BLE001 - frontera del subproceso
+        envelope = {
+            "ok": False,
+            "error_type": type(exc).__name__,
+            "error": str(exc),
+        }
+    # Un archivo evita bloquear el worker al transferir snapshots grandes por
+    # una cola de multiprocessing.
+    output.write_text(
+        json.dumps(envelope, ensure_ascii=False, default=str),
+        encoding="utf-8",
+    )
+
+
+def _terminate_process(process) -> None:
+    """Termina de forma acotada un worker que excedió su presupuesto."""
+    group_owned = False
+    if os.name == "posix" and getattr(process, "pid", None):
+        try:
+            group_id = os.getpgid(process.pid)
+            group_owned = group_id == process.pid
+            if group_owned:
+                os.killpg(group_id, signal.SIGTERM)
+        except ProcessLookupError:
+            return
+        except OSError:
+            group_owned = False
+    if not group_owned:
+        process.terminate()
+    process.join(5)
+    if process.is_alive() and hasattr(process, "kill"):
+        if group_owned:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        else:
+            process.kill()
+        process.join(5)
+
+
+def certify_isolated(
+    path: Path,
+    *,
+    timeout_seconds: int,
+    exchange_dir: Path,
+) -> dict:
+    """Certifica un documento con presupuesto duro y estado no ambiguo."""
+    if timeout_seconds <= 0:
+        raise ValueError("El timeout por documento debe ser mayor que cero.")
+    exchange = exchange_dir / (
+        "result-" + hashlib.sha256(str(path).encode()).hexdigest() + ".json"
+    )
+    exchange.unlink(missing_ok=True)
+    process = multiprocessing.get_context("spawn").Process(
+        target=_certify_worker,
+        args=(str(path), str(exchange)),
+        name=f"corpus-cert-{path.name[:40]}",
+    )
+    started = time.perf_counter()
+    process.start()
+    process.join(timeout_seconds)
+    elapsed = round(time.perf_counter() - started, 3)
+    if process.is_alive():
+        _terminate_process(process)
+        return {
+            "status": "timeout",
+            "processing_state": "timed_out",
+            "error_type": "DocumentTimeout",
+            "error": (
+                f"El documento excedió el presupuesto aislado de "
+                f"{timeout_seconds} segundos."
+            ),
+            "raw_accounts": 0,
+            "qualified_accounts": 0,
+            "requires_ocr": None,
+            "certification": {
+                "state": "timeout",
+                "method": "document_process_timeout",
+                "reasons": [
+                    "El procesamiento fue interrumpido por timeout; ninguna "
+                    "extracción parcial puede certificarse."
+                ],
+                "inconsistent_rows": [],
+                "inconsistent_accounts": [],
+                "final_totals_valid": None,
+                "result": None,
+                "result_type": None,
+                "differences": {},
+            },
+            "classification": {
+                "eligible": 0,
+                "classified": 0,
+                "automatic": 0,
+                "review": 0,
+                "unclassified": 0,
+                "methods": {},
+                "classification_seconds": 0.0,
+                "rows": [],
+            },
+            "warnings": ["Documento no procesado completamente por timeout."],
+            "elapsed_seconds": elapsed,
+            "family_metrics": {"family": "not_processed"},
+            "accounts": [],
+        }
+    if not exchange.exists():
+        return {
+            "status": "error",
+            "processing_state": "worker_failed",
+            "error_type": "WorkerExit",
+            "error": (
+                "El subproceso terminó sin producir un resultado "
+                f"(exitcode={process.exitcode})."
+            ),
+        }
+    envelope = json.loads(exchange.read_text(encoding="utf-8"))
+    exchange.unlink(missing_ok=True)
+    if not envelope.get("ok"):
+        return {
+            "status": "error",
+            "processing_state": "worker_failed",
+            "error_type": envelope.get("error_type") or "WorkerError",
+            "error": envelope.get("error") or "Error no especificado.",
+        }
+    result = dict(envelope["result"])
+    result["processing_state"] = "processed"
+    return result
+
+
+def _has_execution_failure(results: list[dict]) -> bool:
+    """Un timeout o documento no procesado nunca produce salida exitosa."""
+    return any(row.get("status") != "ok" for row in results)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("input", type=Path)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--measurement-output", type=Path,
+        help="Escribe una medición determinista con denominador, hashes y familias.",
+    )
     parser.add_argument("--env-file", type=Path)
     parser.add_argument(
         "--manifest", type=Path,
@@ -657,6 +1082,14 @@ def main() -> int:
     parser.add_argument(
         "--gold-root", type=Path,
         help="Directorio privado desde el cual resolver gold_file del manifiesto.",
+    )
+    parser.add_argument(
+        "--document-timeout-seconds", type=int,
+        default=DEFAULT_DOCUMENT_TIMEOUT_SECONDS,
+        help=(
+            "Presupuesto duro por documento en un subproceso aislado "
+            f"(por defecto: {DEFAULT_DOCUMENT_TIMEOUT_SECONDS}s)."
+        ),
     )
     args = parser.parse_args()
     if args.env_file:
@@ -676,7 +1109,6 @@ def main() -> int:
         )
         jobs = [(path, {}) for path in paths]
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    pipeline = HomologationPipeline()
     results = []
     with tempfile.TemporaryDirectory(prefix="balance-cert-") as temp_dir:
         for position, (path, case) in enumerate(jobs, 1):
@@ -693,7 +1125,11 @@ def main() -> int:
                     parsed_path.write_bytes(
                         select_pdf(path.read_bytes(), selected_pages)
                     )
-                result = certify(parsed_path, pipeline)
+                result = certify_isolated(
+                    parsed_path,
+                    timeout_seconds=args.document_timeout_seconds,
+                    exchange_dir=Path(temp_dir),
+                )
                 result["file"] = path.name
                 result["path"] = str(path)
                 result["sha256"] = _sha256(path)
@@ -703,29 +1139,40 @@ def main() -> int:
                     if case.get("gold_file"):
                         gold_root = args.gold_root or args.manifest.parent
                         gold_path = gold_root / case["gold_file"]
-                        expectations["_gold_rows"] = load_gold_rows(gold_path)
+                        expectations["_gold_rows"] = load_gold_rows(
+                            gold_path,
+                            schema_version=int(case["gold_schema_version"]),
+                        )
                     checks, passed = evaluate_expectations(result, expectations)
                     result["expectation_checks"] = checks
                     result["expectations_passed"] = passed
                     result["required_for_release"] = bool(
                         case.get("required_for_release", True)
                     )
-                print(
-                    "  "
-                    f"cuentas={result['raw_accounts']} "
-                    f"cert={result['certification']['state'] if result['certification'] else 'n/a'} "
-                    f"auto={result['classification']['automatic']} "
-                    f"revision={result['classification']['review']} "
-                    f"tiempo={result['elapsed_seconds']}s",
-                    flush=True,
-                )
+                if result.get("status") == "ok":
+                    print(
+                        "  "
+                        f"cuentas={result['raw_accounts']} "
+                        f"cert={result['certification']['state'] if result['certification'] else 'n/a'} "
+                        f"auto={result['classification']['automatic']} "
+                        f"revision={result['classification']['review']} "
+                        f"tiempo={result['elapsed_seconds']}s",
+                        flush=True,
+                    )
+                else:
+                    print(
+                        "  "
+                        f"{str(result.get('status')).upper()} "
+                        f"{result.get('error_type')}: {result.get('error')}",
+                        flush=True,
+                    )
                 if "expectations_passed" in result:
                     print(
                         "  expectativas="
                         f"{'PASA' if result['expectations_passed'] else 'FALLA'}",
                         flush=True,
                     )
-                if args.write_gold_candidates:
+                if args.write_gold_candidates and result.get("status") == "ok":
                     candidate = write_gold_candidate(
                         result, args.write_gold_candidates,
                     )
@@ -742,7 +1189,16 @@ def main() -> int:
                 json.dumps(results, ensure_ascii=False, indent=2, default=str),
                 encoding="utf-8",
             )
-    failed = any(row["status"] == "error" for row in results)
+    if args.measurement_output:
+        args.measurement_output.parent.mkdir(parents=True, exist_ok=True)
+        args.measurement_output.write_text(
+            json.dumps(
+                build_corpus_measurement(results), ensure_ascii=False,
+                indent=2, sort_keys=True,
+            ) + "\n",
+            encoding="utf-8",
+        )
+    failed = _has_execution_failure(results)
     failed = failed or any(
         row.get("required_for_release", True)
         and row.get("expectations_passed") is False

@@ -131,10 +131,11 @@ def test_naviera_orca_pdf(parser):
 
     res = parser.parsear(pdf_path)
     assert len(res.cuentas) > 5
+    assert res.monedas_detectadas == ["USD"]
     assert any(
-        "CLP" in c.montos_periodos or "USD" in c.montos_periodos
+        "USD" in c.montos_periodos
         for c in res.cuentas
-    ), "Should populate currency keys in montos_periodos"
+    ), "Should populate the unequivocal USD key in montos_periodos"
 
 
 def test_inagal_excel():
@@ -171,7 +172,22 @@ def test_agricola_general_excel():
     certification = certificar_extraccion_columnas(
         cuentas, metodo="excel_8_columns",
     )
-    assert certification.estado == "certificada"
+    control_resultado = next(c for c in cuentas if c.nombre == "Pérdidas / Ganancias")
+    assert control_resultado.es_total, (
+        control_resultado.linea,
+        control_resultado.monto,
+        control_resultado.montos_columnas,
+    )
+    assert certification.estado == "certificada", (
+        certification.razones,
+        certification.diferencias,
+        certification.filas_evaluadas,
+        certification.filas_inconsistentes,
+        [
+            (c.linea, c.codigo, c.nombre, c.monto, c.es_total, c.montos_columnas)
+            for c in cuentas if c.linea in certification.filas_inconsistentes
+        ],
+    )
     assert all(value == 0 for value in certification.diferencias.values())
 
 

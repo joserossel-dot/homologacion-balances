@@ -153,8 +153,9 @@ def test_ui_persiste_validacion_individual_y_limpia_cache(monkeypatch):
         "source": "validacion_humana",
         "suggested_code": "AC.02",
         "suggested_method": "regex",
-        "suggested_confidence": 0.7,
-        "source_file": "balance.pdf",
+            "suggested_confidence": 0.7,
+            "reviewer": "anonymous_staging",
+            "source_file": "balance.pdf",
         "add_to_dictionary": True,
     }
     assert cache_clears == [True]

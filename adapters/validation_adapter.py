@@ -21,14 +21,19 @@ class ValidationAdapter:
         if ctx.parser and ctx.parser.raw_accounts:
             raw_accounts = [r.to_dict() if hasattr(r, "to_dict") else {"codigo": getattr(r, "codigo", ""), "nombre": getattr(r, "nombre", "")} for r in ctx.parser.raw_accounts]
 
-        vr = self._validator.validate(
-            source_file=Path(ctx.source_file).name,
-            accounts_raw=raw_accounts,
-            accounts_classified=classified,
-            accounts_ignored=ignored,
+        pipeline_result = dict(ctx.get_custom("pipeline_v1_result") or {})
+        pipeline_result.update({
+            "source_file": Path(ctx.source_file).name,
+            "classified": classified,
+            "ignored": ignored,
+            "raw_accounts": raw_accounts,
+        })
+        vr = self._validator.validate_from_pipeline(
+            pipeline_result,
             company=metadata.company if metadata else "",
             year=metadata.year if metadata else 0,
             pages=metadata.pages if metadata else 0,
+            format_family=pipeline_result.get("document_family", ""),
         )
 
         validation = ValidationData(
