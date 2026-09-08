@@ -3660,6 +3660,13 @@ def marcar_subtotales_jerarquicos(cuentas: list[CuentaRaw]) -> int:
             continue
         sig_prefix = raw_prefix.rstrip("0")
         prefix = sig_prefix if len(sig_prefix) >= 1 and len(raw_prefix) > len(sig_prefix) else raw_prefix
+        # Un cero puede pertenecer al código real de la sección (3210), no
+        # ser relleno. Si hay descendencia literal contigua, conservarlo evita
+        # absorber al hermano 3211 y perder después los controles ancestros.
+        adjacent_codes = codes[max(0, i - 1):i] + codes[i + 1:i + 2]
+        if any(value.startswith(raw_prefix) and len(value) > len(raw_prefix)
+               for value in adjacent_codes):
+            prefix = raw_prefix
         children = []
         # Buscar hacia adelante (padre antes de hijos)
         for j in range(i + 1, len(cuentas)):

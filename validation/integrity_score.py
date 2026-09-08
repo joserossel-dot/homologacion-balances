@@ -85,7 +85,8 @@ def compute_subtotal_score(subtotal_results: list[SubtotalResult]) -> float:
 
 def compute_equation_score(equation_results: list[EquationResult]) -> float:
     if not equation_results:
-        return 100.0
+        # No equations evaluated is absence of evidence, not perfect integrity.
+        return 0.0
 
     passed = sum(1 for r in equation_results if r.passed)
     total = len(equation_results)

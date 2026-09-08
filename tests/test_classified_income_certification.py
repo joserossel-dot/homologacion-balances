@@ -104,3 +104,115 @@ def test_aggregate_overflow_does_not_certify():
     accounts[6].montos_periodos["2023"] = 1e308
     accounts[7].montos_periodos["2023"] = 1e308
     assert certify(accounts, rows).estado != "certificada"
+
+
+def legacy_income_tree(printed=None):
+    from validation.models import AccountNode, HierarchyTree
+    nodes = [AccountNode(account_name="Ingresos", amount=200, naturaleza="INGRESOS"),
+             AccountNode(account_name="Costo de ventas", amount=100, naturaleza="COSTOS"),
+             AccountNode(account_name="Administración", amount=30, naturaleza="GASTOS")]
+    if printed is not None:
+        nodes.append(AccountNode(account_name="Ganancia (pérdida) del ejercicio",
+                                 amount=printed, es_total=True))
+    return HierarchyTree(all_nodes=nodes)
+
+
+def test_legacy_income_without_printed_control_does_not_validate_itself():
+    from validation.equation_validator import validate_balance_equation
+    result = validate_balance_equation(legacy_income_tree())[0]
+    assert result.passed is False
+    assert result.left_components == {}
+    assert "no verificable" in result.equation
+
+
+@pytest.mark.parametrize("printed,passed,difference", [(70, True, 0), (90, False, 20)])
+def test_legacy_income_compares_against_independent_printed_control(printed, passed, difference):
+    from validation.equation_validator import validate_balance_equation
+    result = validate_balance_equation(legacy_income_tree(printed))[0]
+    assert result.passed is passed
+    assert result.left_side == printed
+    assert result.right_side == 70
+    assert result.difference == difference
+
+
+def test_legacy_duplicate_result_controls_do_not_choose_first():
+    from validation.equation_validator import validate_balance_equation
+    from validation.models import AccountNode
+    tree = legacy_income_tree(70)
+    tree.all_nodes.append(AccountNode(account_name="Resultado del ejercicio", amount=99, es_total=True))
+    assert validate_balance_equation(tree)[0].passed is False
+
+
+def test_legacy_subtotals_are_excluded_from_income_sum():
+    from validation.equation_validator import validate_balance_equation
+    from validation.models import AccountNode
+    tree = legacy_income_tree(70)
+    tree.all_nodes.append(AccountNode(account_name="Subtotal ingresos", amount=200,
+                                     naturaleza="INGRESOS", es_subtotal=True))
+    assert validate_balance_equation(tree)[0].passed is True
+
+
+@pytest.mark.parametrize("invalid", [float("nan"), float("inf"), -100])
+def test_legacy_nonfinite_or_unaccredited_signed_details_do_not_pass(invalid):
+    from validation.equation_validator import validate_balance_equation
+    tree = legacy_income_tree(70)
+    tree.all_nodes[1].amount = invalid
+    assert validate_balance_equation(tree)[0].passed is False
+
+
+@pytest.mark.parametrize("nature", ["RESULTADO", "GANANCIA", "PERDIDA", ""])
+def test_unmapped_income_component_is_not_silently_omitted(nature):
+    from validation.equation_validator import validate_balance_equation
+    from validation.models import AccountNode
+    tree = legacy_income_tree(70)
+    tree.all_nodes.append(AccountNode(account_name="Impuesto a la renta", amount=40, naturaleza=nature))
+    assert validate_balance_equation(tree)[0].passed is False
+
+
+def test_real_hierarchy_tax_columns_do_not_receive_perfect_equation_score():
+    from validation.hierarchy import build_hierarchy
+    from validation.equation_validator import validate_balance_equation
+    from validation.integrity_score import compute_equation_score
+    tree = build_hierarchy([
+        dict(nombre="Ventas", monto=100, origen_columna="GANANCIA"),
+        dict(nombre="Arriendos", monto=30, origen_columna="PERDIDA"),
+        dict(nombre="Utilidad del ejercicio", monto=99, es_total=True),
+    ])
+    results = validate_balance_equation(tree)
+    assert results and all(not result.passed for result in results)
+    assert compute_equation_score(results) == 0
+    assert compute_equation_score([]) == 0
+
+
+def test_loss_net_control_is_recognized_without_assuming_positive_loss_sign():
+    from validation.equation_validator import validate_balance_equation
+    tree = legacy_income_tree(-30)
+    tree.all_nodes[0].amount = 100
+    tree.all_nodes[-1].account_name = "Pérdida del ejercicio"
+    result = validate_balance_equation(tree)[0]
+    assert result.passed is True
+    assert result.left_side == result.right_side == -30
+
+
+def test_intermediate_loss_control_does_not_replace_net_result():
+    from validation.equation_validator import validate_balance_equation
+    tree = legacy_income_tree(70)
+    tree.all_nodes[-1].account_name = "Pérdida antes de impuestos"
+    assert validate_balance_equation(tree)[0].passed is False
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), -float("inf")])
+def test_all_equation_results_are_strict_json_serializable(bad):
+    import json
+    from dataclasses import asdict
+    from validation.equation_validator import validate_balance_equation
+    from validation.models import AccountNode
+    tree = legacy_income_tree(70)
+    tree.all_nodes[1].amount = bad
+    tree.all_nodes.extend([
+        AccountNode(account_name="Activo", amount=float("inf"), naturaleza="ACTIVO"),
+        AccountNode(account_name="Pasivo", amount=10, naturaleza="PASIVO"),
+    ])
+    results = validate_balance_equation(tree)
+    assert all(not result.passed for result in results)
+    json.dumps([asdict(result) for result in results], allow_nan=False)

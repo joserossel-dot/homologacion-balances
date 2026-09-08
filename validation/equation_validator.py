@@ -1,5 +1,7 @@
 from __future__ import annotations
 import re
+import math
+import unicodedata
 from .models import EquationResult, HierarchyTree
 
 
@@ -32,6 +34,8 @@ def _find_section_total(
 
 
 def validate_balance_equation(tree: HierarchyTree, tolerance: float = 1.0) -> list[EquationResult]:
+    if not math.isfinite(tolerance) or tolerance < 0:
+        raise ValueError("La tolerancia debe ser finita y no negativa")
     results = []
 
     active_total = 0.0
@@ -68,11 +72,19 @@ def validate_balance_equation(tree: HierarchyTree, tolerance: float = 1.0) -> li
     income = 0.0
     costs = 0.0
     expenses = 0.0
+    income_details = []
+    unaccounted_details = []
 
     for node in tree.all_nodes:
-        if node.es_header or node.es_total:
+        if node.es_header or node.es_total or node.es_subtotal:
             continue
         nature = node.naturaleza
+        if nature in {"INGRESOS", "COSTOS", "GASTOS"}:
+            income_details.append(node)
+        elif not nature.startswith(("ACTIVO", "PASIVO", "PATRIMONIO")):
+            # RESULTADO, GANANCIA and PERDIDA are emitted by build_hierarchy;
+            # without a component mapping they cannot silently disappear.
+            unaccounted_details.append(node)
         if nature == "INGRESOS":
             income += node.amount
         elif nature == "COSTOS":
@@ -80,18 +92,45 @@ def validate_balance_equation(tree: HierarchyTree, tolerance: float = 1.0) -> li
         elif nature == "GASTOS":
             expenses += node.amount
 
-    if income > 0 or costs > 0 or expenses > 0:
-        result_val = income - costs - expenses
+    if income_details or unaccounted_details:
+        def normalized_name(name: str) -> str:
+            ascii_name = "".join(
+                char for char in unicodedata.normalize("NFD", name.lower())
+                if unicodedata.category(char) != "Mn"
+            )
+            return re.sub(r"\s+", " ", re.sub(r"[^a-z ]", " ", ascii_name)).strip()
+
+        controls = [node for node in tree.all_nodes
+                    if (node.es_total or node.es_subtotal)
+                    and normalized_name(node.account_name) in {
+                        "resultado del ejercicio", "utilidad del ejercicio",
+                        "ganancia perdida del ejercicio", "ganancia perdida",
+                        "resultado del periodo", "utilidad neta",
+                        "perdida del ejercicio", "perdida del periodo", "perdida neta",
+                    }]
+        # No sign-convention metadata exists on this legacy tree. Negative
+        # expenses may be legitimate; they remain unevaluable in this path.
+        usable = (
+            len(controls) == 1
+            and bool(income_details) and not unaccounted_details
+            and all(math.isfinite(node.amount) and node.amount >= 0 for node in income_details)
+            and math.isfinite(controls[0].amount)
+        )
         right_side_val = income - costs - expenses
-        passed = True
+        usable = usable and math.isfinite(right_side_val)
+        result_val = controls[0].amount if usable else 0.0
+        difference = result_val - right_side_val if usable else 0.0
+        passed = usable and math.isfinite(difference) and abs(difference) <= tolerance
 
         result = EquationResult(
-            equation="Resultado = Ingresos - Costos - Gastos",
+            equation=("Resultado = Ingresos - Costos - Gastos" if usable else
+                      "Resultado no verificable: control, cobertura o convención pendientes; "
+                      "diferencia no calculada (ceros de representación)"),
             left_side=result_val,
-            right_side=right_side_val,
-            difference=0.0,
-            left_components={"Resultado": result_val},
-            right_components={"Ingresos": income, "Costos": costs, "Gastos": expenses},
+            right_side=right_side_val if math.isfinite(right_side_val) else 0.0,
+            difference=difference,
+            left_components={"Resultado impreso": result_val} if usable else {},
+            right_components={"Ingresos": income, "Costos": costs, "Gastos": expenses} if usable else {},
             passed=passed,
         )
         results.append(result)
@@ -152,4 +191,13 @@ def validate_balance_equation(tree: HierarchyTree, tolerance: float = 1.0) -> li
         )
         results.append(result)
 
+    for result in results:
+        values = [result.left_side, result.right_side, result.difference,
+                  *result.left_components.values(), *result.right_components.values()]
+        if not all(math.isfinite(value) for value in values):
+            result.passed = False
+            result.equation += ": no verificable por importes no finitos; diferencia no calculada"
+            result.left_side = result.right_side = result.difference = 0.0
+            result.left_components = {}
+            result.right_components = {}
     return results
