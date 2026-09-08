@@ -93,3 +93,4 @@ datasets/**/*.xls
 
 # Entorno
 .env.*
+!deployment/onprem/.env.example
