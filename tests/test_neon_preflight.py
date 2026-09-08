@@ -1,6 +1,8 @@
 import re
 from pathlib import Path
 
+import yaml
+
 
 ROOT = Path(__file__).parents[1]
 CANDIDATE_BRANCH = "codex/mejoras-pendientes-20260826"
@@ -77,3 +79,18 @@ def test_release_gate_exige_neon_y_despliega_el_commit_certificado():
     assert "secrets.RENDER_SERVICE_ID" in source
     assert "poetry run python scripts/deploy_certified_render.py" in source
     assert "DEPLOYED_COMMIT=$GITHUB_SHA" in source
+
+
+def test_release_gate_limita_database_url_a_pasos_neon():
+    workflow = yaml.safe_load(
+        (ROOT / ".github" / "workflows" / "release-gate.yml").read_text()
+    )
+    certify = workflow["jobs"]["certify"]
+    assert "env" not in certify
+    steps = {
+        step["name"]: step for step in certify["steps"] if "name" in step
+    }
+    for name in ("Require Neon secret", "Verify Neon and pipeline knowledge"):
+        assert steps[name]["env"]["DATABASE_URL"] == (
+            "${{ secrets.NEON_DATABASE_URL }}"
+        )

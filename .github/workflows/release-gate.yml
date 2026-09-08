@@ -53,8 +53,6 @@ jobs:
       - onprem-package
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    env:
-      DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -94,8 +92,12 @@ jobs:
               print(f"{path}: {required} caso(s) obligatorio(s) validados")
           PY
       - name: Require Neon secret
+        env:
+          DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
         run: test -n "$DATABASE_URL"
       - name: Verify Neon and pipeline knowledge
+        env:
+          DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
         run: poetry run python scripts/neon_preflight.py
       - name: Require Render deployment secrets
         env:
