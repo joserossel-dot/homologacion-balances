@@ -178,3 +178,21 @@ def test_attestation_rejects_expired_replay(tmp_path):
             attestation=attestation, manifests=[manifest], commit_sha="a" * 40,
             public_key=public_key, now=issued_at + timedelta(hours=2),
         )
+
+
+def test_attestation_rejects_future_issued_at(tmp_path):
+    private_key, public_key = _keys(tmp_path)
+    manifest, report = _inputs(tmp_path)
+    attestation = tmp_path / "attestation.json"
+    verification_time = datetime(2026, 8, 29, 12, tzinfo=timezone.utc)
+    create_attestation(
+        report=report, manifests=[manifest], commit_sha="a" * 40,
+        private_key=private_key, output=attestation,
+        now=verification_time + timedelta(days=30),
+    )
+
+    with pytest.raises(ValueError, match="emisión futura"):
+        verify_attestation(
+            attestation=attestation, manifests=[manifest], commit_sha="a" * 40,
+            public_key=public_key, now=verification_time,
+        )

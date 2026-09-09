@@ -15,6 +15,17 @@ sys.path.insert(0, str(ROOT))
 from persistence.neon_store import NeonKnowledgeStore
 from pipeline.homologation_pipeline import HomologationPipeline
 
+
+def checks_pass(checks: dict) -> bool:
+    return bool(
+        checks["neon"]
+        and checks["history_accessible"]
+        and checks["conflicts_accessible"]
+        and checks["catalog_entries"] >= 62
+        and checks["dictionary_entries"] >= 876
+        and checks["pipeline_dictionary_entries"] == checks["dictionary_entries"]
+    )
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -44,11 +55,7 @@ def main() -> int:
         "history_accessible": isinstance(store.dictionary_history(1), list),
         "conflicts_accessible": isinstance(store.conflicts(), list),
     }
-    ok = (
-        checks["catalog_entries"] >= 62
-        and checks["dictionary_entries"] >= 876
-        and checks["pipeline_dictionary_entries"] == checks["dictionary_entries"]
-    )
+    ok = checks_pass(checks)
     print(json.dumps(checks, ensure_ascii=False, sort_keys=True))
     print("PASS" if ok else "FAIL")
     return 0 if ok else 4

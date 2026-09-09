@@ -3,9 +3,30 @@ from pathlib import Path
 
 import yaml
 
+from scripts.neon_preflight import checks_pass
+
 
 ROOT = Path(__file__).parents[1]
 CANDIDATE_BRANCH = "codex/mejoras-pendientes-20260826"
+
+
+def _healthy_preflight_checks():
+    return {
+        "neon": True,
+        "catalog_entries": 62,
+        "dictionary_entries": 876,
+        "pipeline_dictionary_entries": 876,
+        "history_accessible": True,
+        "conflicts_accessible": True,
+    }
+
+
+def test_preflight_exige_historial_y_conflictos_accesibles():
+    checks = _healthy_preflight_checks()
+    assert checks_pass(checks)
+    for key in ("history_accessible", "conflicts_accessible"):
+        unavailable = dict(checks, **{key: False})
+        assert not checks_pass(unavailable)
 
 
 def test_preflight_no_expone_database_url():
@@ -94,3 +115,17 @@ def test_release_gate_limita_database_url_a_pasos_neon():
         assert steps[name]["env"]["DATABASE_URL"] == (
             "${{ secrets.NEON_DATABASE_URL }}"
         )
+
+
+def test_release_manual_no_despliega_desde_otra_rama_y_revalida_head():
+    workflow = yaml.safe_load(
+        (ROOT / ".github" / "workflows" / "release-gate.yml").read_text()
+    )
+    certify = workflow["jobs"]["certify"]
+    assert certify["if"] == (
+        "github.ref == 'refs/heads/codex/mejoras-pendientes-20260826'"
+    )
+    names = [step.get("name") for step in certify["steps"]]
+    assert names.index("Verify signed private corpus recertification") < names.index(
+        "Recheck branch head immediately before deployment"
+    ) < names.index("Deploy exact certified commit to Render")

@@ -6,7 +6,7 @@
       "file": "230531 Informe Estado de Situación Financiera ABS 2022 - 2021 Def.pdf",
       "pages": [8, 9, 10],
       "gold_file": "230531_ABS_2022_2021.reviewed.xlsx",
-      "gold_schema_version": 1,
+      "gold_schema_version": 2,
       "required_for_release": true,
       "expect": {
         "allowed_certification_states": ["certificada"],
@@ -22,7 +22,7 @@
       "file": "Balance Auditado Cosemar 2015-2016 IFRS.pdf",
       "pages": [4, 5, 6],
       "gold_file": "Balance_Auditado_Cosemar_2015-2016_IFRS.reviewed.xlsx",
-      "gold_schema_version": 1,
+      "gold_schema_version": 2,
       "required_for_release": true,
       "expect": {
         "allowed_certification_states": ["certificada"],
@@ -38,7 +38,7 @@
       "file": "EEFF 2018 Purefruit S A.pdf",
       "pages": [5, 6],
       "gold_file": "EEFF_2018_Purefruit_S_A.reviewed.xlsx",
-      "gold_schema_version": 1,
+      "gold_schema_version": 2,
       "required_for_release": true,
       "expect": {
         "allowed_certification_states": ["certificada"],

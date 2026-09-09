@@ -19,6 +19,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ATTESTATION_SCHEMA = 1
+MAX_CLOCK_SKEW = timedelta(minutes=5)
 
 
 def _sha256(path: Path) -> str:
@@ -180,13 +181,25 @@ def verify_attestation(
     if payload.get("commit_sha") != commit_sha:
         raise ValueError("La atestación pertenece a otro commit.")
     try:
+        created_at = datetime.fromisoformat(str(payload["created_at"]))
         expires_at = datetime.fromisoformat(str(payload["expires_at"]))
     except (KeyError, TypeError, ValueError) as exc:
-        raise ValueError("La atestación no declara una expiración válida.") from exc
+        raise ValueError("La atestación no declara fechas válidas.") from exc
     verification_time = now or datetime.now(timezone.utc)
     if verification_time.tzinfo is None:
         raise ValueError("La fecha de verificación debe incluir zona horaria.")
-    if verification_time.astimezone(timezone.utc) >= expires_at.astimezone(timezone.utc):
+    if created_at.tzinfo is None or expires_at.tzinfo is None:
+        raise ValueError("Las fechas de la atestación deben incluir zona horaria.")
+    verification_time = verification_time.astimezone(timezone.utc)
+    created_at = created_at.astimezone(timezone.utc)
+    expires_at = expires_at.astimezone(timezone.utc)
+    if created_at > verification_time + MAX_CLOCK_SKEW:
+        raise ValueError("La atestación declara una fecha de emisión futura.")
+    if expires_at <= created_at:
+        raise ValueError("La atestación declara una vigencia inválida.")
+    if expires_at - created_at > timedelta(hours=168):
+        raise ValueError("La atestación excede la vigencia máxima permitida.")
+    if verification_time >= expires_at:
         raise ValueError("La atestación expiró y no puede reutilizarse.")
     current_manifests = [
         {"name": path.name, "sha256": _sha256(path)} for path in manifests

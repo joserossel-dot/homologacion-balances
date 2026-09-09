@@ -6,6 +6,7 @@
       "file": "parque_cultural_valparaiso_2024.pdf",
       "required_for_release": true,
       "expect": {
+        "sha256": "8d434a6053e806c2093f63b0ac6c0658058d3f77bf1b26a196e42c92bbd87782",
         "certification_state": "certificada",
         "final_totals_valid": true
       }
@@ -15,6 +16,7 @@
       "pages": [1],
       "required_for_release": true,
       "expect": {
+        "sha256": "966d0fe514892585715cdd31625da46ea1b48fcb100a556a28811b4958b07e3c",
         "certification_state": "certificada",
         "final_totals_valid": true
       }
@@ -23,6 +25,7 @@
       "file": "afuminsal_2016.pdf",
       "required_for_release": true,
       "expect": {
+        "sha256": "b200cab1f4c70e35369c5a4d14610d8a00f6c97a5ed1d9228acb9cb49fea97f1",
         "certification_state": "certificada",
         "final_totals_valid": true,
         "result": 9910945,

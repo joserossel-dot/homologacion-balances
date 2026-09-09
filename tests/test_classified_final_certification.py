@@ -83,6 +83,55 @@ def test_unverified_extraction_and_unknown_controls_block():
     assert certify(accounts, rows).estado == "parcial"
 
 
+def test_native_fragment_reconstruction_certifies_only_after_all_controls_match():
+    accounts, rows = case()
+    for account in accounts:
+        account.confianza_extraccion = 0.75
+
+    result = certificar_clasificado_final(
+        accounts, rows, ["2024", "2023"], ["CLP"],
+        codigos_validos={"AC.01", "AC.02", "PC.01", "PAT.01"},
+        periodo_actual="2024",
+        metodo_extraccion_fuente="native_fragment_reconstruction",
+    )
+
+    assert result.estado == "certificada"
+    assert result.totales_finales_validos is True
+    assert "Texto nativo fragmentado acreditado" in result.razones[0]
+
+
+def test_native_fragment_attestation_never_hides_monetary_difference():
+    accounts, rows = case()
+    for account in accounts:
+        account.confianza_extraccion = 0.75
+    accounts[0].montos_periodos["2023"] = 99
+
+    result = certificar_clasificado_final(
+        accounts, rows, ["2024", "2023"], ["CLP"],
+        codigos_validos={"AC.01", "AC.02", "PC.01", "PAT.01"},
+        periodo_actual="2024",
+        metodo_extraccion_fuente="native_fragment_reconstruction",
+    )
+
+    assert result.estado == "fallida"
+    assert result.diferencias["2023:ecuacion"] == -1
+
+
+def test_ocr_low_confidence_cannot_use_native_fragment_attestation():
+    accounts, rows = case()
+    for account in accounts:
+        account.confianza_extraccion = 0.75
+
+    result = certificar_clasificado_final(
+        accounts, rows, ["2024", "2023"], ["CLP"],
+        codigos_validos={"AC.01", "AC.02", "PC.01", "PAT.01"},
+        periodo_actual="2024",
+        metodo_extraccion_fuente="ocr_coordinates_8_amounts",
+    )
+
+    assert result.estado == "parcial"
+
+
 def test_nonfinite_values_and_unknown_currency_block():
     accounts, rows = case()
     accounts[0].montos_periodos["2023"] = float("nan")

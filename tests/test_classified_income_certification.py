@@ -73,6 +73,34 @@ def test_missing_or_duplicate_income_controls_block():
     assert certify(accounts, rows).estado == "parcial"
 
 
+def test_comprehensive_income_accepts_equal_net_carry_forward_and_zero_oci():
+    accounts, rows = statement()
+    net = accounts[-1]
+    accounts.extend([
+        CuentaRaw(16, None, "Ganancia (pérdida)", net.monto, es_total=True,
+            montos_periodos=dict(net.montos_periodos)),
+        CuentaRaw(17, None, "Otro resultado integral", 0, es_total=False,
+            montos_periodos={"2024": 0, "2023": 0}),
+        CuentaRaw(18, None, "Total resultado integral", net.monto, es_total=True,
+            montos_periodos=dict(net.montos_periodos)),
+    ])
+
+    result = certify(accounts, rows)
+
+    assert result.estado == "certificada"
+    assert result.diferencias["2024:ER_TCI_EQUATION"] == 0
+
+
+def test_comprehensive_income_rejects_different_net_carry_forward():
+    accounts, rows = statement()
+    accounts.append(CuentaRaw(
+        16, None, "Ganancia (pérdida)", 999, es_total=True,
+        montos_periodos={"2024": 999, "2023": 999},
+    ))
+
+    assert certify(accounts, rows).estado == "parcial"
+
+
 def test_nonzero_discontinued_result_needs_independent_detail():
     accounts, rows = statement()
     accounts[13].montos_periodos["2023"] = 5

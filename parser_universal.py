@@ -2068,6 +2068,7 @@ def certificar_clasificado_final(
     cuentas: list[CuentaRaw], clasificaciones: list[dict],
     periodos: list[str], monedas: list[str], tolerancia_absoluta: float = 0.0,
     *, codigos_validos: Optional[set[str]] = None, periodo_actual: Optional[str] = None,
+    metodo_extraccion_fuente: Optional[str] = None,
 ) -> CertificacionExtraccion:
     """Certifica detalle de balance por sección y año después de clasificar.
 
@@ -2129,7 +2130,13 @@ def certificar_clasificado_final(
             return "ER_CONTINUING"
         if name in {"ganancia perdida procedente de operaciones discontinuadas", "ganancia procedente de operaciones discontinuadas", "resultado de operaciones discontinuadas"}:
             return "ER_DISCONTINUED"
-        if re.fullmatch(r"(?:otro )?resultado integral(?: total)?", name) or name in {"otros resultados integrales", "otro resultado integral"}:
+        if (
+            re.fullmatch(r"(?:otro )?resultado integral(?: total)?", name)
+            or name in {
+                "otros resultados integrales", "otro resultado integral",
+                "total resultado integral",
+            }
+        ):
             return "ER_OCI" if "otro" in name else "ER_COMPREHENSIVE"
         if "atribuible a" in name:
             is_nci = any(k in name for k in ("no controlad", "minoritari"))
@@ -2155,6 +2162,7 @@ def certificar_clasificado_final(
     income_rows = []
     attrib_net_rows = []
     income_controls = {}
+    filas_confianza_reducida: list[int] = []
     for account in cuentas:
         if account.monto is None:
             if not section(account.nombre):
@@ -2163,18 +2171,34 @@ def certificar_clasificado_final(
         if (
             account.columnas_derivadas or account.requiere_revision_extraccion
             or not math.isfinite(account.confianza_extraccion)
-            or account.confianza_extraccion < 0.9
             or not math.isfinite(float(account.monto))
         ):
             reasons.append(f"Fila {account.linea}: evidencia de extracción pendiente de revisión.")
+        elif account.confianza_extraccion < 0.9:
+            filas_confianza_reducida.append(account.linea)
         if account.monto != account.montos_periodos.get(periodo_actual):
             reasons.append(f"Fila {account.linea}: monto principal distinto del período declarado.")
-        if account.es_total:
-            income_key = income_control(account.nombre)
+        income_key = income_control(account.nombre)
+        if account.es_total or income_key == "ER_OCI":
             if income_key:
                 if income_key in income_controls:
-                    reasons.append(f"Control de resultados duplicado: {income_key}.")
-                income_controls[income_key] = account
+                    prior = income_controls[income_key]
+                    same_amounts = all(
+                        prior.montos_periodos.get(year)
+                        == account.montos_periodos.get(year)
+                        for year in years
+                    )
+                    if (
+                        income_key == "ER_NET"
+                        and "ER_NET_CARRY_FORWARD" not in income_controls
+                        and same_amounts
+                        and prior.linea < account.linea
+                    ):
+                        income_controls["ER_NET_CARRY_FORWARD"] = account
+                    else:
+                        reasons.append(f"Control de resultados duplicado: {income_key}.")
+                else:
+                    income_controls[income_key] = account
                 continue
             key = section(account.nombre)
             if not key:
@@ -2234,6 +2258,19 @@ def certificar_clasificado_final(
                     reasons.append("Control de operaciones continuadas/discontinuadas fuera de orden.")
             if continuation and discontinued and continuation.linea >= discontinued.linea:
                 reasons.append("El control de operaciones discontinuadas precede al de continuadas.")
+            carry_forward = income_controls.get("ER_NET_CARRY_FORWARD")
+            oci_control = income_controls.get("ER_OCI")
+            comprehensive = income_controls.get("ER_COMPREHENSIVE")
+            if carry_forward:
+                if not oci_control or not comprehensive:
+                    reasons.append(
+                        "El arrastre del resultado neto no tiene controles de resultado integral."
+                    )
+                elif not (
+                    net < carry_forward.linea < oci_control.linea
+                    < comprehensive.linea
+                ):
+                    reasons.append("El arrastre del resultado neto está fuera de orden.")
             all_eval_income = income_rows + attrib_net_rows
             for account in all_eval_income:
                 code = by_line[account.linea]["code"]
@@ -2338,17 +2375,41 @@ def certificar_clasificado_final(
 
         except (ValueError, TypeError) as exc:
             reasons.append(str(exc))
+    native_fragment_attested = bool(
+        filas_confianza_reducida
+        and metodo_extraccion_fuente == "native_fragment_reconstruction"
+        and all(
+            math.isfinite(account.confianza_extraccion)
+            and 0.75 <= account.confianza_extraccion < 0.9
+            and not account.columnas_derivadas
+            and not account.requiere_revision_extraccion
+            for account in cuentas
+            if account.linea in filas_confianza_reducida
+        )
+    )
     if failed:
         result.estado = "fallida"
         reasons.append("El detalle no reproduce los controles por sección y período.")
         result.totales_finales_validos = False
+    elif filas_confianza_reducida and not native_fragment_attested:
+        reasons.extend(
+            f"Fila {linea}: evidencia de extracción pendiente de revisión."
+            for linea in filas_confianza_reducida
+        )
+        result.totales_finales_validos = True
     elif not reasons:
         result.estado = "certificada"
         result.totales_finales_validos = True
         if income_controls:
             result.resultado_ejercicio = result.totales_calculados[f"{periodo_actual}:ER_NET"]
             result.tipo_resultado = "utilidad" if result.resultado_ejercicio >= 0 else "perdida"
-        reasons.append("Detalle, clasificación, secciones y ecuación acreditados en todos los períodos explícitos.")
+        if native_fragment_attested:
+            reasons.append(
+                "Texto nativo fragmentado acreditado mediante detalle, clasificación, "
+                "controles por sección y ecuación en todos los períodos explícitos."
+            )
+        else:
+            reasons.append("Detalle, clasificación, secciones y ecuación acreditados en todos los períodos explícitos.")
     return result
 
 
@@ -4412,6 +4473,10 @@ class ParserPDF:
         if certificacion.estado == "no_evaluable":
             certificacion_clasificada = certificar_totales_clasificados(cuentas)
             if certificacion_clasificada.estado != "no_evaluable":
+                certificacion_clasificada.observaciones_auxiliares.append({
+                    "tipo": "metodo_extraccion_fuente",
+                    "metodo": self._extraction_method,
+                })
                 certificacion = certificacion_clasificada
 
         if requirio_ocr and not ocr_runtime.get("available"):

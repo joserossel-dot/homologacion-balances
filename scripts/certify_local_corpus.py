@@ -851,10 +851,16 @@ def certify(path: Path, pipeline: HomologationPipeline) -> dict:
         accounts, period_hints, currency_hints,
     )
     if certification is not None and certification.metodo == "classified_totals" and certification.estado == "parcial":
+        source_method = next((
+            str(item.get("metodo") or "")
+            for item in (certification.observaciones_auxiliares or [])
+            if item.get("tipo") == "metodo_extraccion_fuente"
+        ), None)
         certification = certificar_clasificado_final(
             accounts, classification["rows"], periods, currencies,
             codigos_validos=set(json.loads((PROJECT_ROOT / "catalogo_maestro.json").read_text(encoding="utf-8"))),
             periodo_actual=str(period_hints[0]) if period_hints else None,
+            metodo_extraccion_fuente=source_method,
         )
     accounts_by_line = {account.linea: account for account in accounts}
     inconsistent_accounts = []

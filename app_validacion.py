@@ -840,6 +840,11 @@ def _guardar_snapshot_clasificado(filename, resultado):
     if f_digest:
         _detectar_bloquear_colision_homonimo(filename, f_digest)
     if metodo == "classified_totals":
+        source_method = next((
+            str(item.get("metodo") or "")
+            for item in (getattr(certification, "observaciones_auxiliares", None) or [])
+            if item.get("tipo") == "metodo_extraccion_fuente"
+        ), None)
         st.session_state.setdefault("classified_source_snapshots", {})[filename] = {
             "file_digest": f_digest,
             "scope": _alcance_snapshot_clasificado(filename),
@@ -847,6 +852,7 @@ def _guardar_snapshot_clasificado(filename, resultado):
             "periods": list(getattr(resultado, "periodos_detectados", []) or []),
             "currencies": list(getattr(resultado, "monedas_detectadas", []) or []),
             "metodo": "classified_totals",
+            "metodo_extraccion_fuente": source_method,
         }
     elif _es_certificacion_ocho_columnas(certification):
         st.session_state.setdefault("classified_source_snapshots", {})[filename] = {
@@ -914,6 +920,7 @@ def _recertificar_balance_clasificado(filename, df, certification, *, force=Fals
     result = certificar_clasificado_final(
         accounts, classifications, snapshot["periods"], snapshot["currencies"],
         codigos_validos=set(catalogo or ()), periodo_actual=_periodos_seleccionados()[0],
+        metodo_extraccion_fuente=snapshot.get("metodo_extraccion_fuente"),
     )
     if result.estado == "certificada":
         f_digest = df.attrs.get("file_digest") or st.session_state.get("file_metadata", {}).get(filename, {}).get("file_digest")
