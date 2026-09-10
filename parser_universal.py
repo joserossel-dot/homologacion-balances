@@ -3552,8 +3552,13 @@ def parsear_linea(
         # Referencia de nota (6.1.2, 12.3.1), no un tercer período monetario.
         montos_tokens.pop()
 
+    # Ocho importes representan las columnas contables canónicas
+    # (Debe, Haber, saldos y clasificación), no ocho períodos comparativos.
+    # Mapear aquí el primer token al año del documento haría que la interfaz
+    # mostrara Débitos en vez del importe clasificado en Activo/Pasivo/ER.
+    es_balance_8_columnas = len(montos_tokens) == len(RAW_MONETARY_COLUMNS)
     # Dynamic year/currency mapping
-    if (years or currencies) and montos_tokens:
+    if (years or currencies) and montos_tokens and not es_balance_8_columnas:
         n_vals = len(montos_tokens)
         active_currencies = currencies if currencies else []
 
@@ -3989,6 +3994,13 @@ def parsear_linea(
             column, value = classified_values[0]
             origen = origin_by_column[column]
             monto_principal = value
+            # El año de la cabecera identifica el período del saldo
+            # clasificado, no la primera columna monetaria (Débitos).
+            if len(active_years) == 1:
+                montos_periodos = {
+                    active_years[0]: value,
+                    "actual": value,
+                }
     return CuentaRaw(
         linea=numero_linea,
         codigo=codigo,

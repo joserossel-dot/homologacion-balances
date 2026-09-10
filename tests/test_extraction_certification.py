@@ -2331,6 +2331,25 @@ def test_split_lado_a_lado_conserva_o_como_conjuncion_en_glosa():
     assert parser.split_side_by_side(line) == [line]
 
 
+def test_balance_8_columnas_mapea_periodo_al_saldo_clasificado_no_a_debitos():
+    cuenta = parser.parsear_linea(
+        "BANCO 1.034.578.021 1.031.257.491 3.320.530 0 "
+        "3.320.530 0 0 0",
+        numero_linea=1,
+        formato_codigo=parser.FormatoCodigo.SIN_CODIGO,
+        separador_miles=".",
+        years=["2022"],
+    )
+
+    assert cuenta is not None
+    assert cuenta.monto == 3_320_530
+    assert cuenta.origen_columna == parser.OrigenColumna.ACTIVO
+    assert cuenta.montos_periodos == {
+        "2022": 3_320_530,
+        "actual": 3_320_530,
+    }
+
+
 def test_encabezados_con_dos_puntos_y_total_final_cortan_la_seccion():
     accounts = [
         parser.CuentaRaw(1, None, "Activos corrientes:", None),

@@ -1,6 +1,7 @@
 import app_validacion
 from extractor_metadata import MetadataEmpresa
 from io import BytesIO
+from parser_universal import CuentaRaw, OrigenColumna
 
 
 def test_valores_periodo_metadata_detecta_ejercicio_completo():
@@ -115,3 +116,31 @@ def test_valor_fila_periodo_conserva_actual_y_anterior():
 
     assert app_validacion._valor_fila_periodo(row, "2019", 0) == 107874
     assert app_validacion._valor_fila_periodo(row, "2018", 1) == 93372
+
+
+def test_ui_usa_saldo_clasificado_del_periodo_en_balance_8_columnas(monkeypatch):
+    cuenta = CuentaRaw(
+        linea=1,
+        codigo=None,
+        nombre="BANCO",
+        monto=3_320_530,
+        origen_columna=OrigenColumna.ACTIVO,
+        montos_columnas={
+            "debitos": 1_034_578_021,
+            "creditos": 1_031_257_491,
+            "saldo_deudor": 3_320_530,
+            "saldo_acreedor": 0,
+            "activo": 3_320_530,
+            "pasivo": 0,
+            "perdida": 0,
+            "ganancia": 0,
+        },
+        montos_periodos={"2022": 3_320_530, "actual": 3_320_530},
+    )
+    monkeypatch.setattr(app_validacion, "_periodos_seleccionados", lambda: ("2022",))
+
+    principal, campos = app_validacion._campos_periodos_cuenta(cuenta)
+
+    assert principal == 3_320_530
+    assert campos["monto_periodo_2022"] == 3_320_530
+    assert campos["monto_periodo_actual"] == 3_320_530
