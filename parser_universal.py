@@ -315,13 +315,26 @@ def split_side_by_side(line: str) -> list[str]:
 
     # Classify tokens
     types = []
-    for t in tokens:
+    for index, t in enumerate(tokens):
         t_stripped = t.replace('$', '').replace('(', '').replace(')', '').strip(' .-–—−,[]')
+        previous_is_text = bool(
+            index > 0
+            and re.search(r'[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]', tokens[index - 1])
+        )
+        next_is_text = bool(
+            index + 1 < len(tokens)
+            and re.search(r'[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]', tokens[index + 1])
+        )
+        # Una ``o`` entre palabras es la conjunción de la glosa, no un cero
+        # OCR. Fuera de ese contexto se conserva el tratamiento numérico para
+        # celdas como ``... O`` o ``... o`` al final de una tabla.
+        o_es_conjuncion = t_stripped in ('o', 'O') and previous_is_text and next_is_text
         is_num = False
         if (
             re.search(r'\d', t_stripped)
             or t in ('-', '—', '−')
-            or t_stripped in ('', '-', '—', '−', 'o', 'O')
+            or t_stripped in ('', '-', '—', '−')
+            or (t_stripped in ('o', 'O') and not o_es_conjuncion)
         ):
             is_num = True
         types.append('N' if is_num else 'T')

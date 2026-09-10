@@ -2325,6 +2325,12 @@ def test_split_lado_a_lado_reconoce_cero_ocr_en_columna_derecha():
     ]
 
 
+def test_split_lado_a_lado_conserva_o_como_conjuncion_en_glosa():
+    line = "Gasto o utilidad por impuestos a las ganancias. 7 224.202 91.158"
+
+    assert parser.split_side_by_side(line) == [line]
+
+
 def test_encabezados_con_dos_puntos_y_total_final_cortan_la_seccion():
     accounts = [
         parser.CuentaRaw(1, None, "Activos corrientes:", None),
