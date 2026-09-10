@@ -94,3 +94,8 @@ datasets/**/*.xls
 # Entorno
 .env.*
 !deployment/onprem/.env.example
+
+# Manifiestos locales de modo sombra y archivos de configuración local
+shadow_manifest.local.json
+shadow_manifest.*.local.json
+reports/pilot_coverage/local/**

@@ -27,6 +27,7 @@ pytest = "^8.0"
 mypy = "^1.0"
 ruff = "^0.4"
 pytest-cov = "^7.1.0"
+fpdf2 = "2.8.2"
 
 [tool.pytest.ini_options]
 pythonpath = "."
