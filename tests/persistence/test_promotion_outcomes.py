@@ -218,3 +218,19 @@ def test_neon_outcome_migrations_include_batch_upgrade(tmp_path):
     )
     store.initialize_promotion_outcomes(first)
     assert cursor.executions == [("SELECT 4;", None)]
+
+
+def test_default_initializers_install_append_only_after_schema_and_upgrade():
+    cursor = _Cursor()
+    store = NeonKnowledgeStore(
+        "postgresql://placeholder", connect=lambda _url: _Connection(cursor),
+    )
+    store.initialize_promotion_policy_metadata()
+    store.initialize_promotion_outcomes()
+    sql = [entry[0] for entry in cursor.executions]
+    assert len(sql) == 5
+    assert "CREATE TABLE IF NOT EXISTS promotion_policy_metadata" in sql[0]
+    assert "BEFORE UPDATE OR DELETE ON promotion_policy_metadata" in sql[1]
+    assert "CREATE TABLE IF NOT EXISTS promotion_outcomes" in sql[2]
+    assert "ADD COLUMN IF NOT EXISTS promotion_ids" in sql[3]
+    assert "BEFORE UPDATE OR DELETE ON promotion_outcomes" in sql[4]

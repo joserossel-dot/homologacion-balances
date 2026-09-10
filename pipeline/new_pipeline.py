@@ -1,3 +1,7 @@
+"""Prototipo no operativo, candidato a poda según module_pruning_plan.md.
+
+No sustituye el pipeline de app_validacion ni acredita capacidad del piloto.
+"""
 from __future__ import annotations
 
 import json

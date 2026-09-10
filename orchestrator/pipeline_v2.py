@@ -1,3 +1,8 @@
+"""Orquestador experimental, no es el entrypoint del piloto.
+
+Su cobertura aislada no certifica el flujo operativo de app_validacion.
+Véase docs/architecture/module_pruning_plan.md antes de integrar o retirar.
+"""
 from __future__ import annotations
 
 import time

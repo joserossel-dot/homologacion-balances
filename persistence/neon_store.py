@@ -108,10 +108,13 @@ class NeonKnowledgeStore:
             / "migrations"
             / "003_promotion_policy_metadata.sql"
         )
-        sql = path.read_text(encoding="utf-8")
+        paths = [path]
+        if migration is None:
+            paths.append(path.parent / "006_policy_append_only.sql")
         with self._connect() as conn:
             with conn.cursor() as cursor:
-                cursor.execute(sql)
+                for item in paths:
+                    cursor.execute(item.read_text(encoding="utf-8"))
 
     def initialize_promotion_outcomes(
         self, migration: str | Path | None = None,
@@ -124,6 +127,7 @@ class NeonKnowledgeStore:
             paths = [
                 root / "004_promotion_outcomes.sql",
                 root / "005_promotion_outcome_batches.sql",
+                root / "007_outcomes_append_only.sql",
             ]
         with self._connect() as conn:
             with conn.cursor() as cursor:

@@ -1,7 +1,7 @@
 [tool.poetry]
-name = "carpeta-tributaria"
+name = "homologacion-balances"
 version = "0.1.0"
-description = "Extracción y análisis de carpetas tributarias"
+description = "Extracción, clasificación y certificación de balances contables"
 authors = ["Jose Alfonso Rossel <josealfonsorossel@gmail.com>"]
 license = "MIT"
 readme = "README.md"

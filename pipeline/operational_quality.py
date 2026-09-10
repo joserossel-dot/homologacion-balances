@@ -2,8 +2,8 @@
 
 Este módulo consume una copia del resultado ya clasificado. Structure,
 Coverage y Self-QA sólo observan: nunca reciben callbacks ni referencias que
-permitan cambiar códigos o importes. La política puede pasar de shadow a
-enforcement mediante una bandera explícita, limitada al permiso de exportar.
+permitan cambiar códigos o importes. El permiso de exportar se controla por
+defecto; el modo shadow requiere desactivación explícita del enforcement.
 """
 from __future__ import annotations
 
@@ -61,7 +61,7 @@ def _family_for_row(row: pd.Series) -> str:
 
 def analyze_operational_quality(
     df: pd.DataFrame, *, balance_squared: bool,
-    enforce_export: bool = False,
+    enforce_export: bool = True,
 ) -> OperationalQualityResult:
     """Ejecuta Structure -> Coverage -> Self-QA sin reclasificar cuentas."""
     rows = _relevant_rows(df)

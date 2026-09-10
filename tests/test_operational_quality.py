@@ -1,7 +1,20 @@
 import pandas as pd
+import pytest
 from pandas.testing import assert_frame_equal
 
 from pipeline.operational_quality import analyze_operational_quality
+
+
+@pytest.mark.parametrize("unclassified,squared,allowed", [
+    (True, True, False), (False, False, False), (False, True, True),
+])
+def test_export_policy_is_enforced_when_caller_omits_flag(unclassified, squared, allowed):
+    source = _frame(unclassified=unclassified)
+    before = source.copy(deep=True)
+    result = analyze_operational_quality(source, balance_squared=squared)
+    assert result.mode == "enforced"
+    assert result.export_allowed is allowed
+    assert_frame_equal(source, before)
 
 
 def _frame(unclassified: bool = True) -> pd.DataFrame:
