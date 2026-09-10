@@ -2353,14 +2353,23 @@ def _monto_presentacion(codigo: str | None, monto, nombre: str | None = None,
                         origen=None, catalogo=None) -> float:
     """Aplica el signo contable sin alterar el importe extraído auditable."""
     valor = 0.0 if pd.isna(monto) else float(monto)
+    codigo_normalizado = str(codigo or '')
+    origen_normalizado = getattr(origen, 'value', origen)
+    origen_normalizado = str(origen_normalizado or '').strip().lower()
     if str(codigo or '').startswith('ER.') and origen is not None:
         resultado = importe_resultado_homologado(codigo, valor, origen, catalogo)
         if resultado is not None:
             return resultado
-    if str(codigo or '') == 'PAT.10':
+    # En un balance de ocho columnas, una partida patrimonial ubicada
+    # físicamente en Activo tiene saldo deudor y reduce el patrimonio. La
+    # extracción conserva el importe positivo de la columna; el signo se
+    # normaliza únicamente para homologación y presentación.
+    if codigo_normalizado.startswith('PAT.') and origen_normalizado == 'activo':
         return -abs(valor)
-    if str(codigo or '') == 'ANC.01.01' or (
-        str(codigo or '').startswith('ANC') and _es_contra_activo(nombre)
+    if codigo_normalizado == 'PAT.10':
+        return -abs(valor)
+    if codigo_normalizado == 'ANC.01.01' or (
+        codigo_normalizado.startswith('ANC') and _es_contra_activo(nombre)
     ):
         return -abs(valor)
     return valor

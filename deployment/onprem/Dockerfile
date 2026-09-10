@@ -42,6 +42,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
+        libgl1 \
         poppler-utils \
         "tesseract-ocr=${TESSERACT_OCR_VERSION}" \
         "tesseract-ocr-spa=${TESSERACT_SPA_VERSION}" \

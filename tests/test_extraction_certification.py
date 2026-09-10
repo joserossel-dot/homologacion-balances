@@ -1950,6 +1950,48 @@ def test_fusiona_glosa_partida_con_importes_de_la_misma_linea():
     assert merged[0].montos_columnas["debitos"] == 127_561_879
 
 
+def test_fusiona_sufijos_verticales_sin_importe_en_balance_tributario():
+    accounts = [
+        parser.CuentaRaw(
+            18, None, "RESULTADOS", 64_500,
+            origen_columna=parser.OrigenColumna.ACTIVO,
+            montos_columnas={"activo": 64_500},
+        ),
+        parser.CuentaRaw(19, None, "ACUMULADOS", 0),
+        parser.CuentaRaw(
+            28, None, "ARRIENDO MAQ Y", 43_618_900,
+            origen_columna=parser.OrigenColumna.PERDIDA,
+            montos_columnas={"perdida": 43_618_900},
+        ),
+        parser.CuentaRaw(29, None, "VEHICULOS", 0),
+    ]
+
+    merged, count = parser.fusionar_continuaciones_verticales(accounts)
+
+    assert count == 2
+    assert [account.nombre for account in merged] == [
+        "RESULTADOS ACUMULADOS", "ARRIENDO MAQ Y VEHICULOS",
+    ]
+    assert merged[0].monto == 64_500
+    assert merged[1].monto == 43_618_900
+
+
+def test_no_fusiona_una_cuenta_sin_importe_que_no_es_continuacion():
+    accounts = [
+        parser.CuentaRaw(
+            1, None, "BANCO", 100,
+            origen_columna=parser.OrigenColumna.ACTIVO,
+            montos_columnas={"activo": 100},
+        ),
+        parser.CuentaRaw(2, None, "CLIENTES", 0),
+    ]
+
+    merged, count = parser.fusionar_continuaciones_verticales(accounts)
+
+    assert count == 0
+    assert [account.nombre for account in merged] == ["BANCO", "CLIENTES"]
+
+
 def test_perdida_de_inventario_es_cuenta_y_no_total():
     account = parser.parsear_linea(
         "PERDIDA DE INVENTARIO (ROBOS Y HURTOS) "
@@ -2242,6 +2284,47 @@ def test_secciones_ifrs_con_dos_columnas_paralelas_y_encabezados_en_ingles():
     assert accounts[5].origen_columna is parser.OrigenColumna.PASIVO
 
 
+def test_secciones_paralelas_en_espanol_corrigen_columnas_colapsadas():
+    accounts = [
+        parser.CuentaRaw(1, None, "ACTIVO CIRCULANTE PASIVO CIRCULANTE", None),
+        parser.CuentaRaw(
+            2, None, "DEUDORES POR VENTAS", 2_962_115_064,
+            origen_columna=parser.OrigenColumna.GANANCIA,
+        ),
+        parser.CuentaRaw(
+            2, None, "CUENTAS POR PAGAR", 1_232_201_344,
+            origen_columna=parser.OrigenColumna.GANANCIA,
+        ),
+    ]
+
+    annotated = parser.anotar_secciones_balance_clasificado(accounts)
+
+    assert annotated == 2
+    assert accounts[1].origen_columna is parser.OrigenColumna.ACTIVO
+    assert accounts[2].origen_columna is parser.OrigenColumna.PASIVO
+
+
+def test_split_lado_a_lado_no_convierte_monto_izquierdo_en_codigo_derecho():
+    line = (
+        "DEUDORES POR VENTAS 2.962.115.064 "
+        "CUENTAS POR PAGAR 1.232.201.344"
+    )
+
+    assert parser.split_side_by_side(line) == [
+        "DEUDORES POR VENTAS 2.962.115.064",
+        "CUENTAS POR PAGAR 1.232.201.344",
+    ]
+
+
+def test_split_lado_a_lado_reconoce_cero_ocr_en_columna_derecha():
+    line = "DISPONIBLE 19.254.399 OBLIGACIONES C/BANCOS Y OTROS o"
+
+    assert parser.split_side_by_side(line) == [
+        "DISPONIBLE 19.254.399",
+        "OBLIGACIONES C/BANCOS Y OTROS o",
+    ]
+
+
 def test_encabezados_con_dos_puntos_y_total_final_cortan_la_seccion():
     accounts = [
         parser.CuentaRaw(1, None, "Activos corrientes:", None),
@@ -2393,3 +2476,52 @@ def test_detects_unlabeled_note_column_from_repeated_references():
     ]
 
     assert parser.detectar_columna_nota_comparativa(lines, ["2022", "2021"])
+
+
+def test_rapidocr_normaliza_solo_celdas_numericas_y_controles_inequivocos():
+    assert parser._normalizar_celda_numerica_rapidocr("7D1.348.715") == "701.348.715"
+    assert parser._normalizar_celda_numerica_rapidocr("1101201-BancoSantander") == (
+        "1101201 BancoSantander"
+    )
+    assert parser._normalizar_celda_numerica_rapidocr("Resultadopositivo") == (
+        "Resultado positivo"
+    )
+    assert parser._normalizar_celda_numerica_rapidocr("DEUDORES") == "DEUDORES"
+
+
+def test_repara_un_saldo_ocr_solo_con_dos_identidades_concordantes():
+    lines = [
+        "1108001 PagosProvisionalesMensuales "
+        "5.754.303 2.081.119 3.873.184 0 3.673.184 0 0 0",
+    ]
+
+    repaired, count = parser._reparar_lineas_por_identidades_redundantes(lines)
+
+    assert count == 1
+    assert repaired == [
+        "1108001 PagosProvisionalesMensuales "
+        "5754303 2081119 3673184 0 3673184 0 0 0",
+    ]
+
+
+def test_no_repara_celda_ocr_si_no_hay_redundancia_concordante():
+    lines = [
+        "1108001 PagosProvisionalesMensuales "
+        "5.754.303 2.081.119 3.873.184 0 3.573.184 0 0 0",
+    ]
+
+    repaired, count = parser._reparar_lineas_por_identidades_redundantes(lines)
+
+    assert count == 0
+    assert repaired == lines
+
+
+def test_lectura_alternativa_no_gana_por_filas_artificialmente_en_cero():
+    base = [
+        "1101 Caja 100 0 100 0 100 0 0 0",
+        "1102 Banco 200 0 200 0 200 0 0 0",
+    ]
+    alternative = [f"{1000 + index} Cuenta{index} 0 0 0 0 0 0 0 0" for index in range(10)]
+
+    assert parser._identidades_validas_lineas_8_columnas(alternative) == (0, 0)
+    assert not parser._preferir_lectura_rapidocr(base, alternative)

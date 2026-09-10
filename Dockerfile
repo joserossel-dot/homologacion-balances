@@ -9,6 +9,7 @@ ARG TESSERACT_SPA_VERSION=1:4.1.0-2
 # Instalar librerías del sistema (Poppler, Tesseract y herramientas esenciales)
 RUN apt-get update && apt-get install -y \
     poppler-utils \
+    libgl1 \
     "tesseract-ocr=${TESSERACT_OCR_VERSION}" \
     "tesseract-ocr-spa=${TESSERACT_SPA_VERSION}" \
     curl \

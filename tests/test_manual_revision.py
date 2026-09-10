@@ -548,6 +548,16 @@ class TestCuadraturaBalanceHomologado:
 
 
 class TestPresentacionYResultado:
+    def test_resultados_acumulados_en_activo_reducen_el_patrimonio(self):
+        assert _monto_presentacion(
+            'PAT.03', 356981102, 'Resultados Acumulados', origen='activo',
+        ) == -356981102
+
+    def test_resultados_acumulados_en_pasivo_conservan_saldo_acreedor(self):
+        assert _monto_presentacion(
+            'PAT.03', 356981102, 'Resultados Acumulados', origen='pasivo',
+        ) == 356981102
+
     def test_depreciacion_acumulada_resta_activo_fijo(self):
         assert _monto_presentacion(
             'ANC.01', 8371044, 'Depreciación Acumulada'

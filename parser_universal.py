@@ -318,7 +318,11 @@ def split_side_by_side(line: str) -> list[str]:
     for t in tokens:
         t_stripped = t.replace('$', '').replace('(', '').replace(')', '').strip(' .-–—−,[]')
         is_num = False
-        if re.search(r'\d', t_stripped) or t in ('-', '—', '−') or t_stripped in ('', '-', '—', '−'):
+        if (
+            re.search(r'\d', t_stripped)
+            or t in ('-', '—', '−')
+            or t_stripped in ('', '-', '—', '−', 'o', 'O')
+        ):
             is_num = True
         types.append('N' if is_num else 'T')
 
@@ -352,7 +356,19 @@ def split_side_by_side(line: str) -> list[str]:
             # Check if the token immediately preceding split_token_idx is a code
             if split_token_idx > 0:
                 prev_tok = tokens[split_token_idx - 1]
-                if re.match(r'^\d+[\d.\-]*$', prev_tok) and len(prev_tok) >= 3:
+                # Un importe de la tabla izquierda queda inmediatamente antes
+                # de la glosa derecha. No debe desplazarse como supuesto código
+                # de la segunda cuenta: ``2.962.115.064 CUENTAS POR PAGAR``.
+                # Sólo retrocedemos ante un código, no ante un monto con grupos
+                # de miles completos.
+                es_monto_agrupado = bool(re.fullmatch(
+                    r"-?\d{1,3}(?:[.,]\d{3})+(?:[.,]\d+)?", prev_tok,
+                ))
+                if (
+                    re.match(r'^\d+[\d.\-]*$', prev_tok)
+                    and len(prev_tok) >= 3
+                    and not es_monto_agrupado
+                ):
                     split_token_idx -= 1
             left_line = " ".join(tokens[:split_token_idx]).strip(' .-–—−')
             right_line = " ".join(tokens[split_token_idx:]).strip(' .-–—−')
@@ -664,7 +680,9 @@ def _extraer_tabla_balance_por_coordenadas(
                     if alias in normalized:
                         matches[key] = normalized[alias]
                         break
-            if all(key in matches for key in RAW_MONETARY_COLUMNS):
+            if "nombre" in matches and all(
+                key in matches for key in RAW_MONETARY_COLUMNS
+            ):
                 header_words = combined
                 detected = matches
                 break
@@ -1409,6 +1427,216 @@ class _OCRWordsPage:
 
     def extract_words(self, **_kwargs) -> list[dict]:
         return self._words
+
+
+def _normalizar_celda_numerica_rapidocr(token: str) -> str:
+    """Corrige glifos numéricos sólo cuando toda la celda parece un importe."""
+    compact = re.sub(r"\s+", "", str(token or ""))
+    if not compact:
+        return compact
+    if not re.fullmatch(r"[0-9OoDd.,()\-]+", compact):
+        # RapidOCR conserva correctamente los caracteres, pero a veces elimina
+        # todos los espacios de una glosa. Se restauran sólo fronteras y
+        # controles inequívocos que el parser necesita para distinguir código
+        # y subtotal; no se intenta reescribir nombres contables arbitrarios.
+        compact = re.sub(
+            r"^(\d{4,10})[.\-]?(?=[A-Za-zÁÉÍÓÚÜÑ])", r"\1 ", compact,
+        )
+        compact = re.sub(
+            r"^(Resultado)(positivo|negativo)$", r"\1 \2", compact, flags=re.I,
+        )
+        compact = re.sub(
+            r"^(Sumas?)(totales?|iguales)$", r"\1 \2", compact, flags=re.I,
+        )
+        return compact
+    return compact.translate(str.maketrans({"O": "0", "o": "0", "D": "0", "d": "0"}))
+
+
+def _rapidocr_words(img_path: Path, rotacion: int) -> list[dict]:
+    """Entrega palabras RapidOCR con su inclinación corregida.
+
+    La dependencia es opcional: si no está instalada o falla, el flujo
+    Tesseract continúa sin cambios. La corrección vertical usa la pendiente
+    observada en los propios cuadriláteros, no una rotación fija por empresa.
+    """
+    try:
+        from rapidocr_onnxruntime import RapidOCR
+    except ImportError:
+        return []
+
+    tmp_path: Optional[Path] = None
+    imagen_ocr = img_path
+    try:
+        if rotacion:
+            with Image.open(img_path) as img:
+                preparada = img.rotate(rotacion, expand=True)
+                with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+                    preparada.save(tmp.name)
+                    tmp_path = Path(tmp.name)
+                    imagen_ocr = tmp_path
+        result, _elapsed = RapidOCR()(str(imagen_ocr))
+        if not result:
+            return []
+
+        slopes: list[float] = []
+        for box, _text, _confidence in result:
+            width = float(box[1][0]) - float(box[0][0])
+            if width >= 30:
+                slopes.append((float(box[1][1]) - float(box[0][1])) / width)
+        slope = sorted(slopes)[len(slopes) // 2] if slopes else 0.0
+
+        words: list[dict] = []
+        for box, raw_text, confidence in result:
+            text = _normalizar_celda_numerica_rapidocr(str(raw_text).strip())
+            if not text:
+                continue
+            xs = [float(point[0]) for point in box]
+            ys = [float(point[1]) for point in box]
+            x0, x1 = min(xs), max(xs)
+            ymid = sum(ys) / len(ys)
+            words.append({
+                "text": text,
+                "x0": x0,
+                "x1": x1,
+                "top": ymid - slope * ((x0 + x1) / 2),
+                "confidence": float(confidence),
+            })
+        # Una misma fila conserva pequeñas diferencias residuales por la
+        # perspectiva del escaneo. Se ajustan a una banda común sólo cuando
+        # están a menos de siete píxeles; las filas reales están separadas por
+        # varias decenas de píxeles en la resolución de trabajo.
+        bands: list[list[dict]] = []
+        for word in sorted(words, key=lambda item: float(item["top"])):
+            if not bands:
+                bands.append([word])
+                continue
+            band_top = sum(float(item["top"]) for item in bands[-1]) / len(bands[-1])
+            if abs(float(word["top"]) - band_top) <= 7:
+                bands[-1].append(word)
+            else:
+                bands.append([word])
+        for band in bands:
+            aligned_top = sum(float(item["top"]) for item in band) / len(band)
+            for word in band:
+                word["top"] = aligned_top
+        return words
+    except Exception as exc:  # noqa: BLE001 - fallback OCR deliberado
+        logger.info("RapidOCR no produjo una lectura utilizable: %s", exc)
+        return []
+    finally:
+        if tmp_path is not None:
+            tmp_path.unlink(missing_ok=True)
+
+
+def _identidades_validas_lineas_8_columnas(lineas: list[str]) -> tuple[int, int]:
+    """Cuenta filas completas y filas que satisfacen ambas identidades."""
+    completas = 0
+    validas = 0
+    for linea in lineas:
+        tokens = linea.split()
+        if len(tokens) < 9:
+            continue
+        amounts = tokens[-8:]
+        if not all(PATRON_MONTOS.fullmatch(normalizar_token_ocr(token)) for token in amounts):
+            continue
+        values = [parsear_monto(token, ".") for token in amounts]
+        if any(value is None for value in values):
+            continue
+        debe, haber, deudor, acreedor, activo, pasivo, perdida, ganancia = (
+            float(value or 0.0) for value in values
+        )
+        if not any(abs(value) > 0 for value in (
+            debe, haber, deudor, acreedor, activo, pasivo, perdida, ganancia,
+        )):
+            continue
+        completas += 1
+        if (
+            math.isclose(debe - haber, deudor - acreedor, abs_tol=1.0)
+            and math.isclose(
+                deudor + acreedor,
+                activo + pasivo + perdida + ganancia,
+                abs_tol=1.0,
+            )
+        ):
+            validas += 1
+    return validas, completas
+
+
+def _preferir_lectura_rapidocr(
+    lineas_base: list[str], lineas_rapid: list[str],
+) -> bool:
+    """Acepta el rescate sólo con evidencia contable estrictamente mejor."""
+    validas_base, completas_base = _identidades_validas_lineas_8_columnas(lineas_base)
+    validas_rapid, completas_rapid = _identidades_validas_lineas_8_columnas(lineas_rapid)
+    return (
+        completas_rapid >= 5
+        and completas_rapid >= max(5, completas_base - 2)
+        and validas_rapid >= validas_base + 3
+        and validas_rapid / completas_rapid >= 0.75
+    )
+
+
+def _reparar_lineas_por_identidades_redundantes(
+    lineas: list[str],
+) -> tuple[list[str], int]:
+    """Corrige una celda OCR sólo si dos representaciones independientes coinciden.
+
+    En un balance de ocho columnas, Debe/Haber, saldos y clasificación final
+    expresan dos veces el mismo saldo. La función no decide la naturaleza de
+    una cuenta ni rellena columnas vacías: sólo reemplaza el saldo o el único
+    monto final ya observado cuando las otras dos expresiones son exactas.
+    """
+    repaired: list[str] = []
+    changes = 0
+    for linea in lineas:
+        tokens = linea.split()
+        if len(tokens) < 9:
+            repaired.append(linea)
+            continue
+        amount_tokens = tokens[-8:]
+        values_optional = [parsear_monto(token, ".") for token in amount_tokens]
+        if any(value is None for value in values_optional):
+            repaired.append(linea)
+            continue
+        values = [float(value or 0.0) for value in values_optional]
+        debe, haber, deudor, acreedor, *finales = values
+        movimiento = debe - haber
+        esperado_deudor = max(movimiento, 0.0)
+        esperado_acreedor = max(-movimiento, 0.0)
+        total_final = sum(finales)
+        saldo_observado = deudor + acreedor
+
+        changed_index: Optional[int] = None
+        changed_value = 0.0
+        if (
+            math.isclose(total_final, abs(movimiento), abs_tol=1.0)
+            and not math.isclose(saldo_observado, abs(movimiento), abs_tol=1.0)
+            and (
+                math.isclose(deudor, 0.0, abs_tol=1.0)
+                or math.isclose(acreedor, 0.0, abs_tol=1.0)
+            )
+        ):
+            changed_index = 2 if movimiento >= 0 else 3
+            changed_value = esperado_deudor if movimiento >= 0 else esperado_acreedor
+            values[3 if movimiento >= 0 else 2] = 0.0
+        else:
+            nonzero_finales = [index for index, value in enumerate(finales) if value]
+            if (
+                math.isclose(saldo_observado, abs(movimiento), abs_tol=1.0)
+                and len(nonzero_finales) == 1
+                and not math.isclose(total_final, saldo_observado, abs_tol=1.0)
+            ):
+                changed_index = 4 + nonzero_finales[0]
+                changed_value = saldo_observado
+
+        if changed_index is None:
+            repaired.append(linea)
+            continue
+        values[changed_index] = changed_value
+        formatted = [str(int(value)) if value.is_integer() else str(value) for value in values]
+        repaired.append(" ".join([*tokens[:-8], *formatted]))
+        changes += 1
+    return repaired, changes
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2642,11 +2870,17 @@ def anotar_secciones_balance_clasificado(cuentas: list[CuentaRaw]) -> int:
             secciones_paralelas = False
             continue
         normalized_english = nombre.replace("-", " ")
-        if (
-            re.search(r"\bassets?\b", normalized_english, re.I)
-            and re.search(r"\b(?:equity|liabilities)\b", normalized_english, re.I)
-            and not cuenta.es_total
-        ):
+        encabezado_paralelo = (
+            (
+                re.search(r"\bassets?\b", normalized_english, re.I)
+                and re.search(r"\b(?:equity|liabilities)\b", normalized_english, re.I)
+            )
+            or (
+                re.search(r"\bactivos?\b", nombre, re.I)
+                and re.search(r"\b(?:pasivos?|patrimonio)\b", nombre, re.I)
+            )
+        )
+        if encabezado_paralelo and not cuenta.es_total:
             seccion = None
             seccion_contable = None
             secciones_paralelas = True
@@ -2754,6 +2988,57 @@ def fusionar_cuentas_partidas(cuentas: list[CuentaRaw]) -> tuple[list[CuentaRaw]
         fusionadas.append(actual)
         indice += 1
     return fusionadas, cantidad
+
+
+_SUFIJOS_GLOSA_PARTIDA = re.compile(
+    r"^(?:acumulad[oa]s?|propio|trabajador(?:es)?|veh[ií]culos?|"
+    r"corriente|no corriente)$",
+    re.IGNORECASE,
+)
+
+
+def fusionar_continuaciones_verticales(
+        cuentas: list[CuentaRaw]) -> tuple[list[CuentaRaw], int]:
+    """Une sufijos verticales sin importe a la cuenta monetaria precedente."""
+    resultado: list[CuentaRaw] = []
+    cantidad = 0
+    for cuenta in cuentas:
+        sin_importes = not any(
+            float(cuenta.montos_columnas.get(columna, 0.0) or 0.0) != 0.0
+            for columna in RAW_MONETARY_COLUMNS
+        )
+        anterior = resultado[-1] if resultado else None
+        nombre = re.sub(r"\s+", " ", cuenta.nombre or "").strip()
+        anterior_tiene_importes = anterior is not None and any(
+            float(anterior.montos_columnas.get(columna, 0.0) or 0.0) != 0.0
+            for columna in RAW_MONETARY_COLUMNS
+        )
+        termina_en_conjuncion = bool(
+            anterior and re.search(r"\b(?:y|de|del|por)$", anterior.nombre, re.I)
+        )
+        if (
+            anterior is not None
+            and cuenta.linea == anterior.linea + 1
+            and not cuenta.codigo
+            and not cuenta.es_total
+            and sin_importes
+            and anterior_tiene_importes
+            and (
+                bool(_SUFIJOS_GLOSA_PARTIDA.fullmatch(_sin_acentos(nombre)))
+                or termina_en_conjuncion
+            )
+        ):
+            anterior.nombre = re.sub(
+                r"\s+", " ", f"{anterior.nombre} {nombre}",
+            ).strip()
+            anterior.confianza_extraccion = min(
+                anterior.confianza_extraccion,
+                cuenta.confianza_extraccion,
+            )
+            cantidad += 1
+            continue
+        resultado.append(cuenta)
+    return resultado, cantidad
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -4399,6 +4684,9 @@ class ParserPDF:
             )
 
         cuentas, cuentas_partidas = fusionar_cuentas_partidas(cuentas)
+        cuentas, continuaciones_verticales = fusionar_continuaciones_verticales(
+            cuentas,
+        )
         jerarquicos = marcar_subtotales_jerarquicos(cuentas)
         detalles_jerarquicos = anotar_jerarquia_contable(cuentas)
         if jerarquicos:
@@ -4415,6 +4703,11 @@ class ParserPDF:
             advertencias.append(
                 f"Se reconstruyeron {cuentas_partidas} cuentas partidas entre "
                 "su código, glosa e importes."
+            )
+        if continuaciones_verticales:
+            advertencias.append(
+                f"Se reconstruyeron {continuaciones_verticales} glosas partidas "
+                "en renglones verticales consecutivos."
             )
 
         secciones_anotadas = anotar_secciones_balance_clasificado(cuentas)
@@ -4763,6 +5056,8 @@ class ParserPDF:
         lineas: list[str] = []
         rotacion_global: Optional[int] = None
         coordinate_centers: Optional[list[float]] = None
+        rapid_coordinate_centers: Optional[list[float]] = None
+        rapid_rescue_active = False
 
         pdftoppm_bin = shutil.which('pdftoppm') or 'pdftoppm'
 
@@ -4882,6 +5177,58 @@ class ParserPDF:
                             self._ocr_advertencias.append(
                                 f"Página {pagina}: OCR de tabla seleccionado por "
                                 f"mayor calidad estructural ({estrategia})."
+                            )
+                # Si la tabla de ocho columnas sigue rompiendo demasiadas
+                # identidades, se contrasta con un segundo motor local. No se
+                # mezcla celda a celda ni se inventan saldos: se reemplaza la
+                # página completa únicamente cuando la alternativa demuestra
+                # una mejora contable amplia y al menos 75% de filas válidas.
+                base_lines = [line for line in texto.splitlines() if line.strip()]
+                base_validas, base_completas = _identidades_validas_lineas_8_columnas(
+                    base_lines,
+                )
+                if (
+                    rapid_rescue_active
+                    or (
+                        base_completas >= 5
+                        and base_validas / base_completas < 0.95
+                    )
+                ):
+                    rapid_words = _rapidocr_words(img_path, rotacion_global)
+                    rapid_lines: list[str] = []
+                    if rapid_words:
+                        rapid_lines, rapid_detected = (
+                            _extraer_tabla_balance_por_coordenadas(
+                                _OCRWordsPage(rapid_words),
+                                rapid_coordinate_centers,
+                            )
+                        )
+                        if rapid_detected:
+                            rapid_coordinate_centers = rapid_detected
+                        rapid_lines, rapid_repairs = (
+                            _reparar_lineas_por_identidades_redundantes(rapid_lines)
+                        )
+                    else:
+                        rapid_repairs = 0
+                    if _preferir_lectura_rapidocr(base_lines, rapid_lines):
+                        texto = "\n".join(rapid_lines)
+                        rapid_rescue_active = True
+                        self._extraction_method = "rapidocr_coordinates_8_amounts"
+                        rapid_validas, rapid_completas = (
+                            _identidades_validas_lineas_8_columnas(rapid_lines)
+                        )
+                        self._ocr_advertencias.append(
+                            f"Página {pagina}: se sustituyó una lectura OCR "
+                            f"inconsistente ({base_validas}/{base_completas}) por "
+                            "una verificación independiente con más identidades "
+                            f"contables válidas ({rapid_validas}/{rapid_completas})."
+                        )
+                        if rapid_repairs:
+                            self._ocr_advertencias.append(
+                                f"Página {pagina}: se repararon {rapid_repairs} "
+                                "celda(s) OCR porque Debe/Haber, saldo y "
+                                "clasificación entregaban dos valores exactos "
+                                "concordantes frente a uno discrepante."
                             )
                 if not texto.strip():
                     self._ocr_advertencias.append(
