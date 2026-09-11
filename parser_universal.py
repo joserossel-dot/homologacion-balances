@@ -771,6 +771,40 @@ def _extraer_tabla_balance_por_coordenadas(
         tail_boundary = float(tail[0]["x0"]) if full_amount_tail else text_boundary
         for word in grupo:
             token = str(word["text"]).strip()
+            if _INTERLEAVED_COLUMN_BLEED.search(token):
+                desenredado = _desenredar_token_colision(token)
+                if desenredado:
+                    w_word = {**word, "text": desenredado[0]}
+                    w_amount = {**word, "text": desenredado[1]}
+                    text_words.append(w_word)
+                    x_col_amount = (
+                        float(w_amount.get("x1", word["x1"]))
+                        if inferred_edges
+                        else (float(w_amount.get("x0", word["x0"])) + float(w_amount.get("x1", word["x1"]))) / 2
+                    )
+                    nearest = min(
+                        range(len(amount_centers)),
+                        key=lambda idx: abs(x_col_amount - amount_centers[idx]),
+                    )
+                    amount_cells[nearest].append(w_amount)
+                    continue
+            m_adh = _PATRON_MONTO_ADHERIDO_A_PALABRA.match(token)
+            if m_adh:
+                w_word = {**word, "text": m_adh.group(1)}
+                w_amount = {**word, "text": m_adh.group(2)}
+                text_words.append(w_word)
+                x_col_amount = (
+                    float(w_amount.get("x1", word["x1"]))
+                    if inferred_edges
+                    else (float(w_amount.get("x0", word["x0"])) + float(w_amount.get("x1", word["x1"]))) / 2
+                )
+                nearest = min(
+                    range(len(amount_centers)),
+                    key=lambda idx: abs(x_col_amount - amount_centers[idx]),
+                )
+                amount_cells[nearest].append(w_amount)
+                continue
+
             xmid = (float(word["x0"]) + float(word["x1"])) / 2
             x_amount = float(word["x1"]) if inferred_edges else xmid
             token_normalizado = normalizar_token_ocr(token).replace("$", "")
@@ -1201,13 +1235,38 @@ _PATRON_MONTO_ADHERIDO_A_PALABRA = re.compile(
 )
 
 
+def _desenredar_token_colision(token: str) -> tuple[str, str] | None:
+    """Desenreda tokens donde columnas de texto y monto colisionaron en el PDF."""
+    if not (any(c.isalpha() for c in token) and any(c.isdigit() for c in token)):
+        return None
+    letters = []
+    digits_and_dots = []
+    for ch in token:
+        if ch.isdigit() or ch in ".,":
+            digits_and_dots.append(ch)
+        elif ch.isalpha() or ch in "áéíóúÁÉÍÓÚñÑüÜ":
+            letters.append(ch)
+        elif ch in "-/()":
+            letters.append(ch)
+
+    word = "".join(letters).strip(". ")
+    monto_raw = "".join(digits_and_dots).strip(". ")
+    m = re.search(r"\d{1,3}(?:\.\d{3})+(?:,\d+)?|\d{4,}", monto_raw)
+    if word and m and len(word) >= 2:
+        return word, m.group(0)
+    return None
+
+
 def _separar_tokens_monto_adherido(tokens: list[str]) -> list[str]:
-    """Separa montos pegados al final de una palabra sin espacio en el layout."""
+    """Separa montos pegados o entrelazados con palabras por solapamiento de columnas."""
     nuevos: list[str] = []
     for t in tokens:
         if _INTERLEAVED_COLUMN_BLEED.search(t):
-            nuevos.append(t)
-            continue
+            desenredado = _desenredar_token_colision(t)
+            if desenredado:
+                nuevos.append(desenredado[0])
+                nuevos.append(desenredado[1])
+                continue
         m = _PATRON_MONTO_ADHERIDO_A_PALABRA.match(t)
         if m:
             nuevos.append(m.group(1))

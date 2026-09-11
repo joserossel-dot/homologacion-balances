@@ -63,7 +63,7 @@ def test_h3_parsear_linea_corrige_desplazamiento_8_columnas():
     assert cuenta.montos_columnas["perdida"] == 100868432.0
 
 
-def test_h3_pipeline_degrada_y_exige_revision_en_colision():
+def test_h3_desenredado_colision_limpia_nombre_y_columnas():
     linea_colision = "2.1.60.266 Serv.Medico Cam.Chilena de la Constru1c0c.9i77.447 10.525.036 452.411 0 452.411 0 0 0"
     cuenta_raw = parsear_linea(
         linea=linea_colision,
@@ -72,5 +72,22 @@ def test_h3_pipeline_degrada_y_exige_revision_en_colision():
         separador_miles=".",
     )
     assert cuenta_raw is not None
-    assert cuenta_raw.requiere_revision_extraccion is True
-    assert "nombre_contaminado_por_fusion_de_columnas" in cuenta_raw.razones_revision_extraccion
+    assert cuenta_raw.nombre == "Serv.Medico Cam.Chilena de la Construcci"
+    assert cuenta_raw.montos_columnas["debitos"] == 10977447.0
+    assert cuenta_raw.montos_columnas["creditos"] == 10525036.0
+    assert cuenta_raw.montos_columnas["saldo_deudor"] == 452411.0
+    assert cuenta_raw.monto == 452411.0
+    assert cuenta_raw.requiere_revision_extraccion is False
+
+
+def test_h3_marcar_cuenta_sospechosa_si_queda_colision_no_resuelta():
+    cuenta_contaminada = CuentaRaw(
+        linea=1,
+        codigo="2.1.60.266",
+        nombre="Serv.Medico Cam.Chilena Constru1c0c.9i77.447",
+        monto=452411.0,
+    )
+    marcar_cuenta_sospechosa(cuenta_contaminada, "2.1.60.266 Serv.Medico Cam.Chilena Constru1c0c.9i77.447 452.411", [])
+    assert cuenta_contaminada.requiere_revision_extraccion is True
+    assert "nombre_contaminado_por_fusion_de_columnas" in cuenta_contaminada.razones_revision_extraccion
+
