@@ -3315,72 +3315,80 @@ def _confirmar_alcance_documentos(archivos) -> bool:
         # reconstruir el mismo widget sin perder su estado.
         st.session_state.setdefault("document_scope_preview", archivos[0].name)
         return True
-    st.subheader("Seleccione las páginas que se analizarán")
-    st.info(
-        "Revise el documento completo en el visor inferior. Si contiene el mismo balance "
-        "en varios formatos, elija sólo uno. En informes auditados seleccione las páginas "
-        "del estado y sus continuaciones, sin volver a incluir sus anexos o duplicados."
-    )
-    if st.session_state.get("document_scope_editing"):
-        st.warning("Cambiar las páginas vuelve a procesar ese documento y reemplaza sus correcciones en esta sesión. Los documentos sin cambios conservan sus resultados.")
-    preview_name = st.selectbox(
-        "Documento a visualizar", [a.name for a in archivos],
-        key="document_scope_preview",
-    )
-    selections = {}
-    errors = []
-    with st.form("document_scope"):
-        for archivo in archivos:
-            if Path(archivo.name).suffix.lower() != ".pdf":
-                continue
-            try:
-                count = page_count(archivo.getvalue())
-            except Exception:
-                errors.append(f"No se pudo abrir {archivo.name} como PDF.")
-                continue
-            st.write(f"{archivo.name}: {count} páginas")
-            key = hashlib.sha256(archivo.name.encode() + archivo.getvalue()).hexdigest()[:16]
-            saved_pages = st.session_state.get("document_pages", {}).get(archivo.name, [])
-            saved_subset = bool(saved_pages) and saved_pages != list(range(1, count + 1))
-            mode = st.radio("Páginas a analizar", ["Todas", "Sólo las seleccionadas"],
-                            index=1 if saved_subset else 0,
-                            key=f"scope_mode_{key}", horizontal=True)
-            text = st.text_input("Páginas o rangos", placeholder="1, 3-5",
-                                 value=", ".join(map(str, saved_pages)) if saved_subset else "",
-                                 key=f"scope_pages_{key}")
-            try:
-                selections[archivo.name] = list(range(1, count + 1)) if mode == "Todas" else parse_pages(text, count)
-            except ValueError as exc:
-                errors.append(f"{archivo.name}: {exc}")
-        submitted = st.form_submit_button("Confirmar páginas y continuar")
-    if submitted:
-        if errors:
-            for error in errors:
-                st.error(error)
-        else:
-            previous = dict(st.session_state.get("document_scope_confirmed") or ())
-            previous_pages = st.session_state.get("document_pages", {})
-            for name, digest in signature:
-                if previous.get(name) != digest or previous_pages.get(name) != selections.get(name):
-                    st.session_state.setdefault(
-                        "process_scope_revisions_pending", set(),
-                    ).add(digest)
-                    revisions = st.session_state.setdefault("extraction_revisions", {})
-                    revisions[name] = revisions.get(name, 0) + 1
-                    st.session_state.metadata_confirmada = False
-                    st.session_state.company_periodos_detectados = ()
-                    st.session_state.company_periodos_seleccionados = ()
-                    for state_key in ("resultados", "metadata_files", "document_intel", "document_families", "extraction_pending",
-                                      "extraction_resolved", "extraction_certifications", "classified_source_snapshots", "processed_at",
-                                      "quality_controls", "depreciation_reclassifications"):
-                        st.session_state.setdefault(state_key, {}).pop(name, None)
-            st.session_state.document_pages = selections
-            st.session_state.document_scope_confirmed = signature
-            st.session_state.document_scope_editing = False
-            return True
-    st.divider()
-    _visor_documento(next(a for a in archivos if a.name == preview_name),
-                     altura="58vh", mostrar_titulo=True)
+    preview_doc = next((a for a in archivos if a.name == preview_name), archivos[0])
+    col_visor, col_form = st.columns([1, 1], gap="medium")
+
+    with col_visor:
+        _visor_documento(preview_doc, altura="72vh", mostrar_titulo=True)
+
+    with col_form:
+        st.subheader("📄 Selección de páginas a analizar")
+        st.info(
+            "Revise el documento en el visor sticky a la izquierda. Si contiene el mismo balance "
+            "en varios formatos, elija sólo uno. En informes auditados seleccione las páginas "
+            "del estado y sus continuaciones."
+        )
+        if st.session_state.get("document_scope_editing"):
+            st.warning("Cambiar las páginas vuelve a procesar ese documento y reemplaza sus correcciones en esta sesión.")
+        
+        if len(archivos) > 1:
+            preview_name = st.selectbox(
+                "Documento a visualizar", [a.name for a in archivos],
+                key="document_scope_preview",
+            )
+        
+        selections = {}
+        errors = []
+        with st.form("document_scope"):
+            for archivo in archivos:
+                if Path(archivo.name).suffix.lower() != ".pdf":
+                    continue
+                try:
+                    count = page_count(archivo.getvalue())
+                except Exception:
+                    errors.append(f"No se pudo abrir {archivo.name} como PDF.")
+                    continue
+                st.markdown(f"**{archivo.name}** (`{count} páginas`)")
+                key = hashlib.sha256(archivo.name.encode() + archivo.getvalue()).hexdigest()[:16]
+                saved_pages = st.session_state.get("document_pages", {}).get(archivo.name, [])
+                saved_subset = bool(saved_pages) and saved_pages != list(range(1, count + 1))
+                mode = st.radio("Páginas a analizar", ["Todas", "Sólo las seleccionadas"],
+                                index=1 if saved_subset else 0,
+                                key=f"scope_mode_{key}", horizontal=True)
+                text = st.text_input("Páginas o rangos", placeholder="1, 3-5",
+                                     value=", ".join(map(str, saved_pages)) if saved_subset else "",
+                                     key=f"scope_pages_{key}")
+                try:
+                    selections[archivo.name] = list(range(1, count + 1)) if mode == "Todas" else parse_pages(text, count)
+                except ValueError as exc:
+                    errors.append(f"{archivo.name}: {exc}")
+            submitted = st.form_submit_button("Confirmar páginas y continuar", use_container_width=True)
+
+        if submitted:
+            if errors:
+                for error in errors:
+                    st.error(error)
+            else:
+                previous = dict(st.session_state.get("document_scope_confirmed") or ())
+                previous_pages = st.session_state.get("document_pages", {})
+                for name, digest in signature:
+                    if previous.get(name) != digest or previous_pages.get(name) != selections.get(name):
+                        st.session_state.setdefault(
+                            "process_scope_revisions_pending", set(),
+                        ).add(digest)
+                        revisions = st.session_state.setdefault("extraction_revisions", {})
+                        revisions[name] = revisions.get(name, 0) + 1
+                        st.session_state.metadata_confirmada = False
+                        st.session_state.company_periodos_detectados = ()
+                        st.session_state.company_periodos_seleccionados = ()
+                        for state_key in ("resultados", "metadata_files", "document_intel", "document_families", "extraction_pending",
+                                          "extraction_resolved", "extraction_certifications", "classified_source_snapshots", "processed_at",
+                                          "quality_controls", "depreciation_reclassifications"):
+                            st.session_state.setdefault(state_key, {}).pop(name, None)
+                st.session_state.document_pages = selections
+                st.session_state.document_scope_confirmed = signature
+                st.session_state.document_scope_editing = False
+                return True
     return False
 
 
@@ -3519,158 +3527,156 @@ def main():
             ):
                 st.session_state.company_periodos_seleccionados = periodos_detectados
 
-        st.subheader("📋 Confirma los datos de la empresa")
-        st.caption("El sistema detectó los siguientes datos generales. Corrígelos si es necesario antes de continuar.")
+        col_visor, col_form = st.columns([1, 1], gap="medium")
+        with col_visor:
+            _visor_documento(first_file, altura="72vh", mostrar_titulo=True)
 
-        with st.form("form_empresa"):
-            col1, col2 = st.columns(2)
-            with col1:
-                rut = st.text_input("RUT", value=st.session_state.company_rut)
-                razon = st.text_input("Razón Social", value=st.session_state.company_razon)
-            with col2:
-                giro_list = ['Otro', 'Inmobiliaria', 'Construcción', 'Promotora']
-                default_giro_idx = 0
-                if st.session_state.company_giro in giro_list:
-                    default_giro_idx = giro_list.index(st.session_state.company_giro)
-                giro_sel = st.selectbox(
-                    "Giro de la empresa (afecta regla D2-Terrenos)",
-                    giro_list, index=default_giro_idx,
-                    help="Escriba dentro del desplegable para filtrar opciones.",
-                )
+        with col_form:
+            st.subheader("📋 Confirma los datos de la empresa")
+            st.caption("El sistema detectó los siguientes datos generales. Corrígelos si es necesario antes de continuar.")
 
-            st.markdown("##### Moneda y período informado")
-            moneda_col, otra_col = st.columns(2)
-            moneda_opciones = ["$", "M", "MM", "USD", "Otra"]
-            moneda_actual = st.session_state.company_moneda
-            moneda_indice = (
-                moneda_opciones.index(moneda_actual)
-                if moneda_actual in moneda_opciones else moneda_opciones.index("Otra")
-            )
-            with moneda_col:
-                moneda_sel = st.selectbox(
-                    "Moneda o unidad",
-                    moneda_opciones,
-                    index=moneda_indice,
-                    help=(
-                        "$: pesos; M: miles; MM: millones; USD: dólares. "
-                        "Escriba para buscar una opción."
-                    ),
-                    filter_mode="fuzzy",
-                )
-            with otra_col:
-                otra_moneda = st.text_input(
-                    "Otra moneda o unidad",
-                    value=(moneda_actual if moneda_actual not in moneda_opciones else ""),
-                    placeholder="Ejemplo: EUR, UF, UTM",
-                    help="Complete este campo únicamente si seleccionó Otra.",
-                )
+            with st.form("form_empresa"):
+                col1, col2 = st.columns(2)
+                with col1:
+                    rut = st.text_input("RUT", value=st.session_state.company_rut)
+                    razon = st.text_input("Razón Social", value=st.session_state.company_razon)
+                with col2:
+                    giro_list = ['Otro', 'Inmobiliaria', 'Construcción', 'Promotora']
+                    default_giro_idx = 0
+                    if st.session_state.company_giro in giro_list:
+                        default_giro_idx = giro_list.index(st.session_state.company_giro)
+                    giro_sel = st.selectbox(
+                        "Giro de la empresa (afecta regla D2-Terrenos)",
+                        giro_list, index=default_giro_idx,
+                        help="Escriba dentro del desplegable para filtrar opciones.",
+                    )
 
-            periodo1, periodo2, periodo3 = st.columns(3)
-            with periodo1:
-                mes_sel = st.selectbox(
-                    "Mes de cierre",
-                    MESES_SELECCION,
-                    index=MESES_SELECCION.index(st.session_state.company_mes),
-                    help="Escriba el nombre del mes para encontrarlo.",
-                    filter_mode="fuzzy",
+                st.markdown("##### Moneda y período informado")
+                moneda_col, otra_col = st.columns(2)
+                moneda_opciones = ["$", "M", "MM", "USD", "Otra"]
+                moneda_actual = st.session_state.company_moneda
+                moneda_indice = (
+                    moneda_opciones.index(moneda_actual)
+                    if moneda_actual in moneda_opciones else moneda_opciones.index("Otra")
                 )
-            anio_actual = date.today().year
-            anios = list(range(anio_actual + 1, 1979, -1))
-            val_anio = st.session_state.company_anio
-            if val_anio is not None and int(val_anio) not in anios:
-                anios.append(int(val_anio))
-                anios.sort(reverse=True)
-            default_anio_idx = anios.index(int(val_anio)) if val_anio is not None else 1
-            with periodo2:
-                anio_sel = st.selectbox(
-                    "Año de cierre" + ("" if val_anio is not None else " (No detectado en documento)"),
-                    anios,
-                    index=default_anio_idx,
-                    help="Año fiscal o de término del balance.",
-                    filter_mode="fuzzy",
-                )
-            opciones_meses = list(range(1, 13))
-            with periodo3:
-                numero_meses_sel = st.selectbox(
-                    "Número de meses del período",
-                    opciones_meses,
-                    index=opciones_meses.index(
-                        int(st.session_state.company_numero_meses) if st.session_state.company_numero_meses is not None else 12
-                    ),
-                    help="Escriba un número entre 1 y 12 para encontrarlo.",
-                    filter_mode="fuzzy",
-                )
+                with moneda_col:
+                    moneda_sel = st.selectbox(
+                        "Moneda o unidad",
+                        moneda_opciones,
+                        index=moneda_indice,
+                        help=(
+                            "$: pesos; M: miles; MM: millones; USD: dólares. "
+                            "Escriba para buscar una opción."
+                        ),
+                        filter_mode="fuzzy",
+                    )
+                with otra_col:
+                    otra_moneda = st.text_input(
+                        "Otra moneda o unidad",
+                        value=(moneda_actual if moneda_actual not in moneda_opciones else ""),
+                        placeholder="Ejemplo: EUR, UF, UTM",
+                        help="Complete este campo únicamente si seleccionó Otra.",
+                    )
 
-            periodos_detectados = tuple(
-                st.session_state.get("company_periodos_detectados", ())
-            )
-            if len(periodos_detectados) >= 2:
-                actual, anterior = periodos_detectados[:2]
-                opciones_periodo = {
-                    f"Ambos períodos detectados: {actual} y {anterior}": (actual, anterior),
-                    f"Sólo {actual}": (actual,),
-                    f"Sólo {anterior}": (anterior,),
-                }
-            elif len(periodos_detectados) == 1:
-                unico = periodos_detectados[0]
-                opciones_periodo = {f"Sólo {unico} (Período detectado)": (unico,)}
-            else:
-                opciones_periodo = {f"Período manual: {anio_sel}": (str(anio_sel),)}
+                periodo1, periodo2, periodo3 = st.columns(3)
+                with periodo1:
+                    mes_sel = st.selectbox(
+                        "Mes de cierre",
+                        MESES_SELECCION,
+                        index=MESES_SELECCION.index(st.session_state.company_mes),
+                        help="Escriba el nombre del mes para encontrarlo.",
+                        filter_mode="fuzzy",
+                    )
+                anio_actual = date.today().year
+                anios = list(range(anio_actual + 1, 1979, -1))
+                val_anio = st.session_state.company_anio
+                if val_anio is not None and int(val_anio) not in anios:
+                    anios.append(int(val_anio))
+                    anios.sort(reverse=True)
+                default_anio_idx = anios.index(int(val_anio)) if val_anio is not None else 1
+                with periodo2:
+                    anio_sel = st.selectbox(
+                        "Año de cierre" + ("" if val_anio is not None else " (No detectado en documento)"),
+                        anios,
+                        index=default_anio_idx,
+                        help="Año fiscal o de término del balance.",
+                        filter_mode="fuzzy",
+                    )
+                opciones_meses = list(range(1, 13))
+                with periodo3:
+                    numero_meses_sel = st.selectbox(
+                        "Número de meses del período",
+                        opciones_meses,
+                        index=opciones_meses.index(
+                            int(st.session_state.company_numero_meses) if st.session_state.company_numero_meses is not None else 12
+                        ),
+                        help="Escriba un número entre 1 y 12 para encontrarlo.",
+                        filter_mode="fuzzy",
+                    )
 
-            seleccion_actual = tuple(
-                st.session_state.get(
-                    "company_periodos_seleccionados",
-                    periodos_detectados or (str(anio_sel),),
+                periodos_detectados = tuple(
+                    st.session_state.get("company_periodos_detectados", ())
                 )
-            )
-            etiquetas_periodo = list(opciones_periodo)
-            indice_periodo = next(
-                (
-                    indice for indice, etiqueta in enumerate(etiquetas_periodo)
-                    if opciones_periodo[etiqueta] == seleccion_actual
-                ),
-                0,
-            )
-            alcance_periodos = st.selectbox(
-                "Períodos a extraer",
-                etiquetas_periodo,
-                index=indice_periodo,
-                help=(
-                    "Ambos conserva una sola clasificación por cuenta y un "
-                    "importe independiente para cada período."
-                ),
-            )
-
-            submitted = st.form_submit_button("Confirmar y procesar todos los balances")
-            if submitted:
-                moneda_final = otra_moneda.strip() if moneda_sel == "Otra" else moneda_sel
-                if not moneda_final:
-                    st.error("Especifique la moneda o unidad cuando seleccione Otra.")
+                if len(periodos_detectados) >= 2:
+                    actual, anterior = periodos_detectados[:2]
+                    opciones_periodo = {
+                        f"Ambos períodos detectados: {actual} y {anterior}": (actual, anterior),
+                        f"Sólo {actual}": (actual,),
+                        f"Sólo {anterior}": (anterior,),
+                    }
+                elif len(periodos_detectados) == 1:
+                    unico = periodos_detectados[0]
+                    opciones_periodo = {f"Sólo {unico} (Período detectado)": (unico,)}
                 else:
-                    st.session_state.company_rut = rut
-                    st.session_state.company_razon = razon
-                    st.session_state.company_giro = giro_sel
-                    st.session_state.company_moneda = moneda_final
-                    st.session_state.company_mes = mes_sel
-                    st.session_state.company_anio = int(anio_sel)
-                    st.session_state.company_numero_meses = int(numero_meses_sel)
-                    st.session_state.company_periodos_seleccionados = (
-                        opciones_periodo[alcance_periodos]
+                    opciones_periodo = {f"Período manual: {anio_sel}": (str(anio_sel),)}
+
+                seleccion_actual = tuple(
+                    st.session_state.get(
+                        "company_periodos_seleccionados",
+                        periodos_detectados or (str(anio_sel),),
                     )
-                    st.session_state.company_anio = int(
-                        st.session_state.company_periodos_seleccionados[0]
-                    )
-                    st.session_state.metadata_confirmada = True
-                    st.session_state.resultados = {}
-                    st.session_state.metadata_files = {}
-                    st.rerun()
-        st.divider()
-        st.subheader("Documento original")
-        st.caption(
-            "Revise el encabezado y el período antes de confirmar. El visor ocupa "
-            "al menos la mitad inferior de la pantalla."
-        )
-        _visor_documento(first_file, altura="58vh", mostrar_titulo=False)
+                )
+                etiquetas_periodo = list(opciones_periodo)
+                indice_periodo = next(
+                    (
+                        indice for indice, etiqueta in enumerate(etiquetas_periodo)
+                        if opciones_periodo[etiqueta] == seleccion_actual
+                    ),
+                    0,
+                )
+                alcance_periodos = st.selectbox(
+                    "Períodos a extraer",
+                    etiquetas_periodo,
+                    index=indice_periodo,
+                    help=(
+                        "Ambos conserva una sola clasificación por cuenta y un "
+                        "importe independiente para cada período."
+                    ),
+                )
+
+                submitted = st.form_submit_button("Confirmar y procesar todos los balances", use_container_width=True)
+                if submitted:
+                    moneda_final = otra_moneda.strip() if moneda_sel == "Otra" else moneda_sel
+                    if not moneda_final:
+                        st.error("Especifique la moneda o unidad cuando seleccione Otra.")
+                    else:
+                        st.session_state.company_rut = rut
+                        st.session_state.company_razon = razon
+                        st.session_state.company_giro = giro_sel
+                        st.session_state.company_moneda = moneda_final
+                        st.session_state.company_mes = mes_sel
+                        st.session_state.company_anio = int(anio_sel)
+                        st.session_state.company_numero_meses = int(numero_meses_sel)
+                        st.session_state.company_periodos_seleccionados = (
+                            opciones_periodo[alcance_periodos]
+                        )
+                        st.session_state.company_anio = int(
+                            st.session_state.company_periodos_seleccionados[0]
+                        )
+                        st.session_state.metadata_confirmada = True
+                        st.session_state.resultados = {}
+                        st.session_state.metadata_files = {}
+                        st.rerun()
         return
 
     try:
@@ -4797,11 +4803,12 @@ def _exportar_advertencias_auxiliares(writer, certification) -> None:
 
 
 def _mostrar_etapa_correccion_extraccion(archivo, filename: str) -> None:
-    """Corrección a ancho completo y documento en la parte inferior."""
-    _mostrar_correccion_extraccion(filename)
-    st.divider()
-    st.subheader("Documento original")
-    _visor_documento(archivo, altura="58vh", mostrar_titulo=False)
+    """Corrección en split-view sticky con documento original a la izquierda."""
+    col_visor, col_diag = st.columns([1, 1], gap="medium")
+    with col_visor:
+        _visor_documento(archivo, altura="72vh", mostrar_titulo=True)
+    with col_diag:
+        _mostrar_correccion_extraccion(filename)
 
 
 def _explicar_diferencia_controles(certification) -> str:
