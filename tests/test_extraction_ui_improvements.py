@@ -78,3 +78,24 @@ def test_es_ruido_empresa_identifica_software_y_cabeceras():
     assert _es_ruido_empresa("BALANCE DE OCHO COLUMNAS") is True
     assert _es_ruido_empresa("PÁGINA 1 DE 5") is True
     assert _es_ruido_empresa("AGRÍCOLA VALLE CENTRAL SPA") is False
+
+
+def test_extractor_detecta_acumulado_mes_anio_y_empresa_corporativa():
+    lineas = [
+        "Do E Na",
+        "INVERSIONES TORABUS LIMITADA",
+        "Sec de Inversion y Rentistas de Capitales Mobiliarios",
+        "1 Sur Nº 690 of. 1001",
+        "Talca",
+        "Talca",
+        "76.013.372-8",
+        "Balance Tributario",
+        "Acumulado mes/año Diciembre/2023",
+        "Moneda : Peso Chileno",
+    ]
+    meta = extraer_metadata(lineas)
+    assert meta.razon_social == "Inversiones Torabus Limitada"
+    assert meta.rut == "76.013.372-8"
+    assert meta.mes_cierre == "Diciembre"
+    assert meta.anio_cierre == 2023
+    assert meta.periodos_detectados == ("2023",)

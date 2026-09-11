@@ -81,6 +81,15 @@ PATRON_PERIODO_LABEL = re.compile(
     r'(\d{1,2}[/\-\.]\d{1,2}[/\-\.]\d{2,4})',
     re.IGNORECASE
 )
+PATRON_MES_ANIO = re.compile(
+    r'(?:acumulado\s+)?(?:mes\s*[\/\-]\s*a[ñn]o|mes|per[ií]odo|periodo|ejercicio)?\s*[:\s]*'
+    r'([a-zA-ZáéíóúÁÉÍÓÚ]+)\s*(?:de|\/|\-|\s)\s*(\d{4})',
+    re.IGNORECASE
+)
+PATRON_CORP_INDICATOR = re.compile(
+    r'\b(spa|s\.a\.?|ltda\.?|limitada|sociedad|eirl|e\.i\.r\.l\.|inversiones|comercial|constructora|agricola|agrícola|servicios|asesorias|asesorías|consultora|ingenieria|ingeniería|transportes|distribuidora|exportadora|importadora|holding|corporacion|corporación)\b',
+    re.IGNORECASE
+)
 
 ERP_NOISE_TERMS = {
     'kame one', 'kame', 'softland', 'defontana', 'erp', 'contapro', 'random',
@@ -147,15 +156,23 @@ def extraer_metadata(lineas: list[str]) -> MetadataEmpresa:
     if m and not _es_ruido_empresa(m.group(1)):
         meta.razon_social = m.group(1).strip().title()
     else:
-        # Heurística: primera línea no vacía que tenga más de 4 chars, no sea ruido
-        # y no sea solo fecha o RUT
+        # Heurística: preferir líneas con indicadores corporativos (Ltda, SpA, S.A., etc.)
         for linea in lineas[:15]:
             linea_limpia = linea.strip()
             if (len(linea_limpia) > 4
                     and not _es_ruido_empresa(linea_limpia)
-                    and not PATRON_RUT.search(linea_limpia)):
+                    and not PATRON_RUT.search(linea_limpia)
+                    and PATRON_CORP_INDICATOR.search(linea_limpia)):
                 meta.razon_social = linea_limpia.title()
                 break
+        if not meta.razon_social:
+            for linea in lineas[:15]:
+                linea_limpia = linea.strip()
+                if (len(linea_limpia) > 4
+                        and not _es_ruido_empresa(linea_limpia)
+                        and not PATRON_RUT.search(linea_limpia)):
+                    meta.razon_social = linea_limpia.title()
+                    break
 
     # ── 3. Período ────────────────────────────────────────────────────────────
     m_text = PATRON_PERIODO_TEXTUAL.search(texto_encabezado)
@@ -166,6 +183,7 @@ def extraer_metadata(lineas: list[str]) -> MetadataEmpresa:
         mes2 = MESES.get(m2_str, '12')
         meta.periodo_desde = f"{d1.zfill(2)}/{mes1}/{a1}"
         meta.periodo_hasta = f"{d2.zfill(2)}/{mes2}/{a2}"
+        meta.mes_cierre = m2_str.capitalize()
         meta.anio_cierre = int(a2)
         meta.periodos_detectados = (str(a2),) if a1 == a2 else (str(a2), str(a1))
     else:
@@ -178,32 +196,43 @@ def extraer_metadata(lineas: list[str]) -> MetadataEmpresa:
                 meta.anio_cierre = int(partes_hasta[2])
                 meta.periodos_detectados = (partes_hasta[2],)
         else:
-            m_cierre = PATRON_FECHA_CIERRE.search(texto_encabezado)
-            if m_cierre:
-                dia, mes_str, anio = m_cierre.group(1), m_cierre.group(2).lower(), m_cierre.group(3)
-                mes = MESES.get(mes_str, '12')
-                meta.periodo_hasta = f"{dia.zfill(2)}/{mes}/{anio}"
+            m_mes_anio = PATRON_MES_ANIO.search(texto_encabezado)
+            if m_mes_anio and m_mes_anio.group(1).lower() in MESES:
+                mes_str, anio = m_mes_anio.group(1).lower(), m_mes_anio.group(2)
+                mes = MESES[mes_str]
+                meta.periodo_hasta = f"31/{mes}/{anio}"
                 meta.periodo_desde = f"01/01/{anio}"
+                meta.mes_cierre = mes_str.capitalize()
                 meta.anio_cierre = int(anio)
                 meta.periodos_detectados = (str(anio),)
             else:
-                m_dig = PATRON_FECHA_CIERRE_DIGITOS.search(texto_encabezado)
-                if m_dig:
-                    dia, mes, anio = m_dig.group(1), m_dig.group(2), m_dig.group(3)
-                    if len(anio) == 2:
-                        anio = '20' + anio
-                    meta.periodo_hasta = f"{dia.zfill(2)}/{mes.zfill(2)}/{anio}"
+                m_cierre = PATRON_FECHA_CIERRE.search(texto_encabezado)
+                if m_cierre:
+                    dia, mes_str, anio = m_cierre.group(1), m_cierre.group(2).lower(), m_cierre.group(3)
+                    mes = MESES.get(mes_str, '12')
+                    meta.periodo_hasta = f"{dia.zfill(2)}/{mes}/{anio}"
                     meta.periodo_desde = f"01/01/{anio}"
+                    meta.mes_cierre = mes_str.capitalize()
                     meta.anio_cierre = int(anio)
                     meta.periodos_detectados = (str(anio),)
                 else:
-                    m_anio = PATRON_ANIO_SIMPLE.search(texto_encabezado)
-                    if m_anio:
-                        anio = m_anio.group(1)
+                    m_dig = PATRON_FECHA_CIERRE_DIGITOS.search(texto_encabezado)
+                    if m_dig:
+                        dia, mes, anio = m_dig.group(1), m_dig.group(2), m_dig.group(3)
+                        if len(anio) == 2:
+                            anio = '20' + anio
+                        meta.periodo_hasta = f"{dia.zfill(2)}/{mes.zfill(2)}/{anio}"
                         meta.periodo_desde = f"01/01/{anio}"
-                        meta.periodo_hasta = f"31/12/{anio}"
                         meta.anio_cierre = int(anio)
                         meta.periodos_detectados = (str(anio),)
+                    else:
+                        m_anio = PATRON_ANIO_SIMPLE.search(texto_encabezado)
+                        if m_anio:
+                            anio = m_anio.group(1)
+                            meta.periodo_desde = f"01/01/{anio}"
+                            meta.periodo_hasta = f"31/12/{anio}"
+                            meta.anio_cierre = int(anio)
+                            meta.periodos_detectados = (str(anio),)
 
     # ── 4. Giro ───────────────────────────────────────────────────────────────
     m = PATRON_GIRO.search(texto_encabezado)

@@ -3505,28 +3505,25 @@ def main():
 
     if not st.session_state.get('metadata_confirmada', False):
         first_file = archivos[0]
-        with st.spinner(f"Detectando metadata de la empresa en {first_file.name}..."):
-            lineas_encabezado = _extraer_lineas_encabezado(first_file)
-            meta = extraer_metadata(lineas_encabezado)
-            st.session_state.company_rut = meta.rut or ""
-            st.session_state.company_razon = meta.razon_social or ""
-            st.session_state.company_giro = meta.giro or "Otro"
-            mes_detectado, anio_detectado, meses_detectados = _valores_periodo_metadata(meta)
-            st.session_state.company_moneda = meta.moneda or "$"
-            st.session_state.company_mes = mes_detectado
-            st.session_state.company_anio = anio_detectado
-            st.session_state.company_numero_meses = meses_detectados
-            periodos_detectados = _detectar_periodos_comparativos(
-                lineas_encabezado, anio_detectado,
-            )
-            st.session_state.company_periodos_detectados = periodos_detectados
-            seleccion_guardada = tuple(
-                st.session_state.get("company_periodos_seleccionados", ())
-            )
-            if not seleccion_guardada or not set(seleccion_guardada).issubset(
-                periodos_detectados
-            ):
-                st.session_state.company_periodos_seleccionados = periodos_detectados
+        file_signature = (first_file.name, hashlib.sha256(first_file.getvalue()).hexdigest())
+        if st.session_state.get("metadata_extracted_signature") != file_signature:
+            with st.spinner(f"Detectando metadata de la empresa en {first_file.name}..."):
+                lineas_encabezado = _extraer_lineas_encabezado(first_file)
+                meta = extraer_metadata(lineas_encabezado)
+                st.session_state.company_rut = meta.rut or ""
+                st.session_state.company_razon = meta.razon_social or ""
+                st.session_state.company_giro = meta.giro or "Otro"
+                mes_detectado, anio_detectado, meses_detectados = _valores_periodo_metadata(meta)
+                st.session_state.company_moneda = meta.moneda or "$"
+                st.session_state.company_mes = mes_detectado
+                st.session_state.company_anio = anio_detectado
+                st.session_state.company_numero_meses = meses_detectados
+                periodos_detectados = _detectar_periodos_comparativos(
+                    lineas_encabezado, anio_detectado,
+                )
+                st.session_state.company_periodos_detectados = periodos_detectados
+                st.session_state.company_periodos_seleccionados = periodos_detectados or ((str(anio_detectado),) if anio_detectado else ())
+                st.session_state.metadata_extracted_signature = file_signature
 
         col_visor, col_form = st.columns([1, 1], gap="medium")
         with col_visor:
@@ -3591,10 +3588,13 @@ def main():
                 anio_actual = date.today().year
                 anios = list(range(anio_actual + 1, 1979, -1))
                 val_anio = st.session_state.company_anio
-                if val_anio is not None and int(val_anio) not in anios:
-                    anios.append(int(val_anio))
-                    anios.sort(reverse=True)
-                default_anio_idx = anios.index(int(val_anio)) if val_anio is not None else 1
+                if val_anio is not None:
+                    if int(val_anio) not in anios:
+                        anios.append(int(val_anio))
+                        anios.sort(reverse=True)
+                    default_anio_idx = anios.index(int(val_anio))
+                else:
+                    default_anio_idx = anios.index(anio_actual - 1) if (anio_actual - 1) in anios else 0
                 with periodo2:
                     anio_sel = st.selectbox(
                         "Año de cierre" + ("" if val_anio is not None else " (No detectado en documento)"),
@@ -3668,9 +3668,12 @@ def main():
                         st.session_state.company_mes = mes_sel
                         st.session_state.company_anio = int(anio_sel)
                         st.session_state.company_numero_meses = int(numero_meses_sel)
-                        st.session_state.company_periodos_seleccionados = (
-                            opciones_periodo[alcance_periodos]
-                        )
+                        if periodos_detectados:
+                            st.session_state.company_periodos_seleccionados = (
+                                opciones_periodo.get(alcance_periodos, (str(anio_sel),))
+                            )
+                        else:
+                            st.session_state.company_periodos_seleccionados = (str(anio_sel),)
                         st.session_state.company_anio = int(
                             st.session_state.company_periodos_seleccionados[0]
                         )
@@ -4330,23 +4333,18 @@ def _visor_documento(
             archivo.seek(0)
 
 
-def _extraer_lineas_encabezado(archivo) -> list[str]:
+@st.cache_data(max_entries=12, show_spinner=False)
+def _extraer_lineas_encabezado_cached(contenido: bytes, suffix: str) -> list[str]:
     import tempfile
-    suffix = Path(archivo.name).suffix.lower()
-    archivo.seek(0)
     if suffix == '.pdf':
         try:
             import pdfplumber
-            contenido = _contenido_para_extraer(archivo)
             with pdfplumber.open(BytesIO(contenido)) as pdf:
                 texto = pdf.pages[0].extract_text() or ""
             lineas = texto.split('\n')[:40]
             if any(re.search(r"(?:19|20)\d{2}", linea) for linea in lineas):
                 return lineas
 
-            # Los estados auditados suelen ser PDFs escaneados. La selección
-            # de períodos ocurre antes del parseo principal, por lo que el
-            # encabezado necesita un OCR breve de la primera página elegida.
             png = render_page(contenido, 1)
             with tempfile.TemporaryDirectory() as tmpdir:
                 imagen = Path(tmpdir) / "encabezado.png"
@@ -4355,17 +4353,24 @@ def _extraer_lineas_encabezado(archivo) -> list[str]:
             return texto_ocr.split('\n')[:60]
         except Exception:
             return []
-        finally:
-            archivo.seek(0)
     else:
-        archivo.seek(0)
-        df = pd.read_excel(archivo, header=None, nrows=15).fillna('')
-        archivo.seek(0)
-        lineas = []
-        for _, row in df.iterrows():
-            vals = [str(v) for v in row if str(v) not in ('nan', 'None', '')]
-            if vals: lineas.append(' '.join(vals))
-        return lineas
+        try:
+            df = pd.read_excel(BytesIO(contenido), header=None, nrows=15).fillna('')
+            lineas = []
+            for _, row in df.iterrows():
+                vals = [str(v) for v in row if str(v) not in ('nan', 'None', '')]
+                if vals:
+                    lineas.append(' '.join(vals))
+            return lineas
+        except Exception:
+            return []
+
+
+def _extraer_lineas_encabezado(archivo) -> list[str]:
+    suffix = Path(archivo.name).suffix.lower()
+    archivo.seek(0)
+    contenido = _contenido_para_extraer(archivo)
+    return _extraer_lineas_encabezado_cached(contenido, suffix)
 
 
 def _documento_no_es_balance(signature) -> bool:
