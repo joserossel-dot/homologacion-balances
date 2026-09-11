@@ -22,10 +22,8 @@ from pipeline.cmcc_classifier import CMCCClassifier
 from pipeline.features import CMCCFeatureFlags
 from persistence.neon_store import NeonKnowledgeStore
 from parsers.account_type_resolver import (
-    is_accumulated_result_name,
     is_contra_asset_name,
     is_equity_account_name,
-    is_patrimonial_reserve_name,
     is_ppe_depreciation_name,
 )
 from reglas_especiales import ProcesadorReglasEspeciales
@@ -85,7 +83,7 @@ class HomologationPipeline:
     # un código de cuenta. Las partidas de balance además exigen que la
     # columna/tipo observado sea compatible; las de resultados no dependen
     # del signo ni de que el PDF haya impreso una columna explícita.
-    _AUDITED_STATEMENT_LABELS: list[tuple[re.Pattern, str, set[str] | None]] = [
+    _AUDITED_STATEMENT_LABELS: list[tuple[re.Pattern, str, set[str | None] | None]] = [
         (re.compile(r"efectivo y (?:efectivo )?equivalente(?:s)?(?: al efectivo)?", re.I), "AC.01", {"ACTIVO"}),
         (re.compile(r"otros activos financieros(?: corrientes?)?", re.I), "AC.08", {"ACTIVO"}),
         (re.compile(r"deudores comerciales y otras cuentas por cobrar(?: corrientes)?", re.I), "AC.03", {"ACTIVO"}),
@@ -100,7 +98,10 @@ class HomologationPipeline:
         (re.compile(r"activos por impuestos diferidos(?: no corrientes)?", re.I), "ANC.09", {"ACTIVO"}),
         (re.compile(r"otros activos no financieros(?: no corrientes)?", re.I), "ANC.06", {"ACTIVO"}),
         (re.compile(r"cuentas comerciales y otras cuentas por pagar(?: corrientes)?", re.I), "PC.01", {"PASIVO"}),
+        (re.compile(r"acreedores comerciales(?: y otras cuentas por pagar)?", re.I), "PC.01", {"PASIVO"}),
+        (re.compile(r"otros acreedores", re.I), "PC.01", {"PASIVO"}),
         (re.compile(r"(?:otros )?pasivos financieros(?: corrientes)?", re.I), "PC.02", {"PASIVO"}),
+        (re.compile(r"obligaciones con instituciones de cr[eé]dito(?: corrientes?)?", re.I), "PC.02", {"PASIVO"}),
         (re.compile(r"pasivos por impuestos(?: corrientes)?", re.I), "PC.05", {"PASIVO"}),
         (re.compile(r"(?:provisi[oó]n |provisiones por )?beneficios a los empleados(?: corrientes)?", re.I), "PC.06", {"PASIVO"}),
         (re.compile(r"cuentas por pagar a entidades relacionadas corrientes", re.I), "PC.07", {"PASIVO"}),
@@ -108,11 +109,20 @@ class HomologationPipeline:
         (re.compile(r"otros pasivos no financieros", re.I), "PC.08", {"PASIVO"}),
         (re.compile(r"otros pasivos financieros no corrientes?", re.I), "PNC.05", {"PASIVO"}),
         (re.compile(r"pasivos financieros no corrientes?", re.I), "PNC.01", {"PASIVO"}),
+        (re.compile(r"obligaciones con instituciones de cr[eé]dito no corrientes?", re.I), "PNC.01", {"PASIVO"}),
         (re.compile(r"cuentas por pagar a entidades relacionadas no corrientes", re.I), "PNC.04", {"PASIVO"}),
         (re.compile(r"pasivos? por impuestos diferidos", re.I), "PNC.06", {"PASIVO"}),
+        (re.compile(r"deferred taxes", re.I), "PNC.06", {"PASIVO"}),
+        (re.compile(r"deferred taxes", re.I), "ANC.09", {"ACTIVO"}),
+        (re.compile(r"inversiones en otras (?:empresas|sociedades)", re.I), "ANC.04", {"ACTIVO"}),
+        (re.compile(r"activos biol[oó]gicos(?: corrientes?)?", re.I), "AC.05", {"ACTIVO"}),
         (re.compile(r"capital emitido", re.I), "PAT.01", {"PATRIMONIO"}),
+        (re.compile(r"capital pagado", re.I), "PAT.01", {"PATRIMONIO"}),
         (re.compile(r"(?:otras )?reservas", re.I), "PAT.02", {"PATRIMONIO"}),
+        (re.compile(r"retasaci[oó]n t[eé]cnica", re.I), "PAT.02", {"PATRIMONIO"}),
         (re.compile(r"ganancias? p[eé]rdidas? acumuladas", re.I), "PAT.03", {"PATRIMONIO"}),
+        (re.compile(r"resultados acumulados", re.I), "PAT.03", {"PATRIMONIO"}),
+        (re.compile(r"utilidad(?:\s*p[eé]rdida)?\s*del ejercicio", re.I), "PAT.04", {"PATRIMONIO", "PERDIDA", "GANANCIA"}),
         (re.compile(r"ingresos de (?:actividades ordinarias|explotaci[oó]n)", re.I), "ER.01", None),
         (re.compile(r"costo de (?:ventas|explotaci[oó]n)", re.I), "ER.02", None),
         (re.compile(r"gastos? de administraci[oó]n", re.I), "ER.04", None),
@@ -153,9 +163,46 @@ class HomologationPipeline:
             e for e in data if e.get("codigo_estandar") != "__EXCLUIR__"
         )
 
-    @staticmethod
-    def _normalize_name(name: str) -> str:
+    _ACCOUNT_ABBREVIATIONS: list[tuple[re.Pattern, str]] = [
+        (re.compile(r"\b(?:c/p|c\.p\.|cp)\b", re.I), "corto plazo"),
+        (re.compile(r"\b(?:l/p|l\.p\.|lp)\b", re.I), "largo plazo"),
+        (re.compile(r"\bctas?(?:\.|\b)", re.I), "cuentas"),
+        (re.compile(r"\bctes?(?:\.|\b)", re.I), "corrientes"),
+        (re.compile(r"\bdoctos?(?:\.|\b)|\bdoc\.", re.I), "documentos"),
+        (re.compile(r"\boblig(?:\.|\b)", re.I), "obligaciones"),
+        (re.compile(r"\binst(?:\.|\b)", re.I), "instituciones"),
+        (re.compile(r"\bfinanc(?:\.|\b)", re.I), "financieras"),
+        (re.compile(r"\bbcos?(?:\.|\b)", re.I), "bancos"),
+        (re.compile(r"\brelac(?:\.|\b)", re.I), "relacionadas"),
+    ]
+
+    _PATRONES_RUIDO_ERP: list[re.Pattern] = [
+        re.compile(r"^\s*Usuario\s*:\s*\w+", re.I),
+        re.compile(r"^\s*HASTA\s+\d{1,2}/\d{1,2}/\d{4}", re.I),
+        re.compile(r"^\s*[\$\s]+\s*$"),
+        re.compile(r"^\s*(?:BALANCE|GASTOS|INGRESOS|FINANCIEROS|PLAZO)\s*$", re.I),
+    ]
+
+    @classmethod
+    def _expand_abbreviations(cls, text: str) -> str:
+        for pattern, replacement in cls._ACCOUNT_ABBREVIATIONS:
+            text = pattern.sub(replacement, text)
+        return text
+
+    @classmethod
+    def _is_erp_metadata_noise(cls, account_name: str, monto: float | None = None) -> bool:
+        if not account_name:
+            return True
+        raw = account_name.strip()
+        for pat in cls._PATRONES_RUIDO_ERP:
+            if pat.search(raw):
+                return True
+        return False
+
+    @classmethod
+    def _normalize_name(cls, name: str) -> str:
         name = name.lower().strip()
+        name = cls._expand_abbreviations(name)
         name = re.sub(r"[^a-z0-9áéíóúñü ]+", " ", name)
         name = re.sub(r"\s+", " ", name).strip()
         return name
@@ -792,7 +839,6 @@ class HomologationPipeline:
         cmcc_review = self._features.CMCC_REVIEW_THRESHOLD
         enable_review_pipeline = self._features.ENABLE_CMCC_REVIEW_PIPELINE
         enable_type_filter = self._features.ENABLE_ACCOUNT_TYPE_FILTER
-        enable_regex = self._features.ENABLE_REGEX_FALLBACK
 
         from parsers.account_type_resolver import AccountTypeResolver
         type_resolver = AccountTypeResolver()
@@ -818,6 +864,14 @@ class HomologationPipeline:
                     "account_name": ab.account_name,
                     "ignored_reason": "control_total",
                     "is_total": True,
+                })
+                continue
+
+            if self._is_erp_metadata_noise(ab.account_name, cr.monto):
+                ignored.append({
+                    "account_code": ab.account_code,
+                    "account_name": ab.account_name,
+                    "ignored_reason": "metadato_erp",
                 })
                 continue
 
