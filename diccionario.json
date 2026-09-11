@@ -4623,5 +4623,10 @@
     "cuenta_original": "Provisiones corrientes",
     "codigo_estandar": "PC.09",
     "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "BCI",
+    "codigo_estandar": "PC.02",
+    "fuente": "validacion_humana"
   }
 ]

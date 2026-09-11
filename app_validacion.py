@@ -4307,10 +4307,10 @@ def _visor_documento(
             st.error("No se pudo mostrar esta página. El documento original no se modificó.")
             return
         st.html(f"""
-        <div style="height:{altura};min-height:50vh;overflow:auto;border:1px solid #d0d0d0;background:#f5f5f5;text-align:center">
-          <img src="data:image/png;base64,{b64}" style="max-width:none" />
+        <div style="height:{altura};min-height:55vh;max-height:85vh;overflow-y:auto;overflow-x:hidden;border:1px solid #cbd5e1;border-radius:8px;background:#f8fafc;padding:6px;text-align:center;">
+          <img src="data:image/png;base64,{b64}" style="width:100%;max-width:100%;height:auto;display:block;margin:0 auto;border-radius:4px;box-shadow:0 1px 3px rgba(0,0,0,0.1);" />
         </div>
-        <p>Página {pagina} de {n_paginas} · {escape(archivo.name)}</p>
+        <p style="font-size:0.8em;color:#64748b;margin-top:4px;text-align:center;">Página {pagina} de {n_paginas} · {escape(archivo.name)}</p>
         """)
 
     elif suffix in ('.xlsx', '.xls'):
@@ -5839,11 +5839,11 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
     for idx, row in visible.iterrows():
         seleccionada = idx in st.session_state.lote_seleccion
         with st.container(border=seleccionada):
-            c0, c1, c2 = st.columns([0.3, 4.2, 4.5])
+            c0, c1, c2, c3 = st.columns([0.04, 0.44, 0.40, 0.12], vertical_alignment="center")
             with c0:
                 checkbox_key = f"{checkbox_prefix}_{idx}"
                 st.checkbox(
-                    "", value=seleccionada, key=checkbox_key,
+                    "Seleccionar", value=seleccionada, key=checkbox_key,
                     label_visibility="collapsed",
                     on_change=_alternar_seleccion_lote,
                     args=(idx, checkbox_key),
@@ -5891,136 +5891,158 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                     detalles.append(f"{float(row.get('confianza')):.0%}")
                 if pd.notna(row.get('monto_periodo_anterior')):
                     detalles.append(f"Ant: ${float(row['monto_periodo_anterior']):,.0f}")
-                st.markdown(f"<div style='font-size:0.75em; color:#64748b; margin-bottom:4px;'>{' · '.join(detalles)}</div>", unsafe_allow_html=True)
 
-                columnas_derivadas = str(row.get('columnas_derivadas') or '').strip()
-                if columnas_derivadas:
-                    st.warning(
-                        "Dato reconstruido contablemente: "
-                        f"{columnas_derivadas}. Requiere confirmación humana."
-                    )
+                c1_sub1, c1_sub2 = st.columns([0.75, 0.25])
+                with c1_sub1:
+                    st.markdown(f"<div style='font-size:0.75em; color:#64748b;'>{' · '.join(detalles)}</div>", unsafe_allow_html=True)
+                with c1_sub2:
+                    with st.popover("✏️ Editar", use_container_width=True):
+                        st.markdown(f"**Editar cuenta:** `{_nombre_mostrar(row)}`")
+                        nuevo_nombre = st.text_input("Nombre", value=_nombre_mostrar(row), key=f"ed_nombre_{doc_key}_{idx}")
+                        opciones_nat = ['ACTIVO', 'PASIVO', 'PERDIDA', 'GANANCIA']
+                        columna_fisica = str(col_extraida).upper()
+                        idx_nat = opciones_nat.index(columna_fisica) if columna_fisica in opciones_nat else 0
+                        nueva_nat = st.selectbox("Columna contable", opciones_nat, index=idx_nat, key=f"ed_nat_{doc_key}_{idx}")
+                        monto_inicial = row['monto'] if pd.notna(row['monto']) else 0.0
+                        periodos_edicion = _periodos_seleccionados()
+                        etiqueta_monto = f"Monto ({periodos_edicion[0]})" if periodos_edicion else "Monto"
+                        nuevo_monto = st.number_input(etiqueta_monto, value=float(monto_inicial), format="%.0f", key=f"ed_monto_{doc_key}_{idx}")
 
-                edit_mode = st.checkbox("Editar cuenta", key=f"edit_{doc_key}_{idx}")
+                        if st.button("💾 Guardar corrección", key=f"ed_guardar_{doc_key}_{idx}", use_container_width=True):
+                            df_mod = st.session_state.resultados[archivo_nombre]
+                            original_col = row.get('origen_columna', '')
+                            original_monto = row['monto']
+                            col_changed = nueva_nat.lower() != original_col
+                            monto_changed = (nuevo_monto != original_monto) if pd.notna(original_monto) else (nuevo_monto != 0)
 
-                if edit_mode:
-                    st.divider()
-                    nuevo_nombre = st.text_input("Nombre", value=_nombre_mostrar(row), key=f"ed_nombre_{doc_key}_{idx}")
-                    opciones_nat = ['ACTIVO', 'PASIVO', 'PERDIDA', 'GANANCIA']
-                    columna_fisica = str(col_extraida).upper()
-                    idx_nat = opciones_nat.index(columna_fisica) if columna_fisica in opciones_nat else 0
-                    nueva_nat = st.selectbox("Columna contable", opciones_nat, index=idx_nat, key=f"ed_nat_{doc_key}_{idx}")
-                    monto_inicial = row['monto'] if pd.notna(row['monto']) else 0.0
-                    periodos_edicion = _periodos_seleccionados()
-                    etiqueta_monto = f"Monto ({periodos_edicion[0]})" if periodos_edicion else "Monto"
-                    nuevo_monto = st.number_input(etiqueta_monto, value=float(monto_inicial), format="%.0f", key=f"ed_monto_{doc_key}_{idx}")
+                            if col_changed or monto_changed:
+                                sel_clave = st.session_state.get(f"sel_{doc_key}_{idx}", '')
+                                codigo_final = sel_clave if sel_clave not in ('', '➕ NUEVA CATEGORÍA', '🚫 NO INCLUIR') else ''
+                                codigo_final = codigo_final or str(row.get('codigo_clasificado') or '')
+                                if codigo_final and not _codigo_compatible_con_origen(
+                                    codigo_final, nueva_nat, nuevo_monto,
+                                    _nombre_con_contexto(
+                                        nuevo_nombre, row.get('jerarquia_contable'),
+                                    ), catalogo,
+                                ):
+                                    st.error('La corrección contradice la clasificación actual. Seleccione una categoría compatible antes de guardarla.')
+                                    st.stop()
+                                _persist_streamlit_correction(
+                                    archivo_nombre, row_reference=idx,
+                                    classification_code=(
+                                        codigo_final or "PENDING_REVIEW"
+                                    ),
+                                    action="account-edit",
+                                )
+                                _registrar_decision(archivo_nombre, idx, row.copy(), codigo_final, 'Corrección de datos de la cuenta')
+                                df_mod.at[idx, 'nombre_original'] = nuevo_nombre
+                                df_mod.at[idx, 'nombre_revision_usuario'] = ''
+                                df_mod.at[idx, 'origen_columna'] = nueva_nat.lower()
+                                _aplicar_edicion_monto_periodos(
+                                    df_mod, idx, nuevo_monto,
+                                    periodo_activo=_periodos_seleccionados()[0] if _periodos_seleccionados() else None,
+                                    periodos=_periodos_seleccionados(),
+                                )
+                                if nueva_nat.lower() in df_mod.columns:
+                                    df_mod.at[idx, nueva_nat.lower()] = nuevo_monto
+                                    old_nat_col = str(row.get('origen_columna') or '').lower()
+                                    if old_nat_col and old_nat_col != nueva_nat.lower() and old_nat_col in df_mod.columns:
+                                        df_mod.at[idx, old_nat_col] = 0.0
+                                df_mod.attrs.pop("certification_binding", None)
 
-                    if st.button("💾 Guardar corrección", key=f"ed_guardar_{doc_key}_{idx}", use_container_width=True):
-                        df_mod = st.session_state.resultados[archivo_nombre]
-                        original_col = row.get('origen_columna', '')
-                        original_monto = row['monto']
-                        col_changed = nueva_nat.lower() != original_col
-                        monto_changed = (nuevo_monto != original_monto) if pd.notna(original_monto) else (nuevo_monto != 0)
-
-                        if col_changed or monto_changed:
-                            sel_clave = st.session_state.get(f"sel_{doc_key}_{idx}", '')
-                            codigo_final = sel_clave if sel_clave not in ('', '➕ NUEVA CATEGORÍA', '🚫 NO INCLUIR') else ''
-                            codigo_final = codigo_final or str(row.get('codigo_clasificado') or '')
-                            if codigo_final and not _codigo_compatible_con_origen(
-                                codigo_final, nueva_nat, nuevo_monto,
-                                _nombre_con_contexto(
-                                    nuevo_nombre, row.get('jerarquia_contable'),
-                                ), catalogo,
-                            ):
-                                st.error('La corrección contradice la clasificación actual. Seleccione una categoría compatible antes de guardarla.')
-                                st.stop()
-                            _persist_streamlit_correction(
-                                archivo_nombre, row_reference=idx,
-                                classification_code=(
-                                    codigo_final or "PENDING_REVIEW"
-                                ),
-                                action="account-edit",
-                            )
-                            _registrar_decision(archivo_nombre, idx, row.copy(), codigo_final, 'Corrección de datos de la cuenta')
-                            df_mod.at[idx, 'nombre_original'] = nuevo_nombre
-                            df_mod.at[idx, 'nombre_revision_usuario'] = ''
-                            df_mod.at[idx, 'origen_columna'] = nueva_nat.lower()
-                            _aplicar_edicion_monto_periodos(
-                                df_mod, idx, nuevo_monto,
-                                periodo_activo=_periodos_seleccionados()[0] if _periodos_seleccionados() else None,
-                                periodos=_periodos_seleccionados(),
-                            )
-                            if nueva_nat.lower() in df_mod.columns:
-                                df_mod.at[idx, nueva_nat.lower()] = nuevo_monto
-                                old_nat_col = str(row.get('origen_columna') or '').lower()
-                                if old_nat_col and old_nat_col != nueva_nat.lower() and old_nat_col in df_mod.columns:
-                                    df_mod.at[idx, old_nat_col] = 0.0
-                            df_mod.attrs.pop("certification_binding", None)
-
-                            df_mod.at[idx, 'origen_columna_efectiva'] = _origen_efectivo(
-                                nueva_nat, nuevo_monto, _nombre_con_contexto(
-                                    nuevo_nombre, row.get('jerarquia_contable'),
-                                ))
-                            df_mod.at[idx, 'origen_columna_display'] = _etiqueta_origen(
-                                nueva_nat, nuevo_monto, _nombre_con_contexto(
-                                    nuevo_nombre, row.get('jerarquia_contable'),
-                                ))
-                            if codigo_final:
-                                df_mod.at[idx, 'codigo_clasificado'] = codigo_final
-                            df_mod.at[idx, 'metodo'] = 'manual_revision'
-                            df_mod.at[idx, 'confianza'] = 1.0
-                            df_mod.at[idx, 'requiere_revision'] = True
-                            df_mod.at[idx, 'tipo_revision'] = 'correccion_extraccion'
-                            df_mod.at[idx, 'origen'] = 'Manual'
-                            df_mod.at[idx, 'regla'] = 'manual_revision'
-                            df_mod.at[idx, 'evidencia'] = 'Corrección manual de extracción'
-                            _registrar_evento_auditoria(
-                                "Invalidación de certificación", archivo_nombre,
-                                "Edición manual de monto u origen",
-                                f"Fila {idx}; cuenta {nuevo_nombre}", df_mod,
-                            )
-                            # Una corrección de extracción es local y debe confirmarse.
-                            st.toast(f"'{nuevo_nombre[:35]}' corregida ✅", icon="✅")
-                        else:
-                            _persist_streamlit_correction(
-                                archivo_nombre, row_reference=idx,
-                                classification_code=(
-                                    str(row.get('codigo_clasificado') or '')
-                                    or "UNCLASSIFIED"
-                                ),
-                                action="display-name-edit",
-                            )
-                            df_mod.at[idx, 'nombre_revision_usuario'] = nuevo_nombre
-                            df_mod.at[idx, 'tipo_revision'] = 'visual'
-                            st.toast(f"'{nuevo_nombre[:35]}' nombre visual actualizado ✏️", icon="✏️")
-                        st.rerun()
+                                df_mod.at[idx, 'origen_columna_efectiva'] = _origen_efectivo(
+                                    nueva_nat, nuevo_monto, _nombre_con_contexto(
+                                        nuevo_nombre, row.get('jerarquia_contable'),
+                                    ))
+                                df_mod.at[idx, 'origen_columna_display'] = _etiqueta_origen(
+                                    nueva_nat, nuevo_monto, _nombre_con_contexto(
+                                        nuevo_nombre, row.get('jerarquia_contable'),
+                                    ))
+                                if codigo_final:
+                                    df_mod.at[idx, 'codigo_clasificado'] = codigo_final
+                                df_mod.at[idx, 'metodo'] = 'manual_revision'
+                                df_mod.at[idx, 'confianza'] = 1.0
+                                df_mod.at[idx, 'requiere_revision'] = True
+                                df_mod.at[idx, 'tipo_revision'] = 'correccion_extraccion'
+                                df_mod.at[idx, 'origen'] = 'Manual'
+                                df_mod.at[idx, 'regla'] = 'manual_revision'
+                                df_mod.at[idx, 'evidencia'] = 'Corrección manual de extracción'
+                                _registrar_evento_auditoria(
+                                    "Invalidación de certificación", archivo_nombre,
+                                    "Edición manual de monto u origen",
+                                    f"Fila {idx}; cuenta {nuevo_nombre}", df_mod,
+                                )
+                                st.toast(f"'{nuevo_nombre[:35]}' corregida ✅", icon="✅")
+                            else:
+                                _persist_streamlit_correction(
+                                    archivo_nombre, row_reference=idx,
+                                    classification_code=(
+                                        str(row.get('codigo_clasificado') or '')
+                                        or "UNCLASSIFIED"
+                                    ),
+                                    action="display-name-edit",
+                                )
+                                df_mod.at[idx, 'nombre_revision_usuario'] = nuevo_nombre
+                                df_mod.at[idx, 'tipo_revision'] = 'visual'
+                                st.toast(f"'{nuevo_nombre[:35]}' nombre visual actualizado ✏️", icon="✏️")
+                            st.rerun()
 
             with c2:
-                mostrar_todas = st.checkbox(
-                    "🔎 Buscar más clasificaciones",
-                    key=f"mostrar_todas_{doc_key}_{idx}",
-                    help=(
-                        "Muestra el catálogo completo para casos contables "
-                        "excepcionales que no coinciden con la columna física."
-                    ),
-                )
+                mostrar_todas = st.session_state.get(f"mostrar_todas_{doc_key}_{idx}", False)
                 sugerido = row['codigo_clasificado']
                 if (not mostrar_todas and sugerido
                         and not _codigo_compatible_con_origen(
                             sugerido, row.get('origen_columna'), row.get('monto'),
                             _nombre_contable_fila(row), catalogo)):
                     sugerido = ''
-                sugerido_nom = catalogo.get(sugerido, {}).get('nombre_estandar', sugerido) if sugerido else '(ninguno)'
-                sugerido_badge = f" `({sugerido})`" if sugerido else ""
-                st.markdown(f"Sugerido: **{sugerido_nom}**{sugerido_badge}")
 
+                if mostrar_todas:
+                    opciones_fila = opciones_codigo
+                else:
+                    opciones_fila = [opciones_codigo[0]] + [
+                        codigo for codigo in opciones_codigo[1:]
+                        if codigo in ('➕ NUEVA CATEGORÍA', '🚫 NO INCLUIR')
+                        or _codigo_compatible_con_origen(
+                            codigo, row.get('origen_columna'), row.get('monto'),
+                            _nombre_contable_fila(row), catalogo)
+                    ]
+                default_idx = (opciones_fila.index(sugerido)
+                               if sugerido in opciones_fila else 0)
+
+                sel_c, opt_c = st.columns([0.86, 0.14])
+                with sel_c:
+                    seleccion = st.selectbox(
+                        "Clasificación correcta",
+                        opciones_fila,
+                        index=default_idx,
+                        format_func=lambda c: (
+                            f"{catalogo[c]['nombre_estandar']} ({c})" if c in catalogo
+                            else c if c else "(sin clasificar)"
+                        ),
+                        key=f"sel_{doc_key}_{idx}",
+                        label_visibility="collapsed",
+                    )
+                with opt_c:
+                    with st.popover("⚙️", help="Opciones y alcance"):
+                        st.checkbox(
+                            "🔎 Buscar en todo el catálogo",
+                            key=f"mostrar_todas_{doc_key}_{idx}",
+                        )
+                        alcance_opciones = [
+                            "Solo para este caso",
+                            "Agregar al diccionario (aplica a futuros iguales)",
+                        ]
+                        st.radio(
+                            "Alcance de la regla:",
+                            alcance_opciones,
+                            index=1 if row.get('requiere_revision', False) else 0,
+                            key=f"alc_{doc_key}_{idx}",
+                        )
+
+                # Alternativas compatibles como chips compactos
                 requiere_decision = (
                     bool(row.get('requiere_revision', False)) or not sugerido
                 )
-                if sugerido and not requiere_decision and not mostrar_todas:
-                    st.caption(
-                        "Clasificación automática confirmada · "
-                        f"{float(row.get('confianza') or 0.0):.0%}"
-                    )
                 alternativas = (
                     _alternativas_revision(
                         nombre=_nombre_contable_fila(row),
@@ -6034,150 +6056,30 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                     if requiere_decision or mostrar_todas else []
                 )
                 if alternativas:
-                    st.caption("Alternativas compatibles · selección asistida")
-                    if (
-                        len(alternativas) > 1
-                        and alternativas[0]["codigo"] != alternativas[1]["codigo"]
-                        and alternativas[0]["score"] - alternativas[1]["score"] <= 0.05
-                    ):
-                        st.warning(
-                            "Señales contradictorias: los dos primeros candidatos "
-                            "tienen relevancia similar. Requiere criterio del analista."
-                        )
-                    # Render chips horizontally side-by-side
-                    alt_cols = st.columns(min(len(alternativas), 3))
-                    for i_alt, alt in enumerate(alternativas[:3]):
+                    alt_cols = st.columns(min(len(alternativas[:2]), 2))
+                    for i_alt, alt in enumerate(alternativas[:2]):
                         with alt_cols[i_alt]:
-                            score_pct = f"{alt['score']:.0%}"
                             glosa_nombre = alt.get('nombre') or catalogo.get(alt['codigo'], {}).get('nombre_estandar', alt['codigo'])
-                            chip_label = f"✓ {glosa_nombre} ({score_pct})"
+                            chip_label = f"✓ {glosa_nombre[:20]} ({alt['score']:.0%})"
                             selection_key = f"sel_{doc_key}_{idx}"
                             st.button(
                                 chip_label,
                                 key=f"usar_alt_{doc_key}_{idx}_{alt['codigo']}",
                                 use_container_width=True,
-                                help=f"{glosa_nombre} ({alt['codigo']}) · Relevancia: {score_pct}",
+                                help=f"{glosa_nombre} ({alt['codigo']}) · Relevancia: {alt['score']:.0%}",
                                 on_click=_asignar_estado_widget,
                                 args=(selection_key, alt['codigo']),
                             )
-                    with st.expander("Ver fundamento de las sugerencias"):
-                        for alternativa in alternativas:
-                            alt_glosa = catalogo.get(alternativa['codigo'], {}).get('nombre_estandar', alternativa.get('nombre', alternativa['codigo']))
-                            st.caption(
-                                f"**{alt_glosa}** ({alternativa['codigo']}) · {alternativa['fuente']} · "
-                                f"{alternativa['evidencia']}"
-                            )
 
-                if mostrar_todas:
-                    opciones_fila = opciones_codigo
-                    st.caption("Catálogo completo habilitado para esta cuenta.")
-                else:
-                    opciones_fila = [opciones_codigo[0]] + [
-                        codigo for codigo in opciones_codigo[1:]
-                        if codigo in ('➕ NUEVA CATEGORÍA', '🚫 NO INCLUIR')
-                        or _codigo_compatible_con_origen(
-                            codigo, row.get('origen_columna'), row.get('monto'),
-                            _nombre_contable_fila(row), catalogo)
-                    ]
-                default_idx = (opciones_fila.index(sugerido)
-                               if sugerido in opciones_fila else 0)
-                seleccion = st.selectbox(
-                    "Clasificación correcta",
-                    opciones_fila,
-                    index=default_idx,
-                    format_func=lambda c: (
-                        f"{catalogo[c]['nombre_estandar']} ({c})" if c in catalogo
-                        else c if c else "(sin clasificar)"
-                    ),
-                    key=f"sel_{doc_key}_{idx}"
-                )
-
+            with c3:
+                alcance = st.session_state.get(f"alc_{doc_key}_{idx}", "Agregar al diccionario" if row.get('requiere_revision', False) else "Solo para este caso")
                 es_nueva_cat = seleccion == '➕ NUEVA CATEGORÍA'
-                if es_nueva_cat:
-                    st.info("Define la nueva categoría:")
-                    nuevo_codigo = st.text_input("Código (ej: AC.10, ER.17)",
-                                                  key=f"new_cod_{doc_key}_{idx}", max_chars=10)
-                    nuevo_nombre_cat = st.text_input("Nombre de la categoría",
-                                                  key=f"new_nom_{doc_key}_{idx}")
-                    nuevo_tipo = st.selectbox("Tipo de estado",
-                                              ['balance', 'resultados'],
-                                              key=f"new_tipo_{doc_key}_{idx}")
-                    nuevo_cat = st.selectbox(
-                        "Categoría",
-                        ['activo_corriente', 'activo_no_corriente',
-                         'pasivo_corriente', 'pasivo_no_corriente',
-                         'patrimonio', 'resultado'],
-                        key=f"new_cat_{doc_key}_{idx}"
-                    )
-                    naturaleza_resultado = st.selectbox(
-                        'Naturaleza de la nueva categoría', ['ganancia', 'perdida'],
-                        key=f'new_naturaleza_{doc_key}_{idx}',
-                    ) if nuevo_cat == 'resultado' else None
 
-                if not es_nueva_cat and seleccion not in ('', '🚫 NO INCLUIR'):
-                    alcance = st.radio(
-                        "¿Aplicar esta clasificación?",
-                        ["Solo para este caso",
-                         "Agregar al diccionario (aplica a casos futuros iguales)"],
-                        index=1 if row.get('requiere_revision', False) else 0,
-                        key=f"alc_{doc_key}_{idx}", horizontal=True
-                    )
-                else:
-                    alcance = "Solo para este caso"
-
-                if st.button("✅ Confirmar", key=f"btn_{doc_key}_{idx}"):
+                if st.button("✓ Confirmar", key=f"btn_{doc_key}_{idx}", type="primary", use_container_width=True):
                     codigo_final = None
 
                     if es_nueva_cat:
-                        if nuevo_codigo and nuevo_nombre_cat:
-                            nueva_entrada = {
-                                'codigo_estandar': nuevo_codigo.strip().upper(),
-                                'nombre_estandar': nuevo_nombre_cat.strip(),
-                                'categoria': nuevo_cat,
-                                'tipo_estado': nuevo_tipo,
-                                'naturaleza': 'deudora' if nuevo_cat.startswith('activo') else 'acreedora',
-                                'signo_normal': 1,
-                                'es_deuda_financiera': False,
-                                'es_activo_liquido': False,
-                                'afecta_ebitda': False,
-                            }
-                            if naturaleza_resultado:
-                                nueva_entrada['naturaleza'] = 'deudora' if naturaleza_resultado == 'perdida' else 'acreedora'
-                                nueva_entrada['signo_normal'] = -1 if naturaleza_resultado == 'perdida' else 1
-                            candidato = nuevo_codigo.strip().upper()
-                            prefijos = {'activo_corriente': 'AC.', 'activo_no_corriente': 'ANC.',
-                                        'pasivo_corriente': 'PC.', 'pasivo_no_corriente': 'PNC.',
-                                        'patrimonio': 'PAT.', 'resultado': 'ER.'}
-                            if candidato in catalogo:
-                                nombre_existente = catalogo[candidato].get(
-                                    'nombre_estandar', candidato,
-                                )
-                                st.error(
-                                    f'El código {candidato} ya existe como '
-                                    f'“{nombre_existente}”. Use un código libre. '
-                                    'No se puede redefinir una categoría '
-                                    'existente desde esta cuenta.'
-                                )
-                                st.stop()
-                            if not candidato.startswith(prefijos[nuevo_cat]):
-                                st.error(
-                                    'El código debe comenzar con el prefijo '
-                                    f'{prefijos[nuevo_cat]} correspondiente a '
-                                    f'{nuevo_cat}. La categoría no fue creada.'
-                                )
-                                st.stop()
-                            if not _codigo_compatible_con_origen(candidato, row.get('origen_columna'), row.get('monto'), _nombre_contable_fila(row), {**catalogo, candidato: nueva_entrada}):
-                                st.error('La nueva categoría contradice la naturaleza de esta cuenta. No fue creada.')
-                                st.stop()
-                            catalogo[nuevo_codigo.strip().upper()] = nueva_entrada
-                            if (not _persistir_catalogo(nueva_entrada)
-                                    and _legacy_json_fallback_allowed()):
-                                _write_legacy_packaged_catalog(catalogo)
-                            codigo_final = nuevo_codigo.strip().upper()
-                            st.toast(f"Nueva categoría '{nuevo_nombre_cat}' ({codigo_final}) creada ✨", icon="🆕")
-                        else:
-                            st.error("Debes ingresar código y nombre.")
-
+                        st.info("Para definir una nueva categoría, use el menú de opciones.")
                     elif seleccion == '🚫 NO INCLUIR':
                         _persist_streamlit_correction(
                             archivo_nombre, row_reference=idx,
