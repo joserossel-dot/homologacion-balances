@@ -4628,5 +4628,120 @@
     "cuenta_original": "BCI",
     "codigo_estandar": "PC.02",
     "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Caja M/N",
+    "codigo_estandar": "AC.01",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Banco Itau",
+    "codigo_estandar": "AC.01",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Deudores Por Ventas",
+    "codigo_estandar": "AC.03",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Mutuo",
+    "codigo_estandar": "AC.02",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Pagos Provisionales Mensuales",
+    "codigo_estandar": "AC.08",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Líneas de Crédito",
+    "codigo_estandar": "PC.02",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Retención 2º Categoría",
+    "codigo_estandar": "PC.05",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Impuestos Trabajadores",
+    "codigo_estandar": "PC.05",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Provisión PPM",
+    "codigo_estandar": "PC.06",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Dividendos Pagados",
+    "codigo_estandar": "AC.06S",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Fondo Revalorización Capital Pr",
+    "codigo_estandar": "PAT.02",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Celulares",
+    "codigo_estandar": "ER.04",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Depreciacion Activo Fijo",
+    "codigo_estandar": "ER.07",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Telefonía Nacional",
+    "codigo_estandar": "ER.04",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Agua",
+    "codigo_estandar": "ER.04",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Electricidad",
+    "codigo_estandar": "ER.04",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Honorarios Administrativos",
+    "codigo_estandar": "ER.04",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Servicios Contables",
+    "codigo_estandar": "ER.04",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Aporte Patronal",
+    "codigo_estandar": "ER.04",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Gratificación",
+    "codigo_estandar": "ER.04",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Artículos de Escritorio",
+    "codigo_estandar": "ER.04",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Impuesto Primera Categoría",
+    "codigo_estandar": "ER.10",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Ingresos Por Arriendos Mac Don",
+    "codigo_estandar": "ER.17",
+    "fuente": "validacion_humana"
   }
 ]

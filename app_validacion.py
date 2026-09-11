@@ -3320,7 +3320,7 @@ def _confirmar_alcance_documentos(archivos) -> bool:
     col_visor, col_form = st.columns([1, 1], gap="medium")
 
     with col_visor:
-        _visor_documento(preview_doc, altura="72vh", mostrar_titulo=True)
+        _visor_documento(preview_doc, altura="72vh", mostrar_titulo=True, key_prefix="scope")
 
     with col_form:
         st.subheader("📄 Selección de páginas a analizar")
@@ -3465,6 +3465,30 @@ def main():
         st.metric("Cuentas en diccionario", len(st.session_state.diccionario))
         st.metric("Códigos en catálogo", len(catalogo))
 
+        col_dic1, col_dic2 = st.columns([1, 1])
+        with col_dic1:
+            if st.button("🔄 Recargar", use_container_width=True, help="Recargar el diccionario más reciente desde disco"):
+                cargar_diccionario_base.clear()
+                st.session_state.diccionario = list(cargar_diccionario_base())
+                st.toast(f"Diccionario recargado ({len(st.session_state.diccionario)} cuentas) 🔄", icon="🔄")
+                st.rerun()
+
+        with st.expander("📥 Cargar diccionario JSON"):
+            dic_custom_file = st.file_uploader(
+                "Subir diccionario JSON", type=['json'], key="uploader_custom_dict"
+            )
+            if dic_custom_file is not None:
+                try:
+                    custom_entries = json.load(dic_custom_file)
+                    if isinstance(custom_entries, list):
+                        st.session_state.diccionario = canonicalize_dictionary(custom_entries)
+                        cargar_diccionario_base.clear()
+                        st.success(f"Cargadas {len(st.session_state.diccionario)} cuentas desde {dic_custom_file.name}")
+                    else:
+                        st.error("El archivo JSON debe contener una lista de cuentas.")
+                except Exception as e:
+                    st.error(f"Error al leer JSON: {e}")
+
         if st.session_state.correcciones:
             st.divider()
             st.success(f"{len(st.session_state.correcciones)} correcciones pendientes")
@@ -3527,7 +3551,7 @@ def main():
 
         col_visor, col_form = st.columns([1, 1], gap="medium")
         with col_visor:
-            _visor_documento(first_file, altura="72vh", mostrar_titulo=True)
+            _visor_documento(first_file, altura="72vh", mostrar_titulo=True, key_prefix="empresa")
 
         with col_form:
             st.subheader("📋 Confirma los datos de la empresa")
@@ -3894,7 +3918,7 @@ def main():
             archivo for archivo in archivos
             if archivo.name not in st.session_state.resultados
         ]
-        hp = HomologationPipeline() if archivos_nuevos else None
+        hp = HomologationPipeline(dictionary=st.session_state.diccionario) if archivos_nuevos else None
         for archivo in archivos_nuevos:
             if archivo.name not in st.session_state.resultados:
                 with st.spinner(f"Clasificando cuentas de {archivo.name}..."):
@@ -4177,16 +4201,26 @@ def main():
     <style>
         /* Split-view sticky visor */
         div[data-testid="stHorizontalBlock"]:has(.document-visor-marker) {
+            display: flex !important;
+            flex-direction: row !important;
+            flex-wrap: nowrap !important;
             align-items: flex-start !important;
+            gap: 1.25rem !important;
         }
         div[data-testid="stHorizontalBlock"]:has(.document-visor-marker) > div[data-testid="column"]:first-child {
             position: -webkit-sticky !important;
             position: sticky !important;
-            top: 2.5rem !important;
+            top: 1rem !important;
             align-self: flex-start !important;
-            max-height: calc(100vh - 3.5rem) !important;
+            max-height: calc(100vh - 2rem) !important;
             overflow-y: auto !important;
-            z-index: 10 !important;
+            z-index: 25 !important;
+            flex: 1 1 48% !important;
+            min-width: 320px !important;
+        }
+        div[data-testid="stHorizontalBlock"]:has(.document-visor-marker) > div[data-testid="column"]:last-child {
+            flex: 1 1 52% !important;
+            min-width: 340px !important;
         }
     </style>
     """, unsafe_allow_html=True)
@@ -4195,7 +4229,7 @@ def main():
 
     with col_visor:
         try:
-            _visor_documento(archivo_activo)
+            _visor_documento(archivo_activo, key_prefix="main")
         except (NameError, Exception):
             pass
 
@@ -4246,7 +4280,7 @@ def _render_pdf_cached(content: bytes, page: int) -> bytes:
 
 @st.fragment
 def _visor_documento(
-    archivo, *, altura: str = "72vh", mostrar_titulo: bool = True,
+    archivo, *, altura: str = "72vh", mostrar_titulo: bool = True, key_prefix: str = "",
 ):
     import tempfile, base64, io, platform, shutil, subprocess, glob
     from PIL import Image
@@ -4258,16 +4292,26 @@ def _visor_documento(
     <style>
         /* Split-view sticky visor */
         div[data-testid="stHorizontalBlock"]:has(.document-visor-marker) {
+            display: flex !important;
+            flex-direction: row !important;
+            flex-wrap: nowrap !important;
             align-items: flex-start !important;
+            gap: 1.25rem !important;
         }
         div[data-testid="stHorizontalBlock"]:has(.document-visor-marker) > div[data-testid="column"]:first-child {
             position: -webkit-sticky !important;
             position: sticky !important;
-            top: 2.5rem !important;
+            top: 1rem !important;
             align-self: flex-start !important;
-            max-height: calc(100vh - 3.5rem) !important;
+            max-height: calc(100vh - 2rem) !important;
             overflow-y: auto !important;
-            z-index: 10 !important;
+            z-index: 25 !important;
+            flex: 1 1 48% !important;
+            min-width: 320px !important;
+        }
+        div[data-testid="stHorizontalBlock"]:has(.document-visor-marker) > div[data-testid="column"]:last-child {
+            flex: 1 1 52% !important;
+            min-width: 340px !important;
         }
     </style>
     <div class="document-visor-marker" style="display:none;"></div>
@@ -4277,7 +4321,7 @@ def _visor_documento(
 
     if suffix == '.pdf':
         content = archivo.getvalue()
-        contenido_id = hashlib.sha256(content).hexdigest()[:16]
+        contenido_id = f"{key_prefix}_{hashlib.sha256(content).hexdigest()[:16]}"
         try:
             n_paginas = page_count(content)
         except Exception:
@@ -4289,7 +4333,7 @@ def _visor_documento(
                                      max_value=n_paginas, value=1, step=1,
                                      key=f"visor_pagina_{contenido_id}")
         with ctrl2:
-            zoom = st.slider("Zoom", 50, 200, 100, 10, format="%d%%",
+            zoom = st.slider("Zoom", 50, 250, 100, 10, format="%d%%",
                              key=f"visor_zoom_{contenido_id}")
         with ctrl3:
             rotacion = st.select_slider("Rotación", options=[0, 90, 180, 270],
@@ -4298,8 +4342,6 @@ def _visor_documento(
             img = Image.open(BytesIO(_render_pdf_cached(content, int(pagina))))
             if rotacion:
                 img = img.rotate(-rotacion, expand=True)
-            if zoom != 100:
-                img = img.resize((int(img.width * zoom / 100), int(img.height * zoom / 100)))
             buf = io.BytesIO()
             img.save(buf, format="PNG")
             b64 = base64.b64encode(buf.getvalue()).decode()
@@ -4307,8 +4349,8 @@ def _visor_documento(
             st.error("No se pudo mostrar esta página. El documento original no se modificó.")
             return
         st.html(f"""
-        <div style="height:{altura};min-height:55vh;max-height:85vh;overflow-y:auto;overflow-x:hidden;border:1px solid #cbd5e1;border-radius:8px;background:#f8fafc;padding:6px;text-align:center;">
-          <img src="data:image/png;base64,{b64}" style="width:100%;max-width:100%;height:auto;display:block;margin:0 auto;border-radius:4px;box-shadow:0 1px 3px rgba(0,0,0,0.1);" />
+        <div style="height:{altura};min-height:55vh;max-height:85vh;overflow:auto;border:1px solid #cbd5e1;border-radius:8px;background:#f8fafc;padding:6px;text-align:center;">
+          <img src="data:image/png;base64,{b64}" style="width:{zoom}%;min-width:{zoom}%;max-width:none;height:auto;display:block;margin:0 auto;border-radius:4px;box-shadow:0 1px 3px rgba(0,0,0,0.1);" />
         </div>
         <p style="font-size:0.8em;color:#64748b;margin-top:4px;text-align:center;">Página {pagina} de {n_paginas} · {escape(archivo.name)}</p>
         """)
@@ -4828,7 +4870,7 @@ def _exportar_advertencias_auxiliares(writer, certification) -> None:
 def _mostrar_etapa_correccion_extraccion(archivo, filename: str) -> None:
     _mostrar_correccion_extraccion(filename)
     st.divider()
-    _visor_documento(archivo, altura="58vh", mostrar_titulo=False)
+    _visor_documento(archivo, altura="58vh", mostrar_titulo=False, key_prefix="extra")
 
 
 def _explicar_diferencia_controles(certification) -> str:

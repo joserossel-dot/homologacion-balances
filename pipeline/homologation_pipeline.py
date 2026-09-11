@@ -44,12 +44,18 @@ class HomologationPipeline:
         self,
         db_path: str | Path = "gold_standard.db",
         features: CMCCFeatureFlags | None = None,
+        dictionary: list[dict[str, Any]] | None = None,
     ) -> None:
         self._parser = ParserPDF()
         self._code_classifier = ClasificadorCodigo()
         self._rule_processor = ProcesadorReglasEspeciales()
         self._learning_engine = LearningEngine(db_path)
-        self._dictionary: list[dict[str, str]] = self._load_dictionary()
+        if dictionary is not None:
+            self._dictionary = canonicalize_dictionary(
+                e for e in dictionary if e.get("codigo_estandar") != "__EXCLUIR__"
+            )
+        else:
+            self._dictionary = self._load_dictionary()
         self._semantic_engine = SemanticEngine()
         self._cmcc_classifier = CMCCClassifier()
         self._decision_engine = DecisionEngine()
