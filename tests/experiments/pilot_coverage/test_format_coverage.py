@@ -153,24 +153,35 @@ def test_geom_lado_es_cuenta_valida_estructura():
 def test_aceptacion_01_paralelo_con_codigo_variante_experimental_exitosa(fixtures_dir: pathlib.Path):
     """
     Aceptación Formato 1: Balance Paralelo con Códigos.
-    Compara los 3 extractores:
-    - Actual: Corrompe códigos/montos por fusión horizontal.
-    - Original (double_column): Sesga el boundary hacia la izquierda y pierde montos de activo.
-    - Variante Experimental (consenso): 100% de las 8 cuentas y 2 totales con montos exactos.
+    Compara los extractores:
+    - ParserPDF (pipeline integrado): 100% exactitud en las 8 cuentas y 2 totales.
+    - DoubleColumnExtractor (endurecido): 100% exactitud en las 8 cuentas y 2 totales.
+    - Variante Experimental (consenso): 100% exactitud en las 8 cuentas y 2 totales.
     """
     pdf_path = fixtures_dir / "01_paralelo_activo_pasivo.pdf"
     assert pdf_path.exists()
 
-    # 1. Extractor Actual
-    res_actual = ParserPDF().parsear(pdf_path)
-    cuentas_act_corruptas = [c for c in res_actual.cuentas if c.monto is None or c.codigo == "1.200.000"]
-    assert len(cuentas_act_corruptas) >= 2, "Actual debe presentar corrupción de líneas"
+    gt_detalles = [g for g in GROUND_TRUTH_PARALELO_CON_CODIGO if not g.es_total]
+    gt_totales = [g for g in GROUND_TRUTH_PARALELO_CON_CODIGO if g.es_total]
 
-    # 2. Separador Original
+    # 1. Extractor Actual (ParserPDF integrado)
+    res_actual = ParserPDF().parsear(pdf_path)
+    cuentas_act = [c for c in res_actual.cuentas if not c.es_total]
+    assert len(cuentas_act) == len(gt_detalles) == 8, f"Actual debe extraer 8 cuentas exactas, obtuvo {len(cuentas_act)}"
+    for gt in gt_detalles:
+        match = [c for c in cuentas_act if c.codigo == gt.codigo]
+        assert len(match) == 1
+        assert match[0].monto == gt.monto
+
+    # 2. Separador DoubleColumnExtractor (endurecido con consenso)
     res_orig = DoubleColumnExtractor().extract(pdf_path)
+    assert res_orig.fallback_used is False
     cuentas_orig = [c for c in res_orig.result.cuentas if not c.es_total]
-    cuentas_orig_sin_monto = [c for c in cuentas_orig if c.monto is None]
-    assert len(cuentas_orig_sin_monto) >= 2, "Original debe presentar montos None por corte sesgado"
+    assert len(cuentas_orig) == len(gt_detalles) == 8
+    for gt in gt_detalles:
+        match = [c for c in cuentas_orig if c.codigo == gt.codigo]
+        assert len(match) == 1
+        assert match[0].monto == gt.monto
 
     # 3. Variante Experimental
     res_exp = ExperimentalDoubleColumnExtractor().extract(pdf_path)
@@ -178,9 +189,6 @@ def test_aceptacion_01_paralelo_con_codigo_variante_experimental_exitosa(fixture
 
     cuentas_exp = [c for c in res_exp.result.cuentas if not c.es_total]
     totales_exp = [c for c in res_exp.result.cuentas if c.es_total]
-
-    gt_detalles = [g for g in GROUND_TRUTH_PARALELO_CON_CODIGO if not g.es_total]
-    gt_totales = [g for g in GROUND_TRUTH_PARALELO_CON_CODIGO if g.es_total]
 
     assert len(cuentas_exp) == len(gt_detalles) == 8, f"Esperadas 8 cuentas, obtenidas {len(cuentas_exp)}"
     assert len(totales_exp) == len(gt_totales) == 2, f"Esperados 2 totales, obtenidos {len(totales_exp)}"
@@ -490,56 +498,65 @@ def test_adversarial_13_codigos_5_6_7_8_digitos(fixtures_dir: pathlib.Path):
 
 
 # ===========================================================================
-# 4. Nivel 3: Pruebas de Caracterización de Defectos Conocidos (xfail estricto)
+# 4. Nivel 3: Pruebas de Resolución Formal de Defectos (Formatos 01, 04, 05, 06)
 # ===========================================================================
 
-@pytest.mark.xfail(strict=True, reason="Defecto caracterizado: El separador original double_column sesga el corte y deja montos de activo en None")
-def test_caracterizacion_01_original_falla_en_paralelo_con_codigo(fixtures_dir: pathlib.Path):
-    """Demuestra que el separador original double_column falla en el fixture 1."""
+def test_resolucion_01_double_column_endurecido_exitoso(fixtures_dir: pathlib.Path):
+    """Verifica que el separador DoubleColumnExtractor ahora resuelve el balance paralelo con códigos al 100%."""
     pdf_path = fixtures_dir / "01_paralelo_activo_pasivo.pdf"
     assert pdf_path.exists(), "Pre-verificación: Fixture debe existir"
     res_orig = DoubleColumnExtractor().extract(pdf_path)
     assert res_orig is not None and res_orig.result is not None, "Pre-verificación: Extractor ejecutó"
+    assert res_orig.fallback_used is False
     cuentas_orig = [c for c in res_orig.result.cuentas if not c.es_total]
     gt_detalles = [g for g in GROUND_TRUTH_PARALELO_CON_CODIGO if not g.es_total]
 
+    assert len(cuentas_orig) == len(gt_detalles) == 8
     for gt in gt_detalles:
         match = [c for c in cuentas_orig if c.codigo == gt.codigo]
         assert len(match) == 1
-        assert match[0].monto == gt.monto, f"Falla demostrada en monto original de {gt.codigo}: {match[0].monto} != {gt.monto}"
+        assert match[0].monto == gt.monto, f"Monto para {gt.codigo}: esperado {gt.monto}, obtenido {match[0].monto}"
 
 
-@pytest.mark.xfail(strict=True, reason="Defecto conocido: ParserPDF en comparativo incluye la fila de encabezado 'Cuenta 2024' como cuenta contable")
-def test_caracterizacion_04_comparativo_incluye_fila_encabezado(fixtures_dir: pathlib.Path):
-    """Caracteriza que el parser actual extrae 6 filas en vez de las 5 cuentas de detalle puras."""
+def test_resolucion_04_comparativo_excluye_fila_encabezado(fixtures_dir: pathlib.Path):
+    """Verifica que ParserPDF en comparativo excluye encabezados de años ('Cuenta 2024') y extrae solo las 5 cuentas."""
     pdf_path = fixtures_dir / "04_comparativo_dos_periodos.pdf"
     assert pdf_path.exists(), "Pre-verificación: Fixture debe existir"
     res_actual = ParserPDF().parsear(pdf_path)
     assert res_actual is not None and res_actual.cuentas is not None, "Pre-verificación: Parser ejecutó"
     cuentas_act = [c for c in res_actual.cuentas if not c.es_total]
     assert len(cuentas_act) == len(GROUND_TRUTH_COMPARATIVO) == 5
+    for gt in GROUND_TRUTH_COMPARATIVO:
+        match = [c for c in cuentas_act if c.codigo == gt.codigo]
+        assert len(match) == 1
+        assert match[0].monto == gt.monto
 
 
-@pytest.mark.xfail(strict=True, reason="Defecto conocido: En PDF plano sin líneas vectoriales, el número de nota se fusiona con el monto")
-def test_caracterizacion_05_notas_cercanas_fusiona_numero_nota(fixtures_dir: pathlib.Path):
-    """Caracteriza que en PDF plano el número de nota altera el importe extraído."""
+def test_resolucion_05_notas_cercanas_preserva_montos_exactos(fixtures_dir: pathlib.Path):
+    """Verifica que ParserPDF detecta columnas de notas y extrae nombres y montos exactos sin fusionar el número de nota."""
     pdf_path = fixtures_dir / "05_notas_cercanas_a_montos.pdf"
     assert pdf_path.exists(), "Pre-verificación: Fixture debe existir"
     res_actual = ParserPDF().parsear(pdf_path)
     assert res_actual is not None and res_actual.cuentas is not None, "Pre-verificación: Parser ejecutó"
     cuentas_act = [c for c in res_actual.cuentas if not c.es_total]
+    assert len(cuentas_act) == len(GROUND_TRUTH_NOTAS) == 4
     for gt in GROUND_TRUTH_NOTAS:
-        match = [c for c in cuentas_act if c.nombre and gt.nombre in c.nombre]
-        assert len(match) == 1
-        assert match[0].monto is not None and float(match[0].monto) == gt.monto
+        match = [c for c in cuentas_act if c.nombre and gt.nombre.lower() in c.nombre.lower()]
+        assert len(match) == 1, f"Cuenta '{gt.nombre}' no encontrada unívocamente"
+        assert match[0].monto is not None and float(match[0].monto) == gt.monto, (
+            f"Monto para '{gt.nombre}': esperado {gt.monto}, obtenido {match[0].monto}"
+        )
 
 
-@pytest.mark.xfail(strict=True, reason="Defecto conocido: Descripciones multilínea en PDF plano se dividen en fragmentos separados")
-def test_caracterizacion_06_descripciones_multilinea_fragmentadas(fixtures_dir: pathlib.Path):
-    """Caracteriza que glosas de 2 y 3 líneas devuelven 4 filas fragmentadas en vez de 2 cuentas completas."""
+def test_resolucion_06_descripciones_multilinea_reconstruidas(fixtures_dir: pathlib.Path):
+    """Verifica que descripciones contables de 2 y 3 líneas se unifican en sus 2 cuentas completas con montos exactos."""
     pdf_path = fixtures_dir / "06_descripciones_multilinea.pdf"
     assert pdf_path.exists(), "Pre-verificación: Fixture debe existir"
     res_actual = ParserPDF().parsear(pdf_path)
     assert res_actual is not None and res_actual.cuentas is not None, "Pre-verificación: Parser ejecutó"
     cuentas_act = [c for c in res_actual.cuentas if not c.es_total]
     assert len(cuentas_act) == len(GROUND_TRUTH_MULTILINEA) == 2
+    for gt in GROUND_TRUTH_MULTILINEA:
+        match = [c for c in cuentas_act if c.codigo == gt.codigo]
+        assert len(match) == 1, f"Código {gt.codigo} no encontrado"
+        assert match[0].monto == gt.monto, f"Monto para {gt.codigo}: esperado {gt.monto}, obtenido {match[0].monto}"

@@ -216,29 +216,25 @@ def extraer_encabezados_documento_pdf(path: Path) -> list[str]:
 def detectar_columna_nota_comparativa(
     lineas: list[str], years: Optional[list[str]] = None,
 ) -> bool:
-    """Detecta una referencia de nota antes de dos importes comparativos.
+    """Detecta una referencia de nota antes de importes comparativos o del período.
 
     En estados financieros auditados es frecuente que los años aparezcan en
     una línea y la cabecera ``Nota MUS$ MUS$`` en la siguiente. La referencia
-    de nota de cada fila, por ejemplo ``(21)``, no es un importe ni un tercer
-    periodo. La detección exige dos años y una cabecera breve con dos unidades
-    monetarias, o bien una cabecera que contenga directamente ambos años.
+    de nota de cada fila, por ejemplo ``(21)`` o ``Nota 5``, no es un importe.
     """
     numeric_years = [
         year for year in (years or [])
         if re.fullmatch(r"(?:19|20)\d{2}", year)
     ]
-    if len(numeric_years) < 2:
-        return False
 
     candidates = lineas[:100]
     for index, line in enumerate(candidates):
         normalized = _sin_acentos(line).lower().strip()
-        if not re.search(r"\bnota\b", normalized):
+        if not re.search(r"\bnotas?\b", normalized):
             continue
 
         same_line_years = re.findall(r"\b(?:19|20)\d{2}\b", normalized)
-        if len(dict.fromkeys(same_line_years)) >= 2:
+        if len(dict.fromkeys(same_line_years)) >= 1 or len(numeric_years) >= 1:
             return True
 
         unit_tokens = [
@@ -250,7 +246,7 @@ def detectar_columna_nota_comparativa(
                 in {"usd", "clp", "uf", "mus", "miles"}
             )
         ]
-        if len(unit_tokens) >= 2:
+        if len(unit_tokens) >= 1:
             return True
 
         # También admite una cabecera partida en dos líneas, por ejemplo
@@ -270,12 +266,9 @@ def detectar_columna_nota_comparativa(
                     in {"usd", "clp", "uf", "mus", "miles"}
                 )
             ]
-            if len(nearby_units) >= 2:
+            if nearby_units:
                 return True
 
-    # Algunos estados imprimen sólo ``Nota`` y dejan la unidad monetaria en
-    # otra zona de la cabecera. Varias referencias breves antes de dos importes
-    # comparativos confirman de forma conservadora esa columna auxiliar.
     rows_with_note_reference = 0
     for line in candidates:
         tokens = line.split()
@@ -390,64 +383,80 @@ def split_side_by_side(line: str) -> list[str]:
     return [line]
 
 
+def _es_token_codigo_inicio(linea: str) -> bool:
+    """Verifica si la línea comienza con un token que aparenta ser código contable."""
+    tokens = linea.split()
+    if not tokens:
+        return False
+    tok0 = tokens[0].rstrip(':-.')
+    if re.match(r'^\d{5,8}$|^\d{1,2}(?:\.\d{1,4}){1,6}$|^\d{1,2}(?:-\d+)+$', tok0):
+        return True
+    return False
+
+
+def _linea_tiene_monto_final(linea: str) -> bool:
+    """Verifica si la línea termina con un token de importe monetario."""
+    return bool(re.search(r'(?:\d{1,3}(?:[.,]\d{3})+|\(?\d{4,}\)?|\b0\b)\s*$', linea.strip()))
+
+
 def asociar_lineas_verticales(lineas: list[str]) -> list[str]:
     """Une glosas partidas antes de interpretar sus importes.
 
-    En estados auditados una misma fila suele ocupar dos líneas: la primera
-    contiene el inicio de la glosa y la segunda su continuación, la nota y los
-    importes comparativos. La regla exige que la segunda línea comience con
-    una expresión de continuación para no unir encabezados ni cuentas vecinas.
+    En estados auditados una misma fila suele ocupar dos o más líneas: la primera
+    contiene el código y el inicio de la glosa, y las siguientes su continuación,
+    la nota y los importes.
     """
-    new_lines = []
-    skip = False
+    new_lines: list[str] = []
+    idx = 0
+    n = len(lineas)
 
-    for idx in range(len(lineas)):
-        if skip:
-            skip = False
-            continue
-
+    while idx < n:
         l_curr = lineas[idx].strip()
         if not l_curr:
             new_lines.append("")
+            idx += 1
             continue
 
-        has_digits_curr = re.search(r'\d{3,}', l_curr)
-
-        if not has_digits_curr and idx + 1 < len(lineas):
+        # Mientras la línea actual no termine en monto y la siguiente sea una continuación válida
+        while not _linea_tiene_monto_final(l_curr) and idx + 1 < n:
             l_next = lineas[idx + 1].strip()
-            cleaned_next = re.sub(r'[\d\s.,$()\-—−_\[\]]', '', l_next)
+            if not l_next:
+                break
+            if _es_token_codigo_inicio(l_next):
+                break
 
+            cleaned_next = re.sub(r'[\d\s.,$()\-—−_\[\]]', '', l_next)
+            # Caso 1: Siguiente línea son solo montos
             if cleaned_next == "" and l_next and re.search(r'\d', l_next):
-                merged = f"{l_curr} {l_next}"
-                new_lines.append(merged)
-                skip = True
+                l_curr = f"{l_curr} {l_next}"
+                idx += 1
                 continue
 
-            # La continuación también puede contener texto antes de la nota
-            # y los montos, por ejemplo ``de la participación (13) 689 900``.
-            # El inicio en minúscula o con un conector reduce el riesgo de
-            # fusionar dos filas contables independientes.
+            # Caso 2: Siguiente línea empieza en minúscula o conector o la actual termina en conector
+            first_char = l_next[0] if l_next else ''
             text_before_amount = re.split(
                 r"\s+(?=(?:\(?-?[\d.,]+\)?|[-—−])(?:\s|$))",
                 l_next,
                 maxsplit=1,
             )[0].strip(" .-–—−")
-            continuation = bool(re.match(
-                r"^(?:de(?:l|\s+la|\s+los|\s+las)?|que|corriente|"
-                r"no\s+corriente|continuad[ao]s?|atribuible|por)\b",
-                _sin_acentos(text_before_amount),
-                re.IGNORECASE,
-            ))
-            if (
-                continuation
-                and re.search(r"\d", l_next)
-                and cleaned_next
-            ):
-                new_lines.append(f"{l_curr} {l_next}")
-                skip = True
-                continue
+            continuation = (
+                first_char.islower()
+                or bool(re.match(
+                    r"^(?:a|de(?:l|\s+la|\s+los|\s+las)?|que|corriente|"
+                    r"no\s+corriente|continuad[ao]s?|atribuible|por|con|en|sin|para|segun|marco|operativo)\b",
+                    _sin_acentos(text_before_amount),
+                    re.IGNORECASE,
+                ))
+                or bool(re.search(r"\b(?:a|de|del|por|con|en|para|y|e|o|u|segun)$", l_curr, re.I))
+            )
+            if continuation and (cleaned_next or re.search(r'\d', l_next)):
+                l_curr = f"{l_curr} {l_next}"
+                idx += 1
+            else:
+                break
 
-        new_lines.append(lineas[idx])
+        new_lines.append(l_curr)
+        idx += 1
 
     return new_lines
 
@@ -3188,6 +3197,15 @@ GARBAGE_PATTERNS: list[re.Pattern] = [
         re.I,
     ),
     re.compile(r'^\s*\d{1,2}/\d{1,2}/\d{2,4}\s*$'),
+    # Encabezados de tabla de columnas / notas / años comparativos
+    re.compile(
+        r'^\s*(?:cuenta|concepto|detalle|glosa|descripci[oó]n|partida)\s+(?:nota\s+)?(?:19|20)\d{2}(?:\s+(?:19|20)\d{2})?(?:\s*\([A-Za-z$]+\))?\s*$',
+        re.I,
+    ),
+    re.compile(
+        r'^\s*(?:cuenta|concepto|detalle|glosa|descripci[oó]n|partida)\s+nota(?:\s+(?:(?:19|20)\d{2}|[A-Za-z$]+|\([A-Za-z$]+\))).*\s*$',
+        re.I,
+    ),
 ]
 
 
@@ -3447,6 +3465,13 @@ def parsear_linea(
         if embedded:
             codigo = re.sub(r"[.,/:]", ".", embedded.group(1))
             resto = embedded.group(2)
+
+    # Las referencias a notas contables (ej. "Nota 5", "Nota 14", "Notas 5 y 6")
+    # que anteceden a los importes no son nombres de cuenta ni cifras numéricas.
+    resto = re.sub(
+        r'\s+Notas?\s+(?:N[°o.]\s*)?\d+(?:\s*(?:y|a)\s*\d+)?(?=\s+\(?-?\d)',
+        ' ', resto, flags=re.I,
+    )
 
     tokens = resto.split()
     descartados_finales = 0
