@@ -1796,12 +1796,21 @@ def es_ruido_ocr_no_contable(cuenta: Optional[CuentaRaw]) -> bool:
     # Una palabra dentro de una cuenta no acredita ruido documental.
     # Conservar importes no nulos para revisión, incluso en etiquetas ambiguas.
     values = [cuenta.monto, *cuenta.montos_columnas.values()]
-    if any(value is not None and value != 0 for value in values):
+    if any(value is not None and abs(float(value)) > 0.01 for value in values):
         return False
+    if re.fullmatch(r"[=\-*_.#/\s]{3,}", cuenta.nombre or ""):
+        return True
+    if bool(re.fullmatch(
+        r"(?:nombre(?:\s+de\s+la\s+cuenta)?|codigo|debe|haber|saldos?|deudor|acreedor|activo|pasivo|perdida|ganancia)",
+        nombre_norm,
+    )):
+        return True
     return bool(re.fullmatch(
         r"(?:(?:firma|firmas)(?:\s+(?:representante legal|contador general))?"
         r"|representante legal|contador general|auditor(?:es)?"
         r"|rut\s*:?\s*[\d.k-]+|nota\s+\d+|pagina\s+\d+(?:\s+de\s+\d+)?"
+        r"|pag\s*:?\s*\d*|hasta\s*:?\s*[a-z0-9/.-]+"
+        r"|(?:\d{4}\s+)?hasta\s*:?\s*[a-z0-9/.-]+"
         r"|fecha\s*:?\s*[\d/.-]+|timbre|visacion)", nombre_norm,
     ))
 
@@ -3105,31 +3114,48 @@ def fusionar_cuentas_partidas(cuentas: list[CuentaRaw]) -> tuple[list[CuentaRaw]
 
 
 _SUFIJOS_GLOSA_PARTIDA = re.compile(
-    r"^(?:acumulad[oa]s?|propio|trabajador(?:es)?|veh[ií]culos?|"
-    r"corriente|no corriente)$",
+    r"^(?:l\.?p\.?|c\.?p\.?|s\.?a\.?|ltda\.?|spa|e\.?i\.?r\.?l\.?|acumulad[oa]s?|propio|trabajador(?:es)?|veh[ií]culos?|"
+    r"corriente|no corriente|largo plazo|corto plazo|por pagar|por cobrar|en garantia|en transito|al personal|de terceros|del giro)$",
     re.IGNORECASE,
 )
+
+_CUENTAS_CORTAS_INDIVIDUALES = {
+    "caja", "iva", "ppm", "banco", "bancos", "clientes", "proveedores", "capital",
+    "retenciones", "honorarios", "sueldos", "arriendos", "seguros", "leasings",
+    "fondos", "gastos", "ingresos", "ventas", "costos", "existencias", "mercaderias",
+}
 
 
 def fusionar_continuaciones_verticales(
         cuentas: list[CuentaRaw]) -> tuple[list[CuentaRaw], int]:
-    """Une sufijos verticales sin importe a la cuenta monetaria precedente."""
+    """Une sufijos y fragmentos verticales sin importe a la cuenta monetaria precedente."""
     resultado: list[CuentaRaw] = []
     cantidad = 0
     for cuenta in cuentas:
-        sin_importes = not any(
-            float(cuenta.montos_columnas.get(columna, 0.0) or 0.0) != 0.0
-            for columna in RAW_MONETARY_COLUMNS
+        sin_importes = (
+            (cuenta.monto is None or abs(float(cuenta.monto)) <= 0.01)
+            and not any(
+                float(cuenta.montos_columnas.get(columna, 0.0) or 0.0) != 0.0
+                for columna in RAW_MONETARY_COLUMNS
+            )
         )
         anterior = resultado[-1] if resultado else None
         nombre = re.sub(r"\s+", " ", cuenta.nombre or "").strip()
-        anterior_tiene_importes = anterior is not None and any(
-            float(anterior.montos_columnas.get(columna, 0.0) or 0.0) != 0.0
-            for columna in RAW_MONETARY_COLUMNS
+        nombre_norm = _sin_acentos(nombre.lower())
+
+        anterior_tiene_importes = anterior is not None and (
+            (anterior.monto is not None and abs(float(anterior.monto)) > 0.01)
+            or any(
+                float(anterior.montos_columnas.get(columna, 0.0) or 0.0) != 0.0
+                for columna in RAW_MONETARY_COLUMNS
+            )
         )
-        termina_en_conjuncion = bool(
-            anterior and re.search(r"\b(?:y|de|del|por)$", anterior.nombre, re.I)
+        termina_en_conector = bool(
+            anterior and re.search(r"\b(?:y|de|del|por|a|al|en|con|para|sin|sobre|e|o|u)\b$", anterior.nombre, re.I)
         )
+        es_sufijo_conocido = bool(_SUFIJOS_GLOSA_PARTIDA.fullmatch(nombre_norm))
+        es_cuenta_corta_valida = nombre_norm in _CUENTAS_CORTAS_INDIVIDUALES
+
         if (
             anterior is not None
             and cuenta.linea == anterior.linea + 1
@@ -3137,9 +3163,11 @@ def fusionar_continuaciones_verticales(
             and not cuenta.es_total
             and sin_importes
             and anterior_tiene_importes
+            and not es_cuenta_corta_valida
             and (
-                bool(_SUFIJOS_GLOSA_PARTIDA.fullmatch(_sin_acentos(nombre)))
-                or termina_en_conjuncion
+                es_sufijo_conocido
+                or termina_en_conector
+                or (len(nombre) <= 25 and not re.search(r"[.)\]]$", anterior.nombre or "") and any(c.isalpha() for c in nombre))
             )
         ):
             anterior.nombre = re.sub(

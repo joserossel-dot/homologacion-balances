@@ -73,6 +73,24 @@ def compare_pre_post(certification: Any, accounts: Iterable[dict[str, Any]],
         late_squared = abs(late_diff_val) <= tolerance
 
     degradation = bool(early["available"] and early["squared"] and not late_squared)
-    return {"early": early, "late": {"squared": late_squared, "difference": late_diff_val},
-            "classification_degradation": degradation,
-            "responsible_changes": sorted(responsible, key=lambda row: abs(row["impact"]), reverse=True)}
+
+    if late_squared:
+        reconciliation_reason = "exact_match"
+    elif degradation:
+        reconciliation_reason = "classification_error" if responsible else "accounts_dropped"
+    elif early.get("available") and not early.get("squared"):
+        reconciliation_reason = "source_imbalance"
+    else:
+        reconciliation_reason = "classification_error" if responsible else "unknown"
+
+    return {
+        "early": early,
+        "late": {
+            "squared": late_squared,
+            "difference": late_diff_val,
+            "reason": reconciliation_reason,
+        },
+        "reason": reconciliation_reason,
+        "classification_degradation": degradation,
+        "responsible_changes": sorted(responsible, key=lambda row: abs(row["impact"]), reverse=True),
+    }

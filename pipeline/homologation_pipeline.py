@@ -218,8 +218,8 @@ class HomologationPipeline:
     _PATRONES_RUIDO_ERP: list[re.Pattern] = [
         re.compile(r"^\s*Usuario\s*:\s*\w+", re.I),
         re.compile(r"^\s*HASTA\s+\d{1,2}/\d{1,2}/\d{4}", re.I),
-        re.compile(r"^\s*[\$\s]+\s*$"),
-        re.compile(r"^\s*(?:BALANCE|GASTOS|INGRESOS|FINANCIEROS|PLAZO)\s*$", re.I),
+        re.compile(r"^\s*[\$\s=_\-*#]+\s*$"),
+        re.compile(r"^\s*(?:BALANCE|GASTOS|INGRESOS|FINANCIEROS|PLAZO|BALANCE\s+GENERAL|BALANCE\s+TRIBUTARIO|ESTADO\s+DE\s+SITUACION|P[AÁ]GINA\s+\d+)\s*$", re.I),
     ]
 
     @classmethod
@@ -229,10 +229,18 @@ class HomologationPipeline:
         return text
 
     @classmethod
-    def _is_erp_metadata_noise(cls, account_name: str, monto: float | None = None) -> bool:
+    def _is_erp_metadata_noise(
+        cls, account_name: str, monto: float | None = None, account_code: str | None = None,
+    ) -> bool:
         if not account_name:
             return True
         raw = account_name.strip()
+        if account_code:
+            return False
+        if monto is not None and abs(float(monto)) > 0.01:
+            if re.fullmatch(r"[=\-*_.#/\s]{3,}", raw):
+                return True
+            return False
         for pat in cls._PATRONES_RUIDO_ERP:
             if pat.search(raw):
                 return True
@@ -947,15 +955,17 @@ class HomologationPipeline:
                 ignored.append({
                     "account_code": ab.account_code,
                     "account_name": ab.account_name,
+                    "monto": cr.monto,
                     "ignored_reason": "control_total",
                     "is_total": True,
                 })
                 continue
 
-            if self._is_erp_metadata_noise(ab.account_name, cr.monto):
+            if self._is_erp_metadata_noise(ab.account_name, cr.monto, ab.account_code):
                 ignored.append({
                     "account_code": ab.account_code,
                     "account_name": ab.account_name,
+                    "monto": cr.monto,
                     "ignored_reason": "metadato_erp",
                 })
                 continue
