@@ -4953,6 +4953,87 @@ class ParserPDF:
             )
             return None
 
+    @staticmethod
+    def _extraer_lineas_pagina_orientada(page: Any) -> list[str]:
+        """Extrae líneas respetando la orientación tipográfica cuando el texto está rotado."""
+        chars = getattr(page, "chars", [])
+        if not chars:
+            return [l.strip() for l in (page.extract_text() or "").split("\n") if l.strip()]
+
+        non_upright = [c for c in chars if c.get("upright") is False]
+        if len(non_upright) / len(chars) > 0.40:
+            sample = non_upright[0]
+            matrix = sample.get("matrix", (1, 0, 0, 1, 0, 0))
+            b = matrix[1] if len(matrix) > 1 else 0.0
+
+            if b > 0.5:
+                # 90° horario: avance en top decreciente, líneas apiladas en X
+                sorted_chars = sorted(chars, key=lambda c: (c["x0"], -c["top"]))
+                lines: list[str] = []
+                curr_line: list[dict[str, Any]] = []
+                curr_x = None
+                for c in sorted_chars:
+                    cx = c["x0"]
+                    if curr_x is None or abs(cx - curr_x) <= 3.5:
+                        curr_line.append(c)
+                        curr_x = cx
+                    else:
+                        curr_sorted = sorted(curr_line, key=lambda ch: -ch["top"])
+                        l_str = ""
+                        for idx, ch in enumerate(curr_sorted):
+                            if idx > 0 and (curr_sorted[idx - 1]["top"] - ch["bottom"]) > 2.0:
+                                l_str += " "
+                            l_str += ch["text"]
+                        if l_str.strip():
+                            lines.append(l_str.strip())
+                        curr_line = [c]
+                        curr_x = cx
+                if curr_line:
+                    curr_sorted = sorted(curr_line, key=lambda ch: -ch["top"])
+                    l_str = ""
+                    for idx, ch in enumerate(curr_sorted):
+                        if idx > 0 and (curr_sorted[idx - 1]["top"] - ch["bottom"]) > 2.0:
+                            l_str += " "
+                        l_str += ch["text"]
+                    if l_str.strip():
+                        lines.append(l_str.strip())
+                return lines
+            elif b < -0.5:
+                # 270° antihorario: avance en top creciente, líneas apiladas en X
+                sorted_chars = sorted(chars, key=lambda c: (-c["x0"], c["top"]))
+                lines: list[str] = []
+                curr_line: list[dict[str, Any]] = []
+                curr_x = None
+                for c in sorted_chars:
+                    cx = c["x0"]
+                    if curr_x is None or abs(cx - curr_x) <= 3.5:
+                        curr_line.append(c)
+                        curr_x = cx
+                    else:
+                        curr_sorted = sorted(curr_line, key=lambda ch: ch["top"])
+                        l_str = ""
+                        for idx, ch in enumerate(curr_sorted):
+                            if idx > 0 and (ch["top"] - curr_sorted[idx - 1]["bottom"]) > 2.0:
+                                l_str += " "
+                            l_str += ch["text"]
+                        if l_str.strip():
+                            lines.append(l_str.strip())
+                        curr_line = [c]
+                        curr_x = cx
+                if curr_line:
+                    curr_sorted = sorted(curr_line, key=lambda ch: ch["top"])
+                    l_str = ""
+                    for idx, ch in enumerate(curr_sorted):
+                        if idx > 0 and (ch["top"] - curr_sorted[idx - 1]["bottom"]) > 2.0:
+                            l_str += " "
+                        l_str += ch["text"]
+                    if l_str.strip():
+                        lines.append(l_str.strip())
+                return lines
+
+        return [l.strip() for l in (page.extract_text() or "").split("\n") if l.strip()]
+
+
     def _extraer_lineas(
         self,
         path: Path,
@@ -4978,6 +5059,18 @@ class ParserPDF:
         with pdfplumber.open(path) as pdf:
             n_paginas = len(pdf.pages)
             for page_number, page in enumerate(pdf.pages, 1):
+                chars = getattr(page, "chars", [])
+                non_upright = [c for c in chars if c.get("upright") is False]
+                if chars and len(non_upright) / len(chars) > 0.40:
+                    lineas_orientadas = self._extraer_lineas_pagina_orientada(page)
+                    if len(lineas_orientadas) >= 3:
+                        lineas.extend(lineas_orientadas)
+                        self._ocr_advertencias.append(
+                            f"Página {page_number}: texto renderizado con rotación de fuente; "
+                            "se extrajo ordenado según el vector de lectura nativo."
+                        )
+                        continue
+
                 texto = page.extract_text() or ""
                 if not texto.strip():
                     continue
