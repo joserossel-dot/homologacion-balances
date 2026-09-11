@@ -18,15 +18,19 @@ def early_balance_state(certification: Any, tolerance: float = 1000.0) -> dict[s
 
 
 def _late_coefficient(code: str) -> int:
-    if code.startswith(("AC.", "ANC.")): return 1
-    if code.startswith(("PC.", "PNC.", "PAT.")): return -1
+    if code.startswith(("AC.", "ANC.")):
+        return 1
+    if code.startswith(("PC.", "PNC.", "PAT.")):
+        return -1
     return 0
 
 
 def _early_coefficient(nature: str) -> int:
     value = str(nature or "").lower()
-    if "activo" in value: return 1
-    if "pasivo" in value or "patrimonio" in value: return -1
+    if "activo" in value:
+        return 1
+    if "pasivo" in value or "patrimonio" in value:
+        return -1
     return 0
 
 
@@ -36,9 +40,12 @@ def compare_pre_post(certification: Any, accounts: Iterable[dict[str, Any]],
     early = early_balance_state(certification, tolerance)
     responsible = []
     derived_late = 0.0
-    for row in accounts:
-        if row.get("es_total") or row.get("is_total"):
-            continue
+    account_rows = list(accounts)
+    detail_rows = [
+        row for row in account_rows
+        if not (row.get("es_total") or row.get("is_total"))
+    ]
+    for row in detail_rows:
         amount = float(row.get("classification_amount", row.get("monto", 0)) or 0)
         code = str(row.get("final_code") or row.get("standard_code")
                    or row.get("codigo_clasificado") or "")
@@ -54,9 +61,18 @@ def compare_pre_post(certification: Any, accounts: Iterable[dict[str, Any]],
                 "amount": amount, "impact": impact,
                 "reason": "La categoría homologada cambia o elimina el lado contable extraído",
             })
-    late_difference = float(derived_late if late_difference is None else late_difference)
-    late_squared = abs(late_difference) <= tolerance
+    if late_difference is None:
+        if not detail_rows:
+            late_diff_val = None
+            late_squared = False
+        else:
+            late_diff_val = float(derived_late)
+            late_squared = abs(late_diff_val) <= tolerance
+    else:
+        late_diff_val = float(late_difference)
+        late_squared = abs(late_diff_val) <= tolerance
+
     degradation = bool(early["available"] and early["squared"] and not late_squared)
-    return {"early": early, "late": {"squared": late_squared, "difference": late_difference},
+    return {"early": early, "late": {"squared": late_squared, "difference": late_diff_val},
             "classification_degradation": degradation,
             "responsible_changes": sorted(responsible, key=lambda row: abs(row["impact"]), reverse=True)}

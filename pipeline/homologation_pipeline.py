@@ -233,14 +233,60 @@ class HomologationPipeline:
     # Classification stages
     # ------------------------------------------------------------------
 
-    def _classify_by_code(self, account_code: str) -> dict[str, Any] | None:
+    @staticmethod
+    def _is_plausible_account_name(name: str | None) -> bool:
+        """Valida si una glosa de cuenta tiene una estructura léxica plausible.
+
+        Filtra artefactos de OCR degradado, ruido numérico o secuencias espurias
+        que no corresponden a nombres de cuenta reales.
+        """
+        if not name or not isinstance(name, str):
+            return False
+        clean = name.strip()
+        if len(clean) < 2:
+            return False
+
+        letras = [c for c in clean if c.isalpha()]
+        if len(letras) < 2:
+            return False
+
+        if "%" in clean or "[]" in clean or "{}" in clean:
+            return False
+
+        if len(re.findall(r"\b\d{6,}\b", clean)) >= 2:
+            return False
+
+        if re.search(r"([a-zA-Z])\1{2,}", clean):
+            return False
+
+        chars_no_space = [c for c in clean if not c.isspace()]
+        ratio_letras = len(letras) / max(len(chars_no_space), 1)
+        if ratio_letras < 0.30:
+            return False
+
+        if " " not in clean and len(clean) >= 6:
+            vocales = [c for c in clean.lower() if c in "aeiouáéíóúü"]
+            if not vocales or (len(vocales) / len(clean)) < 0.15:
+                return False
+
+        return True
+
+    def _classify_by_code(
+        self, account_code: str, account_name: str = "",
+    ) -> dict[str, Any] | None:
         result = self._code_classifier.clasificar(account_code)
         if result is not None:
+            is_plausible = self._is_plausible_account_name(account_name) if account_name else True
+            conf = result.confianza if is_plausible else min(result.confianza, 0.50)
+            reason = result.razon
+            if not is_plausible and account_name:
+                reason += " (advertencia: nombre de cuenta no plausible / sospechoso de ruido OCR)"
             return {
                 "standard_code": result.codigo_estandar,
-                "confidence": result.confianza,
+                "confidence": conf,
                 "method": "code",
-                "reason": result.razon,
+                "reason": reason,
+                "plausible_name": is_plausible,
             }
         return None
 
@@ -614,7 +660,7 @@ class HomologationPipeline:
         # --- Original first-match-wins path (DE disabled) ---
         candidates = [
             result,
-            self._classify_by_code(account_code),
+            self._classify_by_code(account_code, account_name),
             self._classify_audited_statement_label(account_name, account_tipo, account_section),
             self._classify_by_dictionary_exact(account_name),
             self._classify_by_dictionary_fuzzy(account_name),
@@ -692,7 +738,7 @@ class HomologationPipeline:
     ) -> dict[str, Any]:
         from decision.models import DecisionResult as DEResult
 
-        code_r = self._classify_by_code(account_code)
+        code_r = self._classify_by_code(account_code, account_name)
         if code_r and (not self._is_code_allowed(code_r.get("standard_code"), account_tipo, account_section)
                        or not self._is_valid_ppe_depreciation(code_r.get("standard_code"), account_name)):
             code_r = None
@@ -1027,6 +1073,18 @@ class HomologationPipeline:
             if classification.get("standard_code") is None:
                 unclassified_count += 1
 
+            requires_review_by_code = False
+            if classification.get("method") in {"code", "codigo"}:
+                is_plausible = self._is_plausible_account_name(ab.account_name)
+                if not is_plausible or not classification.get("plausible_name", True):
+                    requires_review_by_code = True
+
+            review_required = (
+                adjustment.requiere_revision
+                or classification.get("method") in RESIDUAL_CLASSIFICATION_METHODS
+                or requires_review_by_code
+            )
+
             classified.append({
                 "account_code": ab.account_code,
                 "account_name": ab.account_name,
@@ -1038,10 +1096,7 @@ class HomologationPipeline:
                 "method": classification.get("method", "unknown"),
                 "reason": classification.get("reason", ""),
                 "special_rule": adjustment.nota if adjustment.aplica else None,
-                "review_required": (
-                    adjustment.requiere_revision
-                    or classification.get("method") in RESIDUAL_CLASSIFICATION_METHODS
-                ),
+                "review_required": review_required,
                 "source_file": path.name,
                 "source_page": ab.source_page,
                 "semantic_result": semantic_result,
@@ -1099,9 +1154,11 @@ class HomologationPipeline:
         summary["balance_reconciliation"] = compare_pre_post(
             getattr(resultado, "certificacion_extraccion", None), classified,
         )
+        summary["extraction_status"] = "success" if accounts_total > 0 else "failed"
         summary["export_blocked_by_classification_degradation"] = bool(
             summary["balance_reconciliation"]["classification_degradation"]
         )
+        summary["export_blocked_by_empty_document"] = bool(accounts_total == 0)
 
         logger.info(
             "total=%d specific=%d residual=%d unclassified=%d controls=%d ignored=%d (%.3fs)",

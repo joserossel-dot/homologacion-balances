@@ -35,10 +35,12 @@ class OperationalQualityResult:
 
 
 def _relevant_rows(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or df.empty or "monto" not in df.columns:
+        return pd.DataFrame()
     rows = df.copy()
     if "es_total" in rows:
         rows = rows[~rows["es_total"].fillna(False).astype(bool)]
-    amount = pd.to_numeric(rows.get("monto"), errors="coerce")
+    amount = pd.to_numeric(rows["monto"], errors="coerce")
     return rows[amount.notna() & amount.ne(0)].copy()
 
 
@@ -183,6 +185,10 @@ def analyze_operational_quality(
 
     reasons = []
     hard_blockers = []
+    if not snapshots:
+        reason = "no se extrajeron cuentas del documento (extracción vacía o fallida)"
+        reasons.append(reason)
+        hard_blockers.append(reason)
     if ignored:
         reason = f"{len(ignored)} cuenta(s) con saldo sin clasificación"
         reasons.append(reason)
