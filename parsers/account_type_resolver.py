@@ -42,6 +42,7 @@ def is_ppe_depreciation_name(name: str | None) -> bool:
         return False
     return bool(
         re.search(r"\bdepreciaci[oó]n(?:es)?\s+acumulad[ao]s?\b", normalized)
+        or re.search(r"\bdep(?:r)?\.?\s*acum(?:ulad[ao]s?)?\b", normalized)
         or re.fullmatch(r"depreciaci[oó]n(?:es)?", normalized)
     )
 
