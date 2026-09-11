@@ -140,11 +140,12 @@ def detectar_años_y_monedas(lineas: list[str]) -> tuple[list[str], list[str]]:
             r"(?:ENERO|FEBRERO|MARZO|ABRIL|MAYO|JUNIO|JULIO|AGOSTO|"
             r"SEPTIEMBRE|OCTUBRE|NOVIEMBRE|DICIEMBRE)\b|"
             r"\bPOR\s+(?:LOS\s+)?(?:ANOS|EJERCICIOS|PERIODOS)\s+TERMINADOS\b|"
+            r"\b(?:EJERCICIO|PERIODO|BALANCE)\s+(?:TRIBUTARIO\s+)?(?:DE\s+|DEL\s+)?(?:19|20)\d{2}\b|"
             r"\b(?:JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|"
             r"SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER|JAN|FEB|MAR|APR|JUN|"
             r"JUL|AUG|SEP|OCT|NOV|DEC)\s+\d{1,2},?\s+(?:19|20)\d{2}\b|"
             r"\b\d{1,2}[/-]\d{1,2}[/-](?:19|20)\d{2}\s+"
-            r"(?:A|AL|-)\s+\d{1,2}[/-]\d{1,2}[/-](?:19|20)\d{2}\b",
+            r"(?:A|AL|-|HASTA)\s+\d{1,2}[/-]\d{1,2}[/-](?:19|20)\d{2}\b",
             normalized,
         ))
         mostly_years = bool(re.fullmatch(

@@ -1694,7 +1694,7 @@ def _resumen_bloqueadores_emision(motivos: list[str]) -> pd.DataFrame:
     return pd.DataFrame(filas)
 
 
-def _valores_periodo_metadata(meta: MetadataEmpresa) -> tuple[str, int, int]:
+def _valores_periodo_metadata(meta: MetadataEmpresa) -> tuple[str, int | None, int]:
     """Deriva mes, año y duración desde el período detectado."""
     cierre = None
     inicio = None
@@ -1709,7 +1709,10 @@ def _valores_periodo_metadata(meta: MetadataEmpresa) -> tuple[str, int, int]:
             cierre = parsed
         else:
             inicio = parsed
-    cierre = cierre or date.today()
+    if not cierre:
+        if meta.anio_cierre:
+            return meta.mes_cierre or "Diciembre", int(meta.anio_cierre), meta.numero_meses or 12
+        return meta.mes_cierre or "Diciembre", None, meta.numero_meses or 12
     meses = 12
     if inicio:
         meses = (cierre.year - inicio.year) * 12 + cierre.month - inicio.month + 1
@@ -1718,11 +1721,13 @@ def _valores_periodo_metadata(meta: MetadataEmpresa) -> tuple[str, int, int]:
 
 
 def _fechas_periodo_seleccionado(
-    mes: str, anio: int, numero_meses: int,
+    mes: str, anio: int | None, numero_meses: int,
 ) -> tuple[str, str]:
     """Convierte mes de cierre y duración a fechas inclusivas del período."""
-    mes_numero = MESES_SELECCION.index(mes) + 1
-    total_inicio = anio * 12 + mes_numero - int(numero_meses)
+    if anio is None:
+        return ("", "")
+    mes_numero = MESES_SELECCION.index(mes) + 1 if mes in MESES_SELECCION else 12
+    total_inicio = int(anio) * 12 + mes_numero - int(numero_meses)
     anio_inicio, mes_inicio_cero = divmod(total_inicio, 12)
     mes_inicio = mes_inicio_cero + 1
     ultimo_dia = calendar.monthrange(int(anio), mes_numero)[1]
@@ -1739,24 +1744,25 @@ def _aplicar_metadata_confirmada(meta: MetadataEmpresa) -> MetadataEmpresa:
     meta.giro = st.session_state.company_giro
     meta.moneda = st.session_state.company_moneda
     meta.mes_cierre = st.session_state.company_mes
-    meta.anio_cierre = int(st.session_state.company_anio)
-    meta.numero_meses = int(st.session_state.company_numero_meses)
+    meta.anio_cierre = int(st.session_state.company_anio) if st.session_state.company_anio is not None else None
+    meta.numero_meses = int(st.session_state.company_numero_meses) if st.session_state.company_numero_meses is not None else 12
     meta.periodos_detectados = tuple(
         st.session_state.get("company_periodos_detectados", ())
     )
     meta.periodos_seleccionados = tuple(
         st.session_state.get(
-            "company_periodos_seleccionados", (str(meta.anio_cierre),),
+            "company_periodos_seleccionados", (str(meta.anio_cierre),) if meta.anio_cierre else (),
         )
     )
-    meta.periodo_desde, meta.periodo_hasta = _fechas_periodo_seleccionado(
-        meta.mes_cierre, meta.anio_cierre, meta.numero_meses,
-    )
+    if meta.anio_cierre:
+        meta.periodo_desde, meta.periodo_hasta = _fechas_periodo_seleccionado(
+            meta.mes_cierre, meta.anio_cierre, meta.numero_meses,
+        )
     return meta
 
 
 def _detectar_periodos_comparativos(
-    lineas: list[str], anio_fallback: int,
+    lineas: list[str], anio_fallback: int | None = None,
 ) -> tuple[str, ...]:
     """Devuelve hasta dos años explícitos respetando el orden del documento."""
     years, _ = detectar_años_y_monedas(lineas)
@@ -1764,9 +1770,8 @@ def _detectar_periodos_comparativos(
     for year in years:
         if re.fullmatch(r"(?:19|20)\d{2}", str(year)) and year not in numeric:
             numeric.append(str(year))
-    fallback = str(int(anio_fallback))
-    if not numeric:
-        numeric.append(fallback)
+    if not numeric and anio_fallback is not None:
+        numeric.append(str(int(anio_fallback)))
     return tuple(numeric[:2])
 
 
@@ -1780,7 +1785,9 @@ def _periodos_seleccionados() -> tuple[str, ...]:
     anio = getattr(st.session_state, "company_anio", None)
     if anio is None and hasattr(st.session_state, "get"):
         anio = st.session_state.get("company_anio")
-    return (str(int(anio or date.today().year)),)
+    if anio is not None and str(anio).strip():
+        return (str(int(anio)),)
+    return ()
 
 
 def _valor_periodo(
@@ -3568,16 +3575,18 @@ def main():
                     filter_mode="fuzzy",
                 )
             anio_actual = date.today().year
-            anios = list(range(anio_actual + 2, 1979, -1))
-            if int(st.session_state.company_anio) not in anios:
-                anios.append(int(st.session_state.company_anio))
+            anios = list(range(anio_actual + 1, 1979, -1))
+            val_anio = st.session_state.company_anio
+            if val_anio is not None and int(val_anio) not in anios:
+                anios.append(int(val_anio))
                 anios.sort(reverse=True)
+            default_anio_idx = anios.index(int(val_anio)) if val_anio is not None else 1
             with periodo2:
                 anio_sel = st.selectbox(
-                    "Año de cierre",
+                    "Año de cierre" + ("" if val_anio is not None else " (No detectado en documento)"),
                     anios,
-                    index=anios.index(int(st.session_state.company_anio)),
-                    help="Escriba el año para encontrarlo.",
+                    index=default_anio_idx,
+                    help="Año fiscal o de término del balance.",
                     filter_mode="fuzzy",
                 )
             opciones_meses = list(range(1, 13))
@@ -3586,30 +3595,32 @@ def main():
                     "Número de meses del período",
                     opciones_meses,
                     index=opciones_meses.index(
-                        int(st.session_state.company_numero_meses)
+                        int(st.session_state.company_numero_meses) if st.session_state.company_numero_meses is not None else 12
                     ),
                     help="Escriba un número entre 1 y 12 para encontrarlo.",
                     filter_mode="fuzzy",
                 )
 
             periodos_detectados = tuple(
-                st.session_state.get(
-                    "company_periodos_detectados", (str(anio_sel),),
-                )
+                st.session_state.get("company_periodos_detectados", ())
             )
             if len(periodos_detectados) >= 2:
                 actual, anterior = periodos_detectados[:2]
                 opciones_periodo = {
-                    f"Ambos períodos: {actual} y {anterior}": (actual, anterior),
+                    f"Ambos períodos detectados: {actual} y {anterior}": (actual, anterior),
                     f"Sólo {actual}": (actual,),
                     f"Sólo {anterior}": (anterior,),
                 }
-            else:
+            elif len(periodos_detectados) == 1:
                 unico = periodos_detectados[0]
-                opciones_periodo = {f"Sólo {unico}": (unico,)}
+                opciones_periodo = {f"Sólo {unico} (Período detectado)": (unico,)}
+            else:
+                opciones_periodo = {f"Período manual: {anio_sel}": (str(anio_sel),)}
+
             seleccion_actual = tuple(
                 st.session_state.get(
-                    "company_periodos_seleccionados", periodos_detectados,
+                    "company_periodos_seleccionados",
+                    periodos_detectados or (str(anio_sel),),
                 )
             )
             etiquetas_periodo = list(opciones_periodo)
@@ -4151,6 +4162,25 @@ def main():
     _doc_ctx = st.session_state.document_intel.get(archivo_activo_name)
     if _doc_ctx is not None:
         _mostrar_informacion_documento(_doc_ctx)
+
+    st.markdown("""
+    <style>
+        /* Split-view sticky visor */
+        [data-testid="column"]:first-child:has(.document-visor-anchor) {
+            position: -webkit-sticky !important;
+            position: sticky !important;
+            top: 2rem !important;
+            max-height: calc(100vh - 3rem) !important;
+            overflow-y: auto !important;
+            z-index: 10;
+        }
+        .document-visor-anchor {
+            position: sticky;
+            top: 0;
+        }
+    </style>
+    <div class="document-visor-anchor"></div>
+    """, unsafe_allow_html=True)
 
     col_visor, col_trabajo = st.columns([1, 1], gap="medium")
 
@@ -5762,7 +5792,7 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
     for idx, row in visible.iterrows():
         seleccionada = idx in st.session_state.lote_seleccion
         with st.container(border=seleccionada):
-            c0, c1, c2 = st.columns([0.3, 4, 4])
+            c0, c1, c2 = st.columns([0.3, 4.2, 4.5])
             with c0:
                 checkbox_key = f"{checkbox_prefix}_{idx}"
                 st.checkbox(
@@ -5787,28 +5817,31 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                     'ACTIVO': '#1E90FF', 'PASIVO': '#FF8C00',
                     'PERDIDA': '#DC143C', 'GANANCIA': '#2E8B57',
                 }.get(col_actual, '#6B7280')
+
+                monto_val = row['monto']
+                monto_str = f"${monto_val:,.0f}" if pd.notna(monto_val) else "—"
+                monto_color = '#1d4ed8' if pd.notna(monto_val) and monto_val > 0 else ('#b91c1c' if pd.notna(monto_val) and monto_val < 0 else '#64748b')
+
                 st.markdown(
-                    f"<span style='background:{badge_bg}; color:white; "
-                    f"padding:2px 10px; border-radius:4px; font-size:0.75em; "
-                    f"font-weight:600; letter-spacing:0.5px;'>{etiqueta_columna}</span>",
+                    f"<div style='display:flex; align-items:center; flex-wrap:wrap; gap:6px; margin-bottom:2px;'>"
+                    f"<span style='background:{badge_bg}; color:white; padding:1px 7px; border-radius:4px; font-size:0.75em; font-weight:700;'>{etiqueta_columna}</span>"
+                    f"<span style='font-weight:700; font-size:0.95em; color:#0f172a;'>{_nombre_mostrar(row)}</span>"
+                    f"<span style='font-weight:700; font-family:monospace; font-size:0.95em; color:{monto_color}; margin-left:auto;'>{monto_str}</span>"
+                    f"</div>",
                     unsafe_allow_html=True,
                 )
-                st.caption("Columna de origen del balance")
-                st.markdown(f"**{_nombre_mostrar(row)}**")
-                st.caption(f"Decisión actual: {row.get('codigo_clasificado') or 'Sin clasificar'} · {row.get('metodo', '')}")
-                monto_val = row['monto']
-                if pd.notna(monto_val):
-                    color = 'blue' if monto_val > 0 else ('red' if monto_val < 0 else 'gray')
-                    st.markdown(
-                        f"<span style='color:{color}; font-weight:bold;'>{monto_val:,.0f}</span>",
-                        unsafe_allow_html=True,
-                    )
-                monto_anterior = row.get('monto_periodo_anterior')
-                if pd.notna(monto_anterior):
-                    st.caption(
-                        f"Período seleccionado: actual · "
-                        f"Anterior: {float(monto_anterior):,.0f}"
-                    )
+
+                detalles = []
+                actual_cod = row.get('codigo_clasificado')
+                detalles.append(f"Actual: <b>{actual_cod}</b>" if actual_cod else "<i>Sin clasificar</i>")
+                if row.get('metodo'):
+                    detalles.append(f"{row.get('metodo')}")
+                if pd.notna(row.get('confianza')) and float(row.get('confianza') or 0) > 0:
+                    detalles.append(f"{float(row.get('confianza')):.0%}")
+                if pd.notna(row.get('monto_periodo_anterior')):
+                    detalles.append(f"Ant: ${float(row['monto_periodo_anterior']):,.0f}")
+                st.markdown(f"<div style='font-size:0.75em; color:#64748b; margin-bottom:4px;'>{' · '.join(detalles)}</div>", unsafe_allow_html=True)
+
                 columnas_derivadas = str(row.get('columnas_derivadas') or '').strip()
                 if columnas_derivadas:
                     st.warning(
@@ -5948,7 +5981,7 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                     if requiere_decision or mostrar_todas else []
                 )
                 if alternativas:
-                    st.caption("Alternativas compatibles · selección asistida, no automática")
+                    st.caption("Alternativas compatibles · selección asistida")
                     if (
                         len(alternativas) > 1
                         and alternativas[0]["codigo"] != alternativas[1]["codigo"]
@@ -5958,20 +5991,21 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                             "Señales contradictorias: los dos primeros candidatos "
                             "tienen relevancia similar. Requiere criterio del analista."
                         )
-                    for alternativa in alternativas:
-                        alt_name, alt_score, alt_action = st.columns([4, 1, 1])
-                        alt_name.markdown(
-                            f"**`{alternativa['codigo']}` {alternativa['nombre']}**"
-                        )
-                        alt_score.markdown(f"**{alternativa['score']:.0%}**")
-                        selection_key = f"sel_{doc_key}_{idx}"
-                        alt_action.button(
-                            "Usar",
-                            key=f"usar_alt_{doc_key}_{idx}_{alternativa['codigo']}",
-                            use_container_width=True,
-                            on_click=_asignar_estado_widget,
-                            args=(selection_key, alternativa['codigo']),
-                        )
+                    # Render chips horizontally side-by-side
+                    alt_cols = st.columns(min(len(alternativas), 3))
+                    for i_alt, alt in enumerate(alternativas[:3]):
+                        with alt_cols[i_alt]:
+                            score_pct = f"{alt['score']:.0%}"
+                            chip_label = f"✓ {alt['codigo']} ({score_pct})"
+                            selection_key = f"sel_{doc_key}_{idx}"
+                            st.button(
+                                chip_label,
+                                key=f"usar_alt_{doc_key}_{idx}_{alt['codigo']}",
+                                use_container_width=True,
+                                help=f"{alt['codigo']} — {alt['nombre']} · Relevancia: {score_pct}",
+                                on_click=_asignar_estado_widget,
+                                args=(selection_key, alt['codigo']),
+                            )
                     with st.expander("Ver fundamento de las sugerencias"):
                         for alternativa in alternativas:
                             st.caption(
