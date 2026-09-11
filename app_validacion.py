@@ -5783,12 +5783,32 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
             step=1, key=f"revision_page_{doc_key}",
         ))
     start = (page - 1) * page_size
-    visible = pendientes.iloc[start:start + page_size]
     st.caption(
         f"Mostrando {start + 1}–{min(start + page_size, len(pendientes))} "
         f"de {len(pendientes)} cuentas · página {page} de {total_pages}."
     )
+    st.markdown("""
+    <style>
+        /* Compact review rows */
+        div[data-testid="stVerticalBlockBorderWrapper"] {
+            padding: 6px 10px !important;
+            margin-bottom: 4px !important;
+            background-color: #ffffff;
+            border-radius: 8px;
+            border: 1px solid #e2e8f0;
+        }
+        /* Ticket chip buttons */
+        div[data-testid="column"] button[kind="secondary"] {
+            padding: 2px 6px !important;
+            min-height: 28px !important;
+            font-size: 11px !important;
+            font-weight: 600 !important;
+            border-radius: 6px !important;
+        }
+    </style>
+    """, unsafe_allow_html=True)
 
+    visible = pendientes.iloc[start:start + page_size]
     for idx, row in visible.iterrows():
         seleccionada = idx in st.session_state.lote_seleccion
         with st.container(border=seleccionada):
