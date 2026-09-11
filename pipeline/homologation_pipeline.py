@@ -64,14 +64,13 @@ class HomologationPipeline:
 
     # ------------------------------------------------------------------
     # Regex fallback — only audited rules with 100% precision (Sprint 28.5A)
-    # Indices into REGLAS_REGEX: PC.05(16), PC.08(19), PAT.02(26),
-    #                             ER.04(31), ER.09(34), ER.10(35), ER.11(36),
-    #                             ER.20(38), ER.21(39)
+    # Target codes: PC.05, PC.08, PAT.02, ER.04, ER.09, ER.10, ER.11, ER.20, ER.21
     # ------------------------------------------------------------------
 
     _REGEX_FALLBACK: list[tuple[re.Pattern, str, float]] = [
-        (re.compile(REGLAS_REGEX[i][0], re.IGNORECASE | re.UNICODE), REGLAS_REGEX[i][1], REGLAS_REGEX[i][2])
-        for i in (16, 19, 26, 31, 34, 35, 36, 38, 39)
+        (re.compile(pattern, re.IGNORECASE | re.UNICODE), code, confidence)
+        for pattern, code, confidence in REGLAS_REGEX
+        if code in ("PC.05", "PC.08", "PAT.02", "ER.04", "ER.09", "ER.10", "ER.11", "ER.20", "ER.21")
     ]
     _REGEX_CONTEXTUAL: list[tuple[re.Pattern, str, float]] = [
         (re.compile(pattern, re.IGNORECASE | re.UNICODE), code, confidence)
@@ -116,6 +115,15 @@ class HomologationPipeline:
         (re.compile(r"deferred taxes", re.I), "ANC.09", {"ACTIVO"}),
         (re.compile(r"inversiones en otras (?:empresas|sociedades)", re.I), "ANC.04", {"ACTIVO"}),
         (re.compile(r"activos biol[oó]gicos(?: corrientes?)?", re.I), "AC.05", {"ACTIVO"}),
+        (re.compile(r"activos biol[oó]gicos no corrientes?", re.I), "ANC.01", {"ACTIVO"}),
+        (re.compile(r"gastos futuras cosechas", re.I), "AC.05", {"ACTIVO"}),
+        (re.compile(r"parronales", re.I), "ANC.01", {"ACTIVO"}),
+        (re.compile(r"pozos profundos", re.I), "ANC.01", {"ACTIVO"}),
+        (re.compile(r"salas de bombas", re.I), "ANC.01", {"ACTIVO"}),
+        (re.compile(r"bocatomas?(?:,\s*piscinas?\s*y\s*canales?)?", re.I), "ANC.01", {"ACTIVO"}),
+        (re.compile(r"galpones", re.I), "ANC.01", {"ACTIVO"}),
+        (re.compile(r"bodegas", re.I), "ANC.01", {"ACTIVO"}),
+        (re.compile(r"obras en ejecuci[oó]n", re.I), "ANC.01", {"ACTIVO"}),
         (re.compile(r"capital emitido", re.I), "PAT.01", {"PATRIMONIO"}),
         (re.compile(r"capital pagado", re.I), "PAT.01", {"PATRIMONIO"}),
         (re.compile(r"(?:otras )?reservas", re.I), "PAT.02", {"PATRIMONIO"}),
@@ -697,7 +705,7 @@ class HomologationPipeline:
                     and self._is_valid_ppe_depreciation(reg_cand.get("standard_code"), account_name)):
                 result = reg_cand
 
-        if result is None and not account_code:
+        if result is None:
             reg_cand = self._classify_by_regex_contextual(account_name, account_tipo)
             if (reg_cand
                     and self._is_code_allowed(reg_cand.get("standard_code"), account_tipo, account_section)
