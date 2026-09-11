@@ -3315,6 +3315,7 @@ def _confirmar_alcance_documentos(archivos) -> bool:
         # reconstruir el mismo widget sin perder su estado.
         st.session_state.setdefault("document_scope_preview", archivos[0].name)
         return True
+    preview_name = st.session_state.get("document_scope_preview", archivos[0].name)
     preview_doc = next((a for a in archivos if a.name == preview_name), archivos[0])
     col_visor, col_form = st.columns([1, 1], gap="medium")
 
@@ -4172,20 +4173,19 @@ def main():
     st.markdown("""
     <style>
         /* Split-view sticky visor */
-        [data-testid="column"]:first-child:has(.document-visor-anchor) {
+        div[data-testid="stHorizontalBlock"]:has(.document-visor-marker) {
+            align-items: flex-start !important;
+        }
+        div[data-testid="stHorizontalBlock"]:has(.document-visor-marker) > div[data-testid="column"]:first-child {
             position: -webkit-sticky !important;
             position: sticky !important;
-            top: 2rem !important;
-            max-height: calc(100vh - 3rem) !important;
+            top: 2.5rem !important;
+            align-self: flex-start !important;
+            max-height: calc(100vh - 3.5rem) !important;
             overflow-y: auto !important;
-            z-index: 10;
-        }
-        .document-visor-anchor {
-            position: sticky;
-            top: 0;
+            z-index: 10 !important;
         }
     </style>
-    <div class="document-visor-anchor"></div>
     """, unsafe_allow_html=True)
 
     col_visor, col_trabajo = st.columns([1, 1], gap="medium")
@@ -4251,6 +4251,24 @@ def _visor_documento(
 
     suffix = Path(archivo.name).suffix.lower()
     archivo.seek(0)
+    st.markdown("""
+    <style>
+        /* Split-view sticky visor */
+        div[data-testid="stHorizontalBlock"]:has(.document-visor-marker) {
+            align-items: flex-start !important;
+        }
+        div[data-testid="stHorizontalBlock"]:has(.document-visor-marker) > div[data-testid="column"]:first-child {
+            position: -webkit-sticky !important;
+            position: sticky !important;
+            top: 2.5rem !important;
+            align-self: flex-start !important;
+            max-height: calc(100vh - 3.5rem) !important;
+            overflow-y: auto !important;
+            z-index: 10 !important;
+        }
+    </style>
+    <div class="document-visor-marker" style="display:none;"></div>
+    """, unsafe_allow_html=True)
     if mostrar_titulo:
         st.markdown("#### 📄 Documento original")
 
@@ -4803,12 +4821,9 @@ def _exportar_advertencias_auxiliares(writer, certification) -> None:
 
 
 def _mostrar_etapa_correccion_extraccion(archivo, filename: str) -> None:
-    """Corrección en split-view sticky con documento original a la izquierda."""
-    col_visor, col_diag = st.columns([1, 1], gap="medium")
-    with col_visor:
-        _visor_documento(archivo, altura="72vh", mostrar_titulo=True)
-    with col_diag:
-        _mostrar_correccion_extraccion(filename)
+    _mostrar_correccion_extraccion(filename)
+    st.divider()
+    _visor_documento(archivo, altura="58vh", mostrar_titulo=False)
 
 
 def _explicar_diferencia_controles(certification) -> str:
@@ -5679,7 +5694,7 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
         with bc1:
             cat_lote = st.selectbox(
                 "Clasificar todas las seleccionadas como:", opciones_codigo,
-                format_func=lambda c: f"{c} — {catalogo[c]['nombre_estandar']}" if c in catalogo else c if c else "(elegir categoría)",
+                format_func=lambda c: f"{catalogo[c]['nombre_estandar']} ({c})" if c in catalogo else c if c else "(elegir categoría)",
                 key=f"lote_categoria_{doc_key}"
             )
         with bc2:
@@ -5860,7 +5875,11 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
 
                 detalles = []
                 actual_cod = row.get('codigo_clasificado')
-                detalles.append(f"Actual: <b>{actual_cod}</b>" if actual_cod else "<i>Sin clasificar</i>")
+                if actual_cod:
+                    nombre_actual = catalogo.get(actual_cod, {}).get('nombre_estandar', actual_cod)
+                    detalles.append(f"Actual: <b>{nombre_actual}</b> ({actual_cod})")
+                else:
+                    detalles.append("<i>Sin clasificar</i>")
                 if row.get('metodo'):
                     detalles.append(f"{row.get('metodo')}")
                 if pd.notna(row.get('confianza')) and float(row.get('confianza') or 0) > 0:
@@ -5985,7 +6004,9 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                             sugerido, row.get('origen_columna'), row.get('monto'),
                             _nombre_contable_fila(row), catalogo)):
                     sugerido = ''
-                st.write(f"Sugerido: **{sugerido or '(ninguno)'}**")
+                sugerido_nom = catalogo.get(sugerido, {}).get('nombre_estandar', sugerido) if sugerido else '(ninguno)'
+                sugerido_badge = f" `({sugerido})`" if sugerido else ""
+                st.markdown(f"Sugerido: **{sugerido_nom}**{sugerido_badge}")
 
                 requiere_decision = (
                     bool(row.get('requiere_revision', False)) or not sugerido
@@ -6023,20 +6044,22 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                     for i_alt, alt in enumerate(alternativas[:3]):
                         with alt_cols[i_alt]:
                             score_pct = f"{alt['score']:.0%}"
-                            chip_label = f"✓ {alt['codigo']} ({score_pct})"
+                            glosa_nombre = alt.get('nombre') or catalogo.get(alt['codigo'], {}).get('nombre_estandar', alt['codigo'])
+                            chip_label = f"✓ {glosa_nombre} ({score_pct})"
                             selection_key = f"sel_{doc_key}_{idx}"
                             st.button(
                                 chip_label,
                                 key=f"usar_alt_{doc_key}_{idx}_{alt['codigo']}",
                                 use_container_width=True,
-                                help=f"{alt['codigo']} — {alt['nombre']} · Relevancia: {score_pct}",
+                                help=f"{glosa_nombre} ({alt['codigo']}) · Relevancia: {score_pct}",
                                 on_click=_asignar_estado_widget,
                                 args=(selection_key, alt['codigo']),
                             )
                     with st.expander("Ver fundamento de las sugerencias"):
                         for alternativa in alternativas:
+                            alt_glosa = catalogo.get(alternativa['codigo'], {}).get('nombre_estandar', alternativa.get('nombre', alternativa['codigo']))
                             st.caption(
-                                f"{alternativa['codigo']} · {alternativa['fuente']} · "
+                                f"**{alt_glosa}** ({alternativa['codigo']}) · {alternativa['fuente']} · "
                                 f"{alternativa['evidencia']}"
                             )
 
@@ -6058,7 +6081,7 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                     opciones_fila,
                     index=default_idx,
                     format_func=lambda c: (
-                        f"{c} — {catalogo[c]['nombre_estandar']}" if c in catalogo
+                        f"{catalogo[c]['nombre_estandar']} ({c})" if c in catalogo
                         else c if c else "(sin clasificar)"
                     ),
                     key=f"sel_{doc_key}_{idx}"
