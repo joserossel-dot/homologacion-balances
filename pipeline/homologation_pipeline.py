@@ -1073,6 +1073,14 @@ class HomologationPipeline:
             if classification.get("standard_code") is None:
                 unclassified_count += 1
 
+            is_column_bleed = (
+                getattr(cr, "requiere_revision_extraccion", False)
+                or bool(re.search(
+                    r"[a-zA-ZáéíóúÁÉÍÓÚñÑüÜ]\d+[a-zA-ZáéíóúÁÉÍÓÚñÑüÜ]|\d+[a-zA-ZáéíóúÁÉÍÓÚñÑüÜ]+\d+|\b\w*(?:[a-zA-ZáéíóúÁÉÍÓÚñÑüÜ]\d{1,2}\.\d{3}|\d{1,2}\.[a-zA-ZáéíóúÁÉÍÓÚñÑüÜ])\w*",
+                    ab.account_name,
+                ))
+            )
+
             requires_review_by_code = False
             if classification.get("method") in {"code", "codigo"}:
                 is_plausible = self._is_plausible_account_name(ab.account_name)
@@ -1083,7 +1091,15 @@ class HomologationPipeline:
                 adjustment.requiere_revision
                 or classification.get("method") in RESIDUAL_CLASSIFICATION_METHODS
                 or requires_review_by_code
+                or is_column_bleed
             )
+
+            account_confidence = classification.get("confidence", 0.0)
+            account_reason = classification.get("reason", "")
+            if is_column_bleed:
+                account_confidence = min(account_confidence, 0.50)
+                if "fusión de columnas" not in account_reason:
+                    account_reason = (account_reason + " (advertencia: posible contaminación por fusión/solapamiento de columnas)").strip()
 
             classified.append({
                 "account_code": ab.account_code,
@@ -1092,9 +1108,9 @@ class HomologationPipeline:
                 "classification_amount": classification_amount,
                 "standard_code": classification.get("standard_code"),
                 "final_code": final_code,
-                "confidence": classification.get("confidence", 0.0),
+                "confidence": account_confidence,
                 "method": classification.get("method", "unknown"),
-                "reason": classification.get("reason", ""),
+                "reason": account_reason,
                 "special_rule": adjustment.nota if adjustment.aplica else None,
                 "review_required": review_required,
                 "source_file": path.name,

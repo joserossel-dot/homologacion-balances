@@ -1190,8 +1190,36 @@ def verificar_runtime_ocr() -> dict:
 _EMBEDDED_AMOUNT = re.compile(
     r"(?<!\w)\(?-?\d{1,3}(?:[.,]\d{3})+(?:[.,]\d+)?\)?(?!\w)"
 )
+_INTERLEAVED_COLUMN_BLEED = re.compile(
+    r"[a-zA-ZáéíóúÁÉÍÓÚñÑüÜ]\d+[a-zA-ZáéíóúÁÉÍÓÚñÑüÜ]"
+    r"|\d+[a-zA-ZáéíóúÁÉÍÓÚñÑüÜ]+\d+"
+    r"|\b\w*(?:[a-zA-ZáéíóúÁÉÍÓÚñÑüÜ]\d{1,2}\.\d{3}|\d{1,2}\.[a-zA-ZáéíóúÁÉÍÓÚñÑüÜ])\w*"
+)
+_PATRON_MONTO_ADHERIDO_A_PALABRA = re.compile(
+    r"^([a-zA-ZáéíóúÁÉÍÓÚñÑüÜ][a-zA-ZáéíóúÁÉÍÓÚñÑüÜ\.\-]*[a-zA-ZáéíóúÁÉÍÓÚñÑüÜ\.]|[a-zA-ZáéíóúÁÉÍÓÚñÑüÜ])(\d{1,3}(?:\.\d{3})+(?:,\d+)?|\d{4,})$"
+)
+
+
+def _separar_tokens_monto_adherido(tokens: list[str]) -> list[str]:
+    """Separa montos pegados al final de una palabra sin espacio en el layout."""
+    nuevos: list[str] = []
+    for t in tokens:
+        if _INTERLEAVED_COLUMN_BLEED.search(t):
+            nuevos.append(t)
+            continue
+        m = _PATRON_MONTO_ADHERIDO_A_PALABRA.match(t)
+        if m:
+            nuevos.append(m.group(1))
+            nuevos.append(m.group(2))
+        else:
+            nuevos.append(t)
+    return nuevos
 _DOCUMENT_IDENTIFIER = re.compile(
     r"\b(?:RUT|C\.?\s*I\.?)?\s*\d{1,2}[.]\d{3}[.]\d{3}[-·][0-9K]\b",
+    re.I,
+)
+_LEGAL_AND_TAX_IDENTIFIER = re.compile(
+    r"\b(?:LEY|D\.?F\.?L\.?|D\.?L\.?|ART(?:[IÍ]CULO)?|CIRCULAR|RESOLUCI[ÓO]N)\s*N?[°o.]?\s*\d+(?:[.,]\d+)*\b",
     re.I,
 )
 _LETTER_BLOCK = r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ][A-Za-zÁÉÍÓÚÜÑáéíóúüñ\s./()-]{2,}"
@@ -1223,7 +1251,9 @@ def detectar_linea_sospechosa(
 
 def marcar_cuenta_sospechosa(cuenta: CuentaRaw, linea: str, razones: list[str]) -> None:
     """Propaga señales de extracción antes de cualquier clasificación."""
-    nombre_sin_identificadores = _DOCUMENT_IDENTIFIER.sub("", cuenta.nombre or "")
+    nombre_sin_identificadores = _LEGAL_AND_TAX_IDENTIFIER.sub(
+        "", _DOCUMENT_IDENTIFIER.sub("", cuenta.nombre or "")
+    )
     contexto_no_contable = bool(re.search(
         r"\b(?:RUT|C\.?\s*I\.?|DIRECCI[ÓO]N|P[ÁA]GINA|OFICINA)\b",
         cuenta.nombre or "", re.I,
@@ -1233,6 +1263,8 @@ def marcar_cuenta_sospechosa(cuenta: CuentaRaw, linea: str, razones: list[str]) 
     )
     if nombre_con_monto:
         razones = list(dict.fromkeys([*razones, "monto_incrustado_en_glosa"]))
+    if not contexto_no_contable and _INTERLEAVED_COLUMN_BLEED.search(nombre_sin_identificadores):
+        razones = list(dict.fromkeys([*razones, "nombre_contaminado_por_fusion_de_columnas"]))
     if not razones:
         return
     cuenta.requiere_revision_extraccion = True
@@ -3474,6 +3506,7 @@ def parsear_linea(
     )
 
     tokens = resto.split()
+    tokens = _separar_tokens_monto_adherido(tokens)
     descartados_finales = 0
     while tokens and descartados_finales < 2 and \
             normalizar_token_ocr(tokens[-1]) != '0' and \
@@ -4026,6 +4059,12 @@ def parsear_linea(
                     active_years[0]: value,
                     "actual": value,
                 }
+    requiere_rev = False
+    razones_rev: list[str] = []
+    if _INTERLEAVED_COLUMN_BLEED.search(nombre):
+        requiere_rev = True
+        razones_rev.append("nombre_contaminado_por_fusion_de_columnas")
+
     return CuentaRaw(
         linea=numero_linea,
         codigo=codigo,
@@ -4033,10 +4072,12 @@ def parsear_linea(
         monto=monto_principal,
         origen_columna=origen,
         es_total=es_total,
-        confianza_extraccion=confianza_base,
+        confianza_extraccion=min(confianza_base, 0.35) if requiere_rev else confianza_base,
         montos_columnas=montos_columnas,
         montos_periodos=montos_periodos,
         columnas_derivadas=columnas_derivadas,
+        requiere_revision_extraccion=requiere_rev,
+        razones_revision_extraccion=razones_rev,
     )
 
 
