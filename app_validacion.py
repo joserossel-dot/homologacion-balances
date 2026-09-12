@@ -58,7 +58,7 @@ from reglas_especiales import (
     calcular_patrimonio_efectivo,
     es_cuenta_socios,
 )
-from config.regex_rules import REGLAS_REGEX, REGLAS_COMPILADAS
+from config.regex_rules import REGLAS_COMPILADAS
 from parser_universal import (
     ParserPDF, CuentaRaw, OrigenColumna, RAW_MONETARY_COLUMNS,
     FormatoCodigo, ResultadoParseo, CertificacionExtraccion, certificar_clasificado_final,
@@ -973,12 +973,12 @@ def _clave_compuesta_cuenta(item: Any) -> tuple[Any, Any]:
         p = item.get("pagina")
         if p is None:
             p = item.get("page")
-        l = item.get("linea")
+        linea = item.get("linea")
     else:
         p = getattr(item, "pagina", None)
         if p is None:
             p = getattr(item, "page", None)
-        l = getattr(item, "linea", None)
+        linea = getattr(item, "linea", None)
     if p is not None and pd.notna(p):
         try:
             p_val = int(p)
@@ -986,7 +986,7 @@ def _clave_compuesta_cuenta(item: Any) -> tuple[Any, Any]:
             p_val = str(p).strip()
     else:
         p_val = None
-    return (p_val, l)
+    return (p_val, linea)
 
 
 def _es_cuenta_relevante(cuenta: CuentaRaw) -> bool:
@@ -2121,8 +2121,8 @@ def propagar_clasificacion_resultados(nombre_original: str, codigo_final: str, m
             names = df_res['nombre_original'].fillna('').apply(normalizar_nombre)
             mask = names == nombre_norm
             mask_target = mask & (
-                df_res['requiere_revision'] | 
-                (df_res['codigo_clasificado'] == '') | 
+                df_res['requiere_revision'] |
+                (df_res['codigo_clasificado'] == '') |
                 (df_res['confianza'] < 1.0)
             )
             if codigo_final != '__EXCLUIR__':
@@ -2149,7 +2149,7 @@ def propagar_clasificacion_resultados(nombre_original: str, codigo_final: str, m
                     df_res.loc[mask_target, 'evidencia'] = 'Propagación automática entre balances'
                 st.session_state.resultados[fn] = df_res
                 propagaciones += 1
-        
+
         if propagaciones > 1:
             st.toast(f"Homologación propagada a {propagaciones - 1} otro(s) balance(s) 🔄", icon="🔄")
 
@@ -2417,8 +2417,11 @@ def _codigo_compatible_con_origen(
             and str(codigo or '').startswith('ANC')):
         return True
     if str(codigo or '').startswith('PAT'):
-        if _es_partida_patrimonial(nombre) or origen_efectivo in {'pasivo', 'activo'}:
+        if _es_partida_patrimonial(nombre) or origen_efectivo == 'pasivo':
             return True
+    if (origen_efectivo == 'activo' and codigo == 'PAT.10'
+            and es_cuenta_socios(nombre)):
+        return True
     tipos = _resolver_tipos_permitidos(origen_efectivo)
     if not tipos:
         return True
@@ -2851,8 +2854,10 @@ class MotorHibridoLocal:
 
         for keyword, cod_ing, cod_gas in AMBIGUOS:
             if keyword in nombre_norm:
-                if es_ingreso and codigo_actual not in (cod_ing, cod_gas): return cod_ing
-                if es_gasto and codigo_actual not in (cod_ing, cod_gas): return cod_gas
+                if es_ingreso and codigo_actual not in (cod_ing, cod_gas):
+                    return cod_ing
+                if es_gasto and codigo_actual not in (cod_ing, cod_gas):
+                    return cod_gas
 
         if origen in (OC.ACTIVO, OC.PASIVO) and codigo_actual and codigo_actual.startswith('ER'):
             return None
@@ -3329,13 +3334,13 @@ def _confirmar_alcance_documentos(archivos) -> bool:
         )
         if st.session_state.get("document_scope_editing"):
             st.warning("Cambiar las páginas vuelve a procesar ese documento y reemplaza sus correcciones en esta sesión.")
-        
+
         if len(archivos) > 1:
             preview_name = st.selectbox(
                 "Documento a visualizar", [a.name for a in archivos],
                 key="document_scope_preview",
             )
-        
+
         selections = {}
         errors = []
         with st.form("document_scope"):
@@ -3452,12 +3457,11 @@ def main():
             if st.button("Cambiar páginas a analizar"):
                 st.session_state.document_scope_editing = True
                 st.rerun()
-        giro = st.selectbox(
+        st.selectbox(
             "Giro de la empresa (afecta regla D2-Terrenos)",
             ['Otro', 'Inmobiliaria', 'Construcción', 'Promotora'],
             help="Si el giro es inmobiliario/construcción, los terrenos en activo corriente se reclasifican como inventario."
         )
-        giro_norm = None if giro == 'Otro' else giro.lower()
 
         st.divider()
         st.metric("Cuentas en diccionario", len(st.session_state.diccionario))
@@ -4155,7 +4159,8 @@ def main():
         df = st.session_state.resultados[archivo_activo_name]
         meta_activo = st.session_state.metadata_files.get(archivo_activo_name)
     except (NameError, Exception):
-        class DummyDF: empty = False
+        class DummyDF:
+            empty = False
         df = DummyDF()
         archivo_activo_name = ""
         archivo_activo = None
@@ -4280,7 +4285,8 @@ def _render_pdf_cached(content: bytes, page: int) -> bytes:
 def _visor_documento(
     archivo, *, altura: str = "72vh", mostrar_titulo: bool = True, key_prefix: str = "",
 ):
-    import tempfile, base64, io, platform, shutil, subprocess, glob
+    import base64
+    import io
     from PIL import Image
     from pathlib import Path
 
@@ -5251,7 +5257,8 @@ def _extraer_cuentas(archivo) -> tuple[list[CuentaRaw], object]:
             [{"codigo_original": cuenta.codigo or "", "is_total": cuenta.es_total}
              for cuenta in resultado.cuentas],
         )
-        for adv in resultado.advertencias: st.warning(adv)
+        for adv in resultado.advertencias:
+            st.warning(adv)
         document_context = getattr(resultado, 'document_context', None)
         signature = getattr(document_context, 'signature', None)
         if _documento_no_es_balance(signature):
@@ -5666,7 +5673,7 @@ def _tab_resumen(df: pd.DataFrame):
     dist_df = dist.reset_index()
     dist_df.columns = ['Método', 'Cuentas']
     dist_df['Procedencia'] = dist_df['Método'].map(method_provenance)
-    
+
     METODO_LABELS = {
         'codigo': '0 · Código de cuenta', 'diccionario_exacto': '1 · Diccionario (exacto)',
         'diccionario_fuzzy': '1b · Diccionario (fuzzy)', 'regla_regex': '2 · Reglas regex',
@@ -5745,7 +5752,8 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
         with bc2:
             alcance_lote = st.radio("Alcance", ["Solo este caso", "Agregar al diccionario"], index=1, horizontal=True, key=f"lote_alcance_{doc_key}")
         with bc3:
-            st.write(""); st.write("")
+            st.write("")
+            st.write("")
             confirmar_lote = st.button(f"✅ Confirmar lote ({n_sel})", disabled=(n_sel == 0 or not cat_lote), use_container_width=True)
 
         if confirmar_lote and n_sel > 0 and cat_lote:
@@ -6070,7 +6078,7 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                 with opt_c:
                     with st.popover("⚙️", help="Opciones y alcance"):
                         st.checkbox(
-                            "🔎 Buscar en todo el catálogo",
+                            "🔎 Buscar más clasificaciones",
                             key=f"mostrar_todas_{doc_key}_{idx}",
                         )
                         alcance_opciones = [
@@ -6078,7 +6086,7 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                             "Agregar al diccionario (aplica a futuros iguales)",
                         ]
                         st.radio(
-                            "Alcance de la regla:",
+                            "¿Aplicar esta clasificación?",
                             alcance_opciones,
                             index=1 if row.get('requiere_revision', False) else 0,
                             key=f"alc_{doc_key}_{idx}",
@@ -6120,11 +6128,93 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                 alcance = st.session_state.get(f"alc_{doc_key}_{idx}", "Agregar al diccionario" if row.get('requiere_revision', False) else "Solo para este caso")
                 es_nueva_cat = seleccion == '➕ NUEVA CATEGORÍA'
 
-                if st.button("✓ Confirmar", key=f"btn_{doc_key}_{idx}", type="primary", use_container_width=True):
+                if es_nueva_cat:
+                    st.info("Define la nueva categoría:")
+                    nuevo_codigo = st.text_input("Código (ej: AC.10, ER.17)",
+                                                  key=f"new_cod_{doc_key}_{idx}", max_chars=10)
+                    nuevo_nombre_cat = st.text_input("Nombre de la categoría",
+                                                  key=f"new_nom_{doc_key}_{idx}")
+                    nuevo_tipo = st.selectbox("Tipo de estado",
+                                              ['balance', 'resultados'],
+                                              key=f"new_tipo_{doc_key}_{idx}")
+                    nuevo_cat = st.selectbox(
+                        "Categoría",
+                        ['activo_corriente', 'activo_no_corriente',
+                         'pasivo_corriente', 'pasivo_no_corriente',
+                         'patrimonio', 'resultado'],
+                        key=f"new_cat_{doc_key}_{idx}"
+                    )
+                    naturaleza_resultado = st.selectbox(
+                        'Naturaleza de la nueva categoría', ['ganancia', 'perdida'],
+                        key=f'new_naturaleza_{doc_key}_{idx}',
+                    ) if nuevo_cat == 'resultado' else None
+
+
+                if st.button("✅ Confirmar", key=f"btn_{doc_key}_{idx}", type="primary", use_container_width=True):
                     codigo_final = None
 
                     if es_nueva_cat:
-                        st.info("Para definir una nueva categoría, use el menú de opciones.")
+                        if nuevo_codigo and nuevo_nombre_cat:
+                            nueva_entrada = {
+                                'codigo_estandar': nuevo_codigo.strip().upper(),
+                                'nombre_estandar': nuevo_nombre_cat.strip(),
+                                'categoria': nuevo_cat,
+                                'tipo_estado': nuevo_tipo,
+                                'naturaleza': 'deudora' if nuevo_cat.startswith('activo') else 'acreedora',
+                                'signo_normal': 1,
+                                'es_deuda_financiera': False,
+                                'es_activo_liquido': False,
+                                'afecta_ebitda': False,
+                            }
+                            if naturaleza_resultado:
+                                nueva_entrada['naturaleza'] = 'deudora' if naturaleza_resultado == 'perdida' else 'acreedora'
+                                nueva_entrada['signo_normal'] = -1 if naturaleza_resultado == 'perdida' else 1
+                            candidato = nuevo_codigo.strip().upper()
+                            prefijos = {'activo_corriente': 'AC.', 'activo_no_corriente': 'ANC.',
+                                        'pasivo_corriente': 'PC.', 'pasivo_no_corriente': 'PNC.',
+                                        'patrimonio': 'PAT.', 'resultado': 'ER.'}
+                            if candidato in catalogo:
+                                nombre_existente = catalogo[candidato].get(
+                                    'nombre_estandar', candidato,
+                                )
+                                st.error(
+                                    f'El código {candidato} ya existe como '
+                                    f'“{nombre_existente}”. Use un código libre. '
+                                    'No se puede redefinir una categoría '
+                                    'existente desde esta cuenta.'
+                                )
+                                st.stop()
+                            if not candidato.startswith(prefijos[nuevo_cat]):
+                                st.error(
+                                    'El código debe comenzar con el prefijo '
+                                    f'{prefijos[nuevo_cat]} correspondiente a '
+                                    f'{nuevo_cat}. La categoría no fue creada.'
+                                )
+                                st.stop()
+                            if not _codigo_compatible_con_origen(candidato, row.get('origen_columna'), row.get('monto'), _nombre_contable_fila(row), {**catalogo, candidato: nueva_entrada}):
+                                st.error('La nueva categoría contradice la naturaleza de esta cuenta. No fue creada.')
+                                st.stop()
+                            persistido_catalogo = _persistir_catalogo(nueva_entrada)
+                            if not persistido_catalogo and _legacy_json_fallback_allowed():
+                                try:
+                                    _write_legacy_packaged_catalog(
+                                        {**catalogo, candidato: nueva_entrada},
+                                    )
+                                    persistido_catalogo = True
+                                except Exception:
+                                    st.error('No se pudo guardar el respaldo de la categoría.')
+                            if not persistido_catalogo:
+                                st.error(
+                                    'La categoría no fue guardada. La clasificación '
+                                    'de la cuenta permanece sin cambios; vuelva a intentarlo.'
+                                )
+                                st.stop()
+                            catalogo[candidato] = nueva_entrada
+                            codigo_final = candidato
+                            st.toast(f"Nueva categoría '{nuevo_nombre_cat}' ({codigo_final}) creada ✨", icon="🆕")
+                        else:
+                            st.error("Debes ingresar código y nombre.")
+
                     elif seleccion == '🚫 NO INCLUIR':
                         _persist_streamlit_correction(
                             archivo_nombre, row_reference=idx,
@@ -6911,7 +7001,8 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
 
     for cat in orden_cat:
         sub = presentacion[presentacion['categoria'] == cat]
-        if sub.empty: continue
+        if sub.empty:
+            continue
         st.subheader(LABELS_CAT.get(cat, cat))
         columnas_tabla = ['codigo_clasificado', 'nombre_estandar', *amount_columns, 'num_cuentas']
         tabla = sub[columnas_tabla].copy()
@@ -6928,7 +7019,7 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
         if cat == 'resultado':
             st.caption('Ingresos positivos y gastos negativos. El resultado neto es un cálculo y no se suma nuevamente al detalle.')
         else:
-            st.metric(f"Subtotal", f"{sub['monto_total'].sum():,.0f}")
+            st.metric("Subtotal", f"{sub['monto_total'].sum():,.0f}")
         st.divider()
 
     # Ajuste Patrimonio Efectivo
@@ -6946,7 +7037,7 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
     # Detalle Excel Exporter
     import io
     from openpyxl.styles import Font, PatternFill
-    
+
     export_df = presentacion[[
         "codigo_clasificado", "nombre_estandar", *amount_columns, "num_cuentas",
     ]].copy()
@@ -6966,7 +7057,7 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
     export_df['Tipo de fila'] = presentacion['codigo_clasificado'].map(
         lambda c: 'Calculado, no sumar al detalle' if catalogo.get(c, {}).get('clasificable') is False else 'Cuenta'
     )
-    
+
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
         FILA_INICIO_BALANCE = 7
@@ -7041,12 +7132,18 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
 
         meta = st.session_state.get("metadata_files", {}).get(archivo_nombre)
         if meta:
-            ws["A1"] = "Empresa:";    ws["B1"] = meta.razon_social or ""
-            ws["A2"] = "RUT:";       ws["B2"] = meta.rut or ""
-            ws["A3"] = "Período:";   ws["B3"] = f'{meta.periodo_desde or ""} al {meta.periodo_hasta or ""}'
-            ws["A4"] = "Giro:";      ws["B4"] = meta.giro or ""
-            ws["A5"] = "Moneda/unidad:"; ws["B5"] = meta.moneda or ""
-            ws["A6"] = "Duración:";  ws["B6"] = (
+            ws["A1"] = "Empresa:"
+            ws["B1"] = meta.razon_social or ""
+            ws["A2"] = "RUT:"
+            ws["B2"] = meta.rut or ""
+            ws["A3"] = "Período:"
+            ws["B3"] = f'{meta.periodo_desde or ""} al {meta.periodo_hasta or ""}'
+            ws["A4"] = "Giro:"
+            ws["B4"] = meta.giro or ""
+            ws["A5"] = "Moneda/unidad:"
+            ws["B5"] = meta.moneda or ""
+            ws["A6"] = "Duración:"
+            ws["B6"] = (
                 f"{meta.numero_meses} meses" if meta.numero_meses else ""
             )
 
@@ -7055,7 +7152,9 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
         ws.column_dimensions["C"].width = 22
         ws.column_dimensions["D"].width = 20
 
-        AZUL = "1F4E79"; BLANCO = "FFFFFF"; GRIS = "F2F2F2"
+        AZUL = "1F4E79"
+        BLANCO = "FFFFFF"
+        GRIS = "F2F2F2"
         header_fill = PatternFill("solid", fgColor=AZUL)
         header_font = Font(bold=True, color=BLANCO, size=11)
         for cell in ws[FILA_INICIO_BALANCE]:
@@ -7067,7 +7166,8 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
                 max_row=FILA_INICIO_BALANCE + len(export_df),
                 max_col=len(export_df.columns)), start=0):
             if i % 2 == 0:
-                for cell in row: cell.fill = PatternFill("solid", fgColor=GRIS)
+                for cell in row:
+                    cell.fill = PatternFill("solid", fgColor=GRIS)
 
         fila_sep = FILA_INICIO_BALANCE + len(export_df) + 3
 
@@ -7211,7 +7311,7 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
         )
 
     buf.seek(0)
-    
+
     meta_state = meta
     razon_fn = (meta_state.razon_social or "empresa").replace(" ", "_")[:30] if meta_state else "empresa"
     rut_fn   = (meta_state.rut or "").replace(".", "").replace("-", "") if meta_state else ""
@@ -7270,7 +7370,7 @@ def _tab_diccionario():
     catalogo_local = cargar_catalogo()
     dic = st.session_state.diccionario
     df_dic = pd.DataFrame(dic)
-    
+
     df_dic['nombre_estandar'] = df_dic['codigo_estandar'].map(
         lambda c: catalogo_local.get(c, {}).get('nombre_estandar', '') if c else ''
     )
@@ -7907,6 +8007,6 @@ def _mostrar_resumen_catalogo(catalogo: dict):
 class TaxFolder:
     """Clase de marcador de posición para evitar que el orquestador falle al importar"""
     pass
-    
+
 if __name__ == '__main__':
     main()

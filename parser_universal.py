@@ -1057,13 +1057,13 @@ def validar_archivo(path: Path) -> tuple[bool, str]:
             header = f.read(8)
         ole2_sig = b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1'
         if header != ole2_sig:
-            return False, f"Archivo .xls no tiene firma OLE2 válida."
+            return False, "Archivo .xls no tiene firma OLE2 válida."
 
     elif suffix == '.pdf':
         with open(path, 'rb') as f:
             header = f.read(5)
         if header != b'%PDF-':
-            return False, f"Archivo .pdf no tiene firma PDF válida."
+            return False, "Archivo .pdf no tiene firma PDF válida."
 
     return True, "OK"
 
@@ -1513,7 +1513,7 @@ def ocr_pagina_tsv(img_path: Path, rotacion: int, psm: int = 6) -> list[dict]:
                 continue
             try:
                 left = float(row["left"])
-                top = float(row["top"])
+                float(row["top"])  # Validate the coordinate even though grouping uses line IDs.
                 width = float(row["width"])
             except (KeyError, TypeError, ValueError):
                 continue
@@ -1947,9 +1947,11 @@ def certificar_extraccion_columnas(
             movimiento_cuadra_saldo = (
                 abs(movement - balance) <= tolerancia_absoluta
             )
+            nombre_limpio = re.sub(r"^[^\w]+", "", str(cuenta.nombre or "")).strip()
             es_linea_resultado_cierre = bool(
-                re.search(r"\b(?:utilidad|p[eé]rdida|resultado)(?:es)?\s+(?:del\s+ejercicio|del\s+a[nñ]o|acum(?:ulad[ao]s?)?)\b", str(cuenta.nombre or "").lower())
-                or getattr(cuenta, "es_total", False)
+                getattr(cuenta, "es_total", False)
+                or PATRON_TOTAL.match(nombre_limpio)
+                or re.search(r"\b(?:utilidad|p[eé]rdida|resultado)(?:es)?\s*(?:/|y|o|\s+)\s*(?:p[eé]rdida|utilidad|ganancia|del\s+ejercicio|del\s+a[nñ]o|acum(?:ulad[ao]s?)?)\b", str(cuenta.nombre or "").lower())
             )
             if finales_validadas or (es_linea_resultado_cierre and saldo_cuadra_clasificado):
                 if not saldo_cuadra_clasificado:
@@ -3237,8 +3239,10 @@ PATRON_TOTAL = re.compile(
     r'^.+\s+total(?:es)?$|'
     r'^patrimonio\s+atribuible\s+a\b.*$|'
     r'^(?:resultado(?: del ejercicio| [\x22\x27]?(?:positivo|negativo))?|utilidad(?: neta| del ejercicio)?|'
-    r'perdida(?: o ganancia| neta| neto| del ejercicio)?)$|'
+    r'p[eé]rdida(?: o ganancia| neta| neto| del ejercicio)?)$|'
+    r'^(?:utilidad(?:es)?|p[eé]rdida(?:s)?|resultado(?:s)?)\s*(?:/|y|o|\s+)\s*(?:p[eé]rdida(?:s)?|utilidad(?:es)?|ganancia(?:s)?)(?:\s+(?:del\s+ejercicio|del\s+a[nñ]o|acum(?:ulad[ao]s?)?))?$|'
     r'^p[eé]rdidas?\s*(?:/|y|o)\s*ganancias?$|'
+    r'^utilidad\s*/\s*p[eé]rdida$|'
     r'^ganancia(?:\s*\(p[eé]rdida\))?$|'
     r'^ganancia\s*\(p[eé]rdida\)\s*,?\s*antes\s+de\s+impuestos?$|'
     r'^ganancia(?:\s*\(p[eé]rdida\))?\s+(?:bruta|antes\s+de\s+impuestos?|'
@@ -4651,26 +4655,26 @@ class ParserPDF:
             lineas, pre_years,
         )
         if requirio_ocr:
-            lineas = [normalizar_linea_ocr_tabla(l) for l in lineas]
+            lineas = [normalizar_linea_ocr_tabla(linea) for linea in lineas]
         elif self._extraction_method not in {
             "coordinates_8_amounts",
             "native_table_8_columns",
         }:
             lineas = [
                 normalizar_montos_fragmentados(
-                    l,
+                    linea,
                     preservar_columna_nota=preservar_columna_nota,
                 )
-                for l in lineas
+                for linea in lineas
             ]
-        lineas = [normalizar_codigo_ocr(l) for l in lineas]
+        lineas = [normalizar_codigo_ocr(linea) for linea in lineas]
 
-        primer_tokens = [l.split()[0] if l.split() else '' for l in lineas[:60]]
+        primer_tokens = [linea.split()[0] if linea.split() else '' for linea in lineas[:60]]
         formato_codigo = detectar_formato_codigo(primer_tokens)
 
         muestra_montos = []
-        for l in lineas[:80]:
-            muestra_montos.extend(PATRON_MONTOS.findall(l))
+        for linea in lineas[:80]:
+            muestra_montos.extend(PATRON_MONTOS.findall(linea))
         separador = detectar_separador_miles(muestra_montos)
         periodo_comparativo = any(
             re.search(r"\bactual\s+anterior\b", _sin_acentos(linea), re.I)
@@ -4830,8 +4834,8 @@ class ParserPDF:
             float(longitudes[len(longitudes) // 2]) if longitudes else 0.0
         )
         lineas_sospechosas = 0
-        for i, l in enumerate(lineas):
-            sub_lines = split_side_by_side(l)
+        for i, linea in enumerate(lineas):
+            sub_lines = split_side_by_side(linea)
             for sub_l in sub_lines:
                 razones_sospecha = detectar_linea_sospechosa(
                     sub_l, mediana_longitud=mediana_longitud,
@@ -5050,7 +5054,7 @@ class ParserPDF:
         """Extrae líneas respetando la orientación tipográfica cuando el texto está rotado."""
         chars = getattr(page, "chars", [])
         if not chars:
-            return [l.strip() for l in (page.extract_text() or "").split("\n") if l.strip()]
+            return [linea.strip() for linea in (page.extract_text() or "").split("\n") if linea.strip()]
 
         non_upright = [c for c in chars if c.get("upright") is False]
         if len(non_upright) / len(chars) > 0.40:
@@ -5123,7 +5127,7 @@ class ParserPDF:
                         lines.append(l_str.strip())
                 return lines
 
-        return [l.strip() for l in (page.extract_text() or "").split("\n") if l.strip()]
+        return [linea.strip() for linea in (page.extract_text() or "").split("\n") if linea.strip()]
 
 
     def _extraer_lineas(
@@ -5136,7 +5140,7 @@ class ParserPDF:
         # reutiliza íntegramente el pipeline de parseo posterior (formato,
         # separador, parsear_linea); no se duplica ninguna lógica.
         if context is not None and context.lineas_presplit:
-            lineas = [l for l in context.lineas_presplit if l.strip()]
+            lineas = [linea for linea in context.lineas_presplit if linea.strip()]
             if lineas:
                 return lineas, False, 0
 
@@ -5239,7 +5243,7 @@ class ParserPDF:
                         "universal.", exc,
                     )
                 if page_lineas:
-                    lineas.extend(l for l in page_lineas if l.strip())
+                    lineas.extend(linea for linea in page_lineas if linea.strip())
                 else:
                     tabla_8_columnas = _extraer_tabla_balance_8_columnas(page)
                     if tabla_8_columnas:
@@ -5260,7 +5264,7 @@ class ParserPDF:
 
         if lineas:
             if self._debe_corregir_rotacion(context):
-                lineas = [ParserPDF._reverse_line(l) for l in lineas]
+                lineas = [ParserPDF._reverse_line(linea) for linea in lineas]
                 return lineas, uso_ocr_parcial, 180
             return lineas, uso_ocr_parcial, 0
 
@@ -5775,7 +5779,6 @@ def parsear_excel(file) -> list[CuentaRaw]:
 
 if __name__ == '__main__':
     import sys
-    import json
 
     if len(sys.argv) < 2:
         print("Uso: python parser_universal.py <ruta_al_pdf>")
