@@ -56,8 +56,8 @@
   },
   {
     "cuenta_original": "Cta.Cte. Socio los Guris",
-    "codigo_estandar": "AC.06",
-    "fuente": "balances_reales_validado"
+    "codigo_estandar": "AC.06S",
+    "fuente": "validacion_humana"
   },
   {
     "cuenta_original": "Cuenta Corriente Merc. Empleados",
@@ -1701,8 +1701,8 @@
   },
   {
     "cuenta_original": "Revalorización Capital Propio",
-    "codigo_estandar": "PAT.01",
-    "fuente": "balances_reales_validado"
+    "codigo_estandar": "PAT.02",
+    "fuente": "validacion_humana"
   },
   {
     "cuenta_original": "Capital Social",
@@ -1805,9 +1805,9 @@
     "fuente": "balances_reales_validado"
   },
   {
-    "cuenta_original": "Corrección Monetaria",
+    "cuenta_original": "Corrección monetaria",
     "codigo_estandar": "ER.14",
-    "fuente": "balances_reales_validado"
+    "fuente": "validacion_humana"
   },
   {
     "cuenta_original": "Diferencia de Cambio",
@@ -3610,9 +3610,9 @@
     "fuente": "validacion_humana"
   },
   {
-    "cuenta_original": "iva Crédito Fiscal",
-    "codigo_estandar": "AC.07",
-    "fuente": "validacion_humana"
+    "cuenta_original": "Iva Crédito Fiscal",
+    "codigo_estandar": "AC.08",
+    "fuente": "validacion_humana_lote"
   },
   {
     "cuenta_original": "Corpbanca / ITAU",
@@ -4180,18 +4180,8 @@
     "fuente": "validacion_humana"
   },
   {
-    "cuenta_original": "Corrección monetaria",
-    "codigo_estandar": "ER.14",
-    "fuente": "validacion_humana"
-  },
-  {
     "cuenta_original": "4.02,1201 Diferencias de cambio Perdida s72",
     "codigo_estandar": "ER.15",
-    "fuente": "validacion_humana"
-  },
-  {
-    "cuenta_original": "IMPUESTO UNICO TRABAJADORES",
-    "codigo_estandar": "PC.05",
     "fuente": "validacion_humana"
   },
   {
@@ -4201,16 +4191,6 @@
   },
   {
     "cuenta_original": "MULTAS Y COSTAS",
-    "codigo_estandar": "ER.04",
-    "fuente": "validacion_humana_lote"
-  },
-  {
-    "cuenta_original": "PATENTES Y CONTRIBUCIONES",
-    "codigo_estandar": "ER.04",
-    "fuente": "validacion_humana_lote"
-  },
-  {
-    "cuenta_original": "IVA NO RECUPERABLE",
     "codigo_estandar": "ER.04",
     "fuente": "validacion_humana_lote"
   },
@@ -4245,11 +4225,6 @@
     "fuente": "validacion_humana"
   },
   {
-    "cuenta_original": "Iva Crédito Fiscal",
-    "codigo_estandar": "AC.08",
-    "fuente": "validacion_humana_lote"
-  },
-  {
     "cuenta_original": "Remanente Crédito Fiscal",
     "codigo_estandar": "AC.08",
     "fuente": "validacion_humana_lote"
@@ -4265,23 +4240,8 @@
     "fuente": "validacion_humana"
   },
   {
-    "cuenta_original": "Revalorización Capital Propio",
-    "codigo_estandar": "PAT.02",
-    "fuente": "validacion_humana"
-  },
-  {
     "cuenta_original": "É 1.02.04,03 — Herramientas en Consignacion",
     "codigo_estandar": "ANC.01",
-    "fuente": "validacion_humana"
-  },
-  {
-    "cuenta_original": "Corrección monetaria",
-    "codigo_estandar": "ER.14",
-    "fuente": "validacion_humana"
-  },
-  {
-    "cuenta_original": "Impuesto Unico Trabajadores",
-    "codigo_estandar": "PC.05",
     "fuente": "validacion_humana"
   },
   {
@@ -4743,5 +4703,635 @@
     "cuenta_original": "Ingresos Por Arriendos Mac Don",
     "codigo_estandar": "ER.17",
     "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "Particular Socio",
+    "codigo_estandar": "PAT.10",
+    "fuente": "regla_especial_cuenta_particular_socios"
+  },
+  {
+    "cuenta_original": "Particular Accionista",
+    "codigo_estandar": "PAT.10",
+    "fuente": "regla_especial_cuenta_particular_socios"
+  },
+  {
+    "cuenta_original": "Corriente Socio",
+    "codigo_estandar": "PAT.10",
+    "fuente": "regla_especial_cuenta_particular_socios"
+  },
+  {
+    "cuenta_original": "Corriente Accionista",
+    "codigo_estandar": "PAT.10",
+    "fuente": "regla_especial_cuenta_particular_socios"
+  },
+  {
+    "cuenta_original": "Cuenta Socio",
+    "codigo_estandar": "PAT.10",
+    "fuente": "regla_especial_cuenta_particular_socios"
+  },
+  {
+    "cuenta_original": "Cuenta Accionista",
+    "codigo_estandar": "PAT.10",
+    "fuente": "regla_especial_cuenta_particular_socios"
+  },
+  {
+    "cuenta_original": "Prestamo Socio",
+    "codigo_estandar": "PAT.10",
+    "fuente": "regla_especial_cuenta_particular_socios"
+  },
+  {
+    "cuenta_original": "Prestamo Accionista",
+    "codigo_estandar": "PAT.10",
+    "fuente": "regla_especial_cuenta_particular_socios"
+  },
+  {
+    "cuenta_original": "Prestamos Socio",
+    "codigo_estandar": "PAT.10",
+    "fuente": "regla_especial_cuenta_particular_socios"
+  },
+  {
+    "cuenta_original": "Prestamos Accionista",
+    "codigo_estandar": "PAT.10",
+    "fuente": "regla_especial_cuenta_particular_socios"
+  },
+  {
+    "cuenta_original": "Anticipo Socio",
+    "codigo_estandar": "PAT.10",
+    "fuente": "regla_especial_cuenta_particular_socios"
+  },
+  {
+    "cuenta_original": "Anticipo Accionista",
+    "codigo_estandar": "PAT.10",
+    "fuente": "regla_especial_cuenta_particular_socios"
+  },
+  {
+    "cuenta_original": "Retiro Socio",
+    "codigo_estandar": "PAT.10",
+    "fuente": "regla_especial_cuenta_particular_socios"
+  },
+  {
+    "cuenta_original": "Retiro Accionista",
+    "codigo_estandar": "PAT.10",
+    "fuente": "regla_especial_cuenta_particular_socios"
+  },
+  {
+    "cuenta_original": "Giro Socio",
+    "codigo_estandar": "PAT.10",
+    "fuente": "regla_especial_cuenta_particular_socios"
+  },
+  {
+    "cuenta_original": "Giros Socios",
+    "codigo_estandar": "PAT.10",
+    "fuente": "regla_especial_cuenta_particular_socios"
+  },
+  {
+    "cuenta_original": "Cxc Socio",
+    "codigo_estandar": "PAT.10",
+    "fuente": "regla_especial_cuenta_particular_socios"
+  },
+  {
+    "cuenta_original": "Cxc Accionista",
+    "codigo_estandar": "PAT.10",
+    "fuente": "regla_especial_cuenta_particular_socios"
+  },
+  {
+    "cuenta_original": "C X C Socio",
+    "codigo_estandar": "PAT.10",
+    "fuente": "regla_especial_cuenta_particular_socios"
+  },
+  {
+    "cuenta_original": "Cps",
+    "codigo_estandar": "PAT.10",
+    "fuente": "regla_especial_cuenta_particular_socios"
+  },
+  {
+    "cuenta_original": "Cta Socio",
+    "codigo_estandar": "PAT.10",
+    "fuente": "regla_especial_cuenta_particular_socios"
+  },
+  {
+    "cuenta_original": "Cta Particular",
+    "codigo_estandar": "PAT.10",
+    "fuente": "regla_especial_cuenta_particular_socios"
+  },
+  {
+    "cuenta_original": "Interes No Controlador",
+    "codigo_estandar": "PAT.11",
+    "fuente": "regla_especial_interés_minoritario"
+  },
+  {
+    "cuenta_original": "Minoritario",
+    "codigo_estandar": "PAT.11",
+    "fuente": "regla_especial_interés_minoritario"
+  },
+  {
+    "cuenta_original": "Participacion No Controladora",
+    "codigo_estandar": "PAT.05",
+    "fuente": "regla_especial_participación_no_controladora"
+  },
+  {
+    "cuenta_original": "Participacion No Controlador",
+    "codigo_estandar": "PAT.05",
+    "fuente": "regla_especial_participación_no_controladora"
+  },
+  {
+    "cuenta_original": "Participacion De No Controladores",
+    "codigo_estandar": "PAT.05",
+    "fuente": "regla_especial_participación_no_controladora"
+  },
+  {
+    "cuenta_original": "Pnc",
+    "codigo_estandar": "PAT.05",
+    "fuente": "regla_especial_participación_no_controladora"
+  },
+  {
+    "cuenta_original": "Reserva Tecnica Revalorizacion",
+    "codigo_estandar": "PAT.08",
+    "fuente": "regla_especial_reserva_técnica_revalorización_activo_fijo"
+  },
+  {
+    "cuenta_original": "Reserva Revalorizacion",
+    "codigo_estandar": "PAT.08",
+    "fuente": "regla_especial_reserva_técnica_revalorización_activo_fijo"
+  },
+  {
+    "cuenta_original": "Revalorizacion Activo Fijo",
+    "codigo_estandar": "PAT.08",
+    "fuente": "regla_especial_reserva_técnica_revalorización_activo_fijo"
+  },
+  {
+    "cuenta_original": "Reserva Tecnica",
+    "codigo_estandar": "PAT.08",
+    "fuente": "regla_especial_reserva_técnica_revalorización_activo_fijo"
+  },
+  {
+    "cuenta_original": "Goodwill",
+    "codigo_estandar": "ANC.08",
+    "fuente": "regla_especial_goodwill"
+  },
+  {
+    "cuenta_original": "Plusvalia Comprada",
+    "codigo_estandar": "ANC.08",
+    "fuente": "regla_especial_goodwill"
+  },
+  {
+    "cuenta_original": "Diferencia Positiva Combinacion Negocio",
+    "codigo_estandar": "ANC.08",
+    "fuente": "regla_especial_goodwill"
+  },
+  {
+    "cuenta_original": "Propiedades De Inversion",
+    "codigo_estandar": "ANC.02",
+    "fuente": "regla_especial_propiedades_de_inversión"
+  },
+  {
+    "cuenta_original": "Propiedad De Inversion",
+    "codigo_estandar": "ANC.02",
+    "fuente": "regla_especial_propiedades_de_inversión"
+  },
+  {
+    "cuenta_original": "Inversion Inmobiliaria",
+    "codigo_estandar": "ANC.02",
+    "fuente": "regla_especial_propiedades_de_inversión"
+  },
+  {
+    "cuenta_original": "Inmuebles De Inversion",
+    "codigo_estandar": "ANC.02",
+    "fuente": "regla_especial_propiedades_de_inversión"
+  },
+  {
+    "cuenta_original": "Activo Biologico",
+    "codigo_estandar": "AC.09",
+    "fuente": "regla_especial_activos_biológicos"
+  },
+  {
+    "cuenta_original": "Activos Biologicos",
+    "codigo_estandar": "AC.09",
+    "fuente": "regla_especial_activos_biológicos"
+  },
+  {
+    "cuenta_original": "Animales Vivos",
+    "codigo_estandar": "AC.09",
+    "fuente": "regla_especial_activos_biológicos"
+  },
+  {
+    "cuenta_original": "Vino En Proceso",
+    "codigo_estandar": "AC.09",
+    "fuente": "regla_especial_activos_biológicos"
+  },
+  {
+    "cuenta_original": "Rebanos",
+    "codigo_estandar": "AC.09",
+    "fuente": "regla_especial_activos_biológicos"
+  },
+  {
+    "cuenta_original": "Patente",
+    "codigo_estandar": "ANC.03",
+    "fuente": "regla_especial_patentes_y_marcas"
+  },
+  {
+    "cuenta_original": "Marcas",
+    "codigo_estandar": "ANC.03",
+    "fuente": "regla_especial_patentes_y_marcas"
+  },
+  {
+    "cuenta_original": "Concesiones",
+    "codigo_estandar": "ANC.03",
+    "fuente": "regla_especial_patentes_y_marcas"
+  },
+  {
+    "cuenta_original": "Concesion",
+    "codigo_estandar": "ANC.03",
+    "fuente": "regla_especial_patentes_y_marcas"
+  },
+  {
+    "cuenta_original": "Licencias",
+    "codigo_estandar": "ANC.03",
+    "fuente": "regla_especial_patentes_y_marcas"
+  },
+  {
+    "cuenta_original": "Software",
+    "codigo_estandar": "ANC.03",
+    "fuente": "regla_especial_patentes_y_marcas"
+  },
+  {
+    "cuenta_original": "Intangibles",
+    "codigo_estandar": "ANC.03",
+    "fuente": "regla_especial_patentes_y_marcas"
+  },
+  {
+    "cuenta_original": "Intangible",
+    "codigo_estandar": "ANC.03",
+    "fuente": "regla_especial_patentes_y_marcas"
+  },
+  {
+    "cuenta_original": "Franquicia",
+    "codigo_estandar": "ANC.03",
+    "fuente": "regla_especial_patentes_y_marcas"
+  },
+  {
+    "cuenta_original": "Obligacion Leasing",
+    "codigo_estandar": "PC.03",
+    "fuente": "regla_especial_pasivos_por_leasing"
+  },
+  {
+    "cuenta_original": "Pasivo Leasing",
+    "codigo_estandar": "PC.03",
+    "fuente": "regla_especial_pasivos_por_leasing"
+  },
+  {
+    "cuenta_original": "Deuda Leasing",
+    "codigo_estandar": "PC.03",
+    "fuente": "regla_especial_pasivos_por_leasing"
+  },
+  {
+    "cuenta_original": "Leasing Por Pagar",
+    "codigo_estandar": "PC.03",
+    "fuente": "regla_especial_pasivos_por_leasing"
+  },
+  {
+    "cuenta_original": "Leaseback Por Pagar",
+    "codigo_estandar": "PC.03",
+    "fuente": "regla_especial_pasivos_por_leasing"
+  },
+  {
+    "cuenta_original": "Factoring",
+    "codigo_estandar": "PC.04",
+    "fuente": "regla_especial_factoring"
+  },
+  {
+    "cuenta_original": "Cesion Facturas",
+    "codigo_estandar": "PC.04",
+    "fuente": "regla_especial_factoring"
+  },
+  {
+    "cuenta_original": "Facturas Cedidas",
+    "codigo_estandar": "PC.04",
+    "fuente": "regla_especial_factoring"
+  },
+  {
+    "cuenta_original": "Relacionada",
+    "codigo_estandar": "PC.07",
+    "fuente": "regla_especial_obligaciones_con_relacionadas"
+  },
+  {
+    "cuenta_original": "Relacionadas",
+    "codigo_estandar": "PC.07",
+    "fuente": "regla_especial_obligaciones_con_relacionadas"
+  },
+  {
+    "cuenta_original": "Empresas Relacionadas",
+    "codigo_estandar": "PC.07",
+    "fuente": "regla_especial_obligaciones_con_relacionadas"
+  },
+  {
+    "cuenta_original": "Partes Relacionadas",
+    "codigo_estandar": "PC.07",
+    "fuente": "regla_especial_obligaciones_con_relacionadas"
+  },
+  {
+    "cuenta_original": "Obligaciones Relacionadas",
+    "codigo_estandar": "PC.07",
+    "fuente": "regla_especial_obligaciones_con_relacionadas"
+  },
+  {
+    "cuenta_original": "Cuenta Relacionada",
+    "codigo_estandar": "PC.07",
+    "fuente": "regla_especial_obligaciones_con_relacionadas"
+  },
+  {
+    "cuenta_original": "Mutuos Relacionadas",
+    "codigo_estandar": "PC.07",
+    "fuente": "regla_especial_obligaciones_con_relacionadas"
+  },
+  {
+    "cuenta_original": "Mutuo Relacionada",
+    "codigo_estandar": "PC.07",
+    "fuente": "regla_especial_obligaciones_con_relacionadas"
+  },
+  {
+    "cuenta_original": "Mutuos",
+    "codigo_estandar": "PC.02",
+    "fuente": "regla_especial_mutuos"
+  },
+  {
+    "cuenta_original": "Prestamo Mutuo",
+    "codigo_estandar": "PC.02",
+    "fuente": "regla_especial_mutuos"
+  },
+  {
+    "cuenta_original": "Activo En Leasing",
+    "codigo_estandar": "ANC.01",
+    "fuente": "regla_especial_activos_en_leasing"
+  },
+  {
+    "cuenta_original": "Vehiculos En Leasing",
+    "codigo_estandar": "ANC.01",
+    "fuente": "regla_especial_activos_en_leasing"
+  },
+  {
+    "cuenta_original": "Maquinaria En Leasing",
+    "codigo_estandar": "ANC.01",
+    "fuente": "regla_especial_activos_en_leasing"
+  },
+  {
+    "cuenta_original": "Cta. Cte. Merc. Empleados",
+    "codigo_estandar": "AC.07",
+    "fuente": "abbreviation_expansion"
+  },
+  {
+    "cuenta_original": "CxC a Emp. Relacionada",
+    "codigo_estandar": "AC.06",
+    "fuente": "abbreviation_expansion"
+  },
+  {
+    "cuenta_original": "PPM (Ppm)",
+    "codigo_estandar": "AC.07",
+    "fuente": "abbreviation_expansion"
+  },
+  {
+    "cuenta_original": "Otros AF",
+    "codigo_estandar": "ANC.01",
+    "fuente": "abbreviation_expansion"
+  },
+  {
+    "cuenta_original": "Hon. por Pagar",
+    "codigo_estandar": "PC.06",
+    "fuente": "abbreviation_expansion"
+  },
+  {
+    "cuenta_original": "Otras CxP del Giro",
+    "codigo_estandar": "PC.08",
+    "fuente": "abbreviation_expansion"
+  },
+  {
+    "cuenta_original": "CxP a Empresas Relacionadas a Corto Plazo",
+    "codigo_estandar": "PC.07",
+    "fuente": "abbreviation_expansion"
+  },
+  {
+    "cuenta_original": "Otros Imptos. por Pagar",
+    "codigo_estandar": "PC.05",
+    "fuente": "abbreviation_expansion"
+  },
+  {
+    "cuenta_original": "CxP a Empresas Relacionadas a Largo Plazo",
+    "codigo_estandar": "PNC.04",
+    "fuente": "abbreviation_expansion"
+  },
+  {
+    "cuenta_original": "CxC FACTORING",
+    "codigo_estandar": "AC.03",
+    "fuente": "abbreviation_expansion"
+  },
+  {
+    "cuenta_original": "IVA Crédito",
+    "codigo_estandar": "AC.07",
+    "fuente": "abbreviation_expansion"
+  },
+  {
+    "cuenta_original": "Rem. por Pagar",
+    "codigo_estandar": "PC.06",
+    "fuente": "abbreviation_expansion"
+  },
+  {
+    "cuenta_original": "Hon. por Pagar (CLP)",
+    "codigo_estandar": "PC.06",
+    "fuente": "abbreviation_expansion"
+  },
+  {
+    "cuenta_original": "Otras CxP",
+    "codigo_estandar": "PC.08",
+    "fuente": "abbreviation_expansion"
+  },
+  {
+    "cuenta_original": "IVA Débito",
+    "codigo_estandar": "PC.05",
+    "fuente": "abbreviation_expansion"
+  },
+  {
+    "cuenta_original": "Imptos. por Pagar (F29)",
+    "codigo_estandar": "PC.05",
+    "fuente": "abbreviation_expansion"
+  },
+  {
+    "cuenta_original": "Ptmo. Bancario",
+    "codigo_estandar": "PC.02",
+    "fuente": "abbreviation_expansion"
+  },
+  {
+    "cuenta_original": "Imptos. por Pagar",
+    "codigo_estandar": "PC.05",
+    "fuente": "abbreviation_expansion"
+  },
+  {
+    "cuenta_original": "Impto. Renta",
+    "codigo_estandar": "ER.10",
+    "fuente": "abbreviation_expansion"
+  },
+  {
+    "cuenta_original": "Cta. Part. Socio",
+    "codigo_estandar": "AC.06",
+    "fuente": "abbreviation_expansion"
+  },
+  {
+    "cuenta_original": "Dep. Acum. A. Fijo",
+    "codigo_estandar": "ANC.01",
+    "fuente": "abbreviation_expansion"
+  },
+  {
+    "cuenta_original": "Costo de Venta AF",
+    "codigo_estandar": "ER.04",
+    "fuente": "abbreviation_expansion"
+  },
+  {
+    "cuenta_original": "CxC",
+    "codigo_estandar": "AC.03",
+    "fuente": "abbreviation_expansion"
+  },
+  {
+    "cuenta_original": "Dep. Acum. MUEBLES Y UTILES",
+    "codigo_estandar": "ANC.01",
+    "fuente": "abbreviation_expansion"
+  },
+  {
+    "cuenta_original": "Dep. Acum. MUEBLES",
+    "codigo_estandar": "ANC.01",
+    "fuente": "abbreviation_expansion"
+  },
+  {
+    "cuenta_original": "Dep. Acum.",
+    "codigo_estandar": "ANC.01",
+    "fuente": "abbreviation_expansion"
+  },
+  {
+    "cuenta_original": "INTERESES Ptmos. Bancarios",
+    "codigo_estandar": "ER.09",
+    "fuente": "abbreviation_expansion"
+  },
+  {
+    "cuenta_original": "credito AF",
+    "codigo_estandar": "ANC.06",
+    "fuente": "abbreviation_expansion"
+  },
+  {
+    "cuenta_original": "Doctos. por Cobrar empresas relacionadas",
+    "codigo_estandar": "ANC.05",
+    "fuente": "abbreviation_expansion"
+  },
+  {
+    "cuenta_original": "socios Cta. Cte.",
+    "codigo_estandar": "AC.06S",
+    "fuente": "abbreviation_expansion"
+  },
+  {
+    "cuenta_original": "accionistas Cta. Cte.",
+    "codigo_estandar": "AC.06S",
+    "fuente": "abbreviation_expansion"
+  },
+  {
+    "cuenta_original": "Doctos. por Pagar LP",
+    "codigo_estandar": "PNC.01",
+    "fuente": "abbreviation_expansion"
+  },
+  {
+    "cuenta_original": "Doctos. por Pagar empresas relacionadas",
+    "codigo_estandar": "PNC.04",
+    "fuente": "abbreviation_expansion"
+  },
+  {
+    "cuenta_original": "valor revalorizacion tecnica del AF",
+    "codigo_estandar": "PAT.02",
+    "fuente": "abbreviation_expansion"
+  },
+  {
+    "cuenta_original": "Utilidad venta AF",
+    "codigo_estandar": "ER.13",
+    "fuente": "abbreviation_expansion"
+  },
+  {
+    "cuenta_original": "Pérdida venta AF",
+    "codigo_estandar": "ER.13",
+    "fuente": "abbreviation_expansion"
+  },
+  {
+    "cuenta_original": "Resultado venta AF",
+    "codigo_estandar": "ER.13",
+    "fuente": "abbreviation_expansion"
+  },
+  {
+    "cuenta_original": "Corrección monetaria AF",
+    "codigo_estandar": "ER.14",
+    "fuente": "abbreviation_expansion"
+  },
+  {
+    "cuenta_original": "Arriendos de AF",
+    "codigo_estandar": "ER.04",
+    "fuente": "abbreviation_expansion"
+  },
+  {
+    "cuenta_original": "Cta. Cte. Paciente Serv x Facturar",
+    "codigo_estandar": "AC.03",
+    "fuente": "abbreviation_expansion"
+  },
+  {
+    "cuenta_original": "CxC EMPRESAS RELACIONADAS",
+    "codigo_estandar": "ANC.05",
+    "fuente": "abbreviation_expansion"
+  },
+  {
+    "cuenta_original": "CxP EMPRESAS RELACIONADAS",
+    "codigo_estandar": "PNC.04",
+    "fuente": "abbreviation_expansion"
+  },
+  {
+    "cuenta_original": "Dep. Acum. Construcción2.S8.1C8..309.408",
+    "codigo_estandar": "ANC.01",
+    "fuente": "abbreviation_expansion"
+  },
+  {
+    "cuenta_original": "Dep. Acum. Construcción1.U04n8id.9ad51.201",
+    "codigo_estandar": "ANC.01",
+    "fuente": "abbreviation_expansion"
+  },
+  {
+    "cuenta_original": "Dep. Acum. VehiculoS.C",
+    "codigo_estandar": "ANC.01",
+    "fuente": "abbreviation_expansion"
+  },
+  {
+    "cuenta_original": "Dep. Acum. VehiculoUnid2a1d2.021.861",
+    "codigo_estandar": "ANC.01",
+    "fuente": "abbreviation_expansion"
+  },
+  {
+    "cuenta_original": "Dep. Acum. InventarioS.C.36.791.495",
+    "codigo_estandar": "ANC.01",
+    "fuente": "abbreviation_expansion"
+  },
+  {
+    "cuenta_original": "Dep. Acum. InventarioUni1d6a0d.828.382",
+    "codigo_estandar": "ANC.01",
+    "fuente": "abbreviation_expansion"
+  },
+  {
+    "cuenta_original": "DPP",
+    "codigo_estandar": "AC.03",
+    "fuente": "abbreviation_expansion"
+  },
+  {
+    "cuenta_original": "PPM",
+    "codigo_estandar": "AC.08",
+    "fuente": "abbreviation_expansion"
+  },
+  {
+    "cuenta_original": "Depreciacion AF",
+    "codigo_estandar": "ER.07",
+    "fuente": "abbreviation_expansion"
+  },
+  {
+    "cuenta_original": "Revalorizacion AF",
+    "codigo_estandar": "PAT.08",
+    "fuente": "abbreviation_expansion"
   }
 ]

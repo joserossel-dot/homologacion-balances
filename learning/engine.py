@@ -111,6 +111,16 @@ class LearningEngine:
             return {"source": "none", "code": None, "confidence": 0.0, "matched_name": None}
 
         conn = self._get_conn()
+        try:
+            has_table = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='gold_standard'"
+            ).fetchone()
+        except Exception:
+            has_table = None
+
+        if not has_table:
+            return {"source": "none", "code": None, "confidence": 0.0, "matched_name": None}
+
         norm = normalize_name(account_name)
 
         # 1. Exact match (normalización en ambos lados: texto buscado y gold)
