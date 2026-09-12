@@ -1947,7 +1947,11 @@ def certificar_extraccion_columnas(
             movimiento_cuadra_saldo = (
                 abs(movement - balance) <= tolerancia_absoluta
             )
-            if finales_validadas:
+            es_linea_resultado_cierre = bool(
+                re.search(r"\b(?:utilidad|p[eé]rdida|resultado)(?:es)?\s+(?:del\s+ejercicio|del\s+a[nñ]o|acum(?:ulad[ao]s?)?)\b", normalizar_nombre(cuenta.nombre))
+                or getattr(cuenta, "es_total", False)
+            )
+            if finales_validadas or (es_linea_resultado_cierre and saldo_cuadra_clasificado):
                 if not saldo_cuadra_clasificado:
                     inconsistent.append(cuenta.linea)
             else:

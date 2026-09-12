@@ -61,11 +61,14 @@ def is_patrimonial_reserve_name(name: str | None) -> bool:
 def is_accumulated_result_name(name: str | None) -> bool:
     """True para utilidades, ganancias o pérdidas acumuladas patrimoniales."""
     normalized = re.sub(r"\s+", " ", str(name or "").lower()).strip()
-    normalized = re.sub(r"[(),;:/]+", " ", normalized)
+    normalized = re.sub(r"[(),;:/.]+", " ", normalized)
     normalized = re.sub(r"\s+", " ", normalized).strip()
     return bool(re.search(
         r"\b(?:resultado(?:s)?|utilidad(?:es)?|ganancia(?:s)?|p[eé]rdida(?:s)?)\s+"
-        r"(?:acumulad[ao]s?|de\s+ejercicios?\s+anteriores?)\b",
+        r"(?:acum(?:ulad[ao]s?)?|de\s+ejercicios?\s+anteriores?|de\s+a[nñ]os?\s+anteriores?|a[nñ]os?\s+anteriores?)\b",
+        normalized,
+    ) or re.search(
+        r"\b(?:resultado|utilidad|ganancia|p[eé]rdida)(?:es)?\s+(?:acum|anterior)\b",
         normalized,
     ))
 
@@ -74,9 +77,12 @@ def is_equity_account_name(name: str | None) -> bool:
     """True para partidas canónicas del patrimonio neto."""
     normalized = re.sub(r"\s+", " ", str(name or "").lower()).strip()
     return bool(
-        re.fullmatch(r"capital(?: social| emitido| pagado)?", normalized)
+        re.search(r"\bcapital(?:\s+(?:social|emitido|pagado))?\b", normalized)
         or is_patrimonial_reserve_name(normalized)
         or is_accumulated_result_name(normalized)
+        or re.search(r"\b(?:resultado|utilidad|p[eé]rdida)(?:es)?\s+(?:del\s+ejercicio|del\s+a[nñ]o|acum(?:ulad[ao]s?)?)\b", normalized)
+        or re.search(r"\b(?:fondo\s+revalorizaci[oó]n|revalorizaci[oó]n\s+capital|capital\s+propio)\b", normalized)
+        or re.search(r"\b(?:dividendos?\s+provisorios?|retiros?\s+personales?|retiros?\s+socios?|cuenta\s+obligada)\b", normalized)
     )
 
 

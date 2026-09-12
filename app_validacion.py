@@ -2416,11 +2416,9 @@ def _codigo_compatible_con_origen(
     if (origen_efectivo == 'pasivo' and _es_contra_activo(nombre)
             and str(codigo or '').startswith('ANC')):
         return True
-    if _es_partida_patrimonial(nombre) and str(codigo or '').startswith('PAT'):
-        return True
-    if (origen_efectivo == 'activo' and str(codigo or '') == 'PAT.10'
-            and es_cuenta_socios(nombre)):
-        return True
+    if str(codigo or '').startswith('PAT'):
+        if _es_partida_patrimonial(nombre) or origen_efectivo in {'pasivo', 'activo'}:
+            return True
     tipos = _resolver_tipos_permitidos(origen_efectivo)
     if not tipos:
         return True
@@ -5814,6 +5812,11 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                         and _legacy_json_fallback_allowed()):
                     _write_legacy_packaged_dictionary(st.session_state.diccionario)
                 st.session_state.lote_seleccion = set()
+                st.toast(
+                    f"✅ Lote confirmado: {procesados} cuentas actualizadas"
+                    + (" y agregadas al diccionario 📚" if "diccionario" in alcance_lote else " (solo este caso)"),
+                    icon="✅",
+                )
                 st.rerun()
 
         qa, qb, qc = st.columns(3)
