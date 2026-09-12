@@ -1948,7 +1948,7 @@ def certificar_extraccion_columnas(
                 abs(movement - balance) <= tolerancia_absoluta
             )
             es_linea_resultado_cierre = bool(
-                re.search(r"\b(?:utilidad|p[eé]rdida|resultado)(?:es)?\s+(?:del\s+ejercicio|del\s+a[nñ]o|acum(?:ulad[ao]s?)?)\b", normalizar_nombre(cuenta.nombre))
+                re.search(r"\b(?:utilidad|p[eé]rdida|resultado)(?:es)?\s+(?:del\s+ejercicio|del\s+a[nñ]o|acum(?:ulad[ao]s?)?)\b", str(cuenta.nombre or "").lower())
                 or getattr(cuenta, "es_total", False)
             )
             if finales_validadas or (es_linea_resultado_cierre and saldo_cuadra_clasificado):
