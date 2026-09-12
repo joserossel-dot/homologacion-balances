@@ -662,7 +662,8 @@ def test_atribuciones_controladora_y_no_controladores_no_duplican_resultado():
     assert result['resultado_homologado'] == -3462
 
 
-def review_app(rows):
+def review_app(rows, catalog_save_result=None):
+    from copy import deepcopy
     import streamlit as st
     import pandas as pd
     import app_validacion as app
@@ -678,12 +679,25 @@ def review_app(rows):
         st.session_state.persistidas.extend(items)
         return True
     prev, prev_lote = app._persistir_validacion, app._persistir_validaciones_lote
+    prev_catalogo = app._persistir_catalogo
+    prev_fallback = app._legacy_json_fallback_allowed
+    catalogo = st.session_state.setdefault('catalogo_prueba', deepcopy(catalogo_local()))
+    if catalog_save_result is not None:
+        st.session_state.setdefault('catalogo_guardados', [])
+        def persistir_catalogo(entry):
+            if catalog_save_result:
+                st.session_state.catalogo_guardados.append(entry.copy())
+            return catalog_save_result
+        app._persistir_catalogo = persistir_catalogo
+        app._legacy_json_fallback_allowed = lambda: False
     app._persistir_validacion, app._persistir_validaciones_lote = persistir, persistir_lote
     try:
-        app._tab_revision(st.session_state.resultados['caso.pdf'], catalogo_local(),
+        app._tab_revision(st.session_state.resultados['caso.pdf'], catalogo,
                           app.MotorHibridoLocal([]), 'caso.pdf')
     finally:
         app._persistir_validacion, app._persistir_validaciones_lote = prev, prev_lote
+        app._persistir_catalogo = prev_catalogo
+        app._legacy_json_fallback_allowed = prev_fallback
 
 
 def all_view(rows):
@@ -753,6 +767,34 @@ def test_ui_no_redefine_categoria_existente_para_evadir_control():
     assert not at.exception
     assert any('No se puede redefinir' in e.value for e in at.error)
     assert not at.session_state.persistidas
+
+
+@pytest.mark.parametrize('catalog_save_result', [True, False])
+def test_ui_categoria_nueva_solo_confirma_despues_de_guardar(catalog_save_result):
+    rows = [cuenta('Cuotas', 100, 'ganancia', 'ER.17')]
+    at = AppTest.from_function(
+        review_app, args=(rows, catalog_save_result),
+    ).run()
+    at.radio[0].set_value('Todas (incluye confirmadas y excluidas)').run()
+    next(s for s in at.selectbox if s.label == 'Clasificación correcta').set_value('➕ NUEVA CATEGORÍA').run()
+    next(t for t in at.text_input if t.label.startswith('Código (ej')).set_value('ER.99')
+    next(t for t in at.text_input if t.label == 'Nombre de la categoría').set_value('Cuotas especiales')
+    next(s for s in at.selectbox if s.label == 'Tipo de estado').set_value('resultados')
+    next(s for s in at.selectbox if s.label == 'Categoría').set_value('resultado').run()
+    next(b for b in at.button if b.label == '✅ Confirmar').click().run()
+    assert not at.exception
+    if catalog_save_result:
+        assert at.session_state.resultados['caso.pdf'].at[0, 'codigo_clasificado'] == 'ER.99'
+        assert at.session_state.catalogo_guardados[0]['codigo_estandar'] == 'ER.99'
+        assert 'ER.99' in at.session_state.catalogo_prueba
+        assert at.session_state.persistidas[0]['codigo'] == 'ER.99'
+    else:
+        pd.testing.assert_frame_equal(at.session_state.resultados['caso.pdf'], pd.DataFrame(rows))
+        assert 'ER.99' not in at.session_state.catalogo_prueba
+        assert not at.session_state.catalogo_guardados
+        assert not at.session_state.persistidas
+        assert 'historial_decisiones' not in at.session_state or not at.session_state.historial_decisiones
+        assert any('categoría no fue guardada' in e.value for e in at.error)
 
 
 def test_ui_busqueda_vacia_no_oculta_acceso_a_confirmadas():

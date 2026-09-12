@@ -1,4 +1,3 @@
-import pytest
 from parser_universal import (
     CuentaRaw,
     _INTERLEAVED_COLUMN_BLEED,
@@ -7,7 +6,6 @@ from parser_universal import (
     parsear_linea,
     FormatoCodigo,
 )
-from pipeline.homologation_pipeline import HomologationPipeline
 
 
 def test_h3_separar_tokens_monto_adherido():
@@ -90,4 +88,3 @@ def test_h3_marcar_cuenta_sospechosa_si_queda_colision_no_resuelta():
     marcar_cuenta_sospechosa(cuenta_contaminada, "2.1.60.266 Serv.Medico Cam.Chilena Constru1c0c.9i77.447 452.411", [])
     assert cuenta_contaminada.requiere_revision_extraccion is True
     assert "nombre_contaminado_por_fusion_de_columnas" in cuenta_contaminada.razones_revision_extraccion
-

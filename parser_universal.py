@@ -425,6 +425,10 @@ def asociar_lineas_verticales(lineas: list[str]) -> list[str]:
                 break
             if _es_token_codigo_inicio(l_next):
                 break
+            # Un control impreso inicia una fila propia, incluso si el cero
+            # final de la fila precedente fue leído como la letra O.
+            if PATRON_TOTAL.match(l_next):
+                break
 
             cleaned_next = re.sub(r'[\d\s.,$()\-—−_\[\]]', '', l_next)
             # Caso 1: Siguiente línea son solo montos
@@ -1951,7 +1955,6 @@ def certificar_extraccion_columnas(
             es_linea_resultado_cierre = bool(
                 getattr(cuenta, "es_total", False)
                 or PATRON_TOTAL.match(nombre_limpio)
-                or re.search(r"\b(?:utilidad|p[eé]rdida|resultado)(?:es)?\s*(?:/|y|o|\s+)\s*(?:p[eé]rdida|utilidad|ganancia|del\s+ejercicio|del\s+a[nñ]o|acum(?:ulad[ao]s?)?)\b", str(cuenta.nombre or "").lower())
             )
             if finales_validadas or (es_linea_resultado_cierre and saldo_cuadra_clasificado):
                 if not saldo_cuadra_clasificado:
@@ -2330,9 +2333,10 @@ def certificar_extraccion_columnas(
         failed = False
         razones = [r for r in razones if not r.startswith("Las sumas extraídas no reproducen el subtotal")]
         razones.append(
-            "Debe y Haber contienen movimientos cerrados no reproducidos por "
-            "el detalle impreso; las columnas finales, el resultado y el cierre "
-            "sí quedaron certificados para homologación."
+            "Las sumas de Debe y Haber no coinciden con el total impreso; "
+            "no se ha determinado la causa. Solo las columnas finales, el "
+            "resultado y el cierre quedaron certificados para homologación, "
+            "no la integridad de los movimientos."
         )
 
     reconciliacion_ocr_requiere_revision = bool(
@@ -3140,6 +3144,7 @@ def fusionar_continuaciones_verticales(
     for cuenta in cuentas:
         sin_importes = (
             (cuenta.monto is None or abs(float(cuenta.monto)) <= 0.01)
+            and not cuenta.montos_periodos
             and not any(
                 float(cuenta.montos_columnas.get(columna, 0.0) or 0.0) != 0.0
                 for columna in RAW_MONETARY_COLUMNS
@@ -3167,13 +3172,13 @@ def fusionar_continuaciones_verticales(
             and cuenta.linea == anterior.linea + 1
             and not cuenta.codigo
             and not cuenta.es_total
+            and not anterior.es_total
             and sin_importes
             and anterior_tiene_importes
             and not es_cuenta_corta_valida
             and (
                 es_sufijo_conocido
                 or termina_en_conector
-                or (len(nombre) <= 25 and not re.search(r"[.)\]]$", anterior.nombre or "") and any(c.isalpha() for c in nombre))
             )
         ):
             anterior.nombre = re.sub(
@@ -3240,7 +3245,7 @@ PATRON_TOTAL = re.compile(
     r'^patrimonio\s+atribuible\s+a\b.*$|'
     r'^(?:resultado(?: del ejercicio| [\x22\x27]?(?:positivo|negativo))?|utilidad(?: neta| del ejercicio)?|'
     r'p[eé]rdida(?: o ganancia| neta| neto| del ejercicio)?)$|'
-    r'^(?:utilidad(?:es)?|p[eé]rdida(?:s)?|resultado(?:s)?)\s*(?:/|y|o|\s+)\s*(?:p[eé]rdida(?:s)?|utilidad(?:es)?|ganancia(?:s)?)(?:\s+(?:del\s+ejercicio|del\s+a[nñ]o|acum(?:ulad[ao]s?)?))?$|'
+    r'^(?:utilidad(?:es)?|p[eé]rdida(?:s)?|resultado(?:s)?)\s*(?:/|y|o|\s+)\s*(?:p[eé]rdida(?:s)?|utilidad(?:es)?|ganancia(?:s)?)(?:\s+(?:del\s+ejercicio|del\s+a[nñ]o))?$|'
     r'^p[eé]rdidas?\s*(?:/|y|o)\s*ganancias?$|'
     r'^utilidad\s*/\s*p[eé]rdida$|'
     r'^ganancia(?:\s*\(p[eé]rdida\))?$|'
@@ -4835,6 +4840,10 @@ class ParserPDF:
         )
         lineas_sospechosas = 0
         for i, linea in enumerate(lineas):
+            # Filtrar la nota completa antes de dividir columnas evita que
+            # sus números se conviertan en una cuenta huérfana.
+            if _es_linea_basura(linea):
+                continue
             sub_lines = split_side_by_side(linea)
             for sub_l in sub_lines:
                 razones_sospecha = detectar_linea_sospechosa(
@@ -5156,7 +5165,11 @@ class ParserPDF:
             n_paginas = len(pdf.pages)
             for page_number, page in enumerate(pdf.pages, 1):
                 chars = getattr(page, "chars", [])
-                non_upright = [c for c in chars if c.get("upright") is False]
+                non_upright = [
+                    c for c in chars
+                    if c.get("upright") is False
+                    and abs(c.get("matrix", (1, 0, 0, 1, 0, 0))[1]) > 0.5
+                ]
                 if chars and len(non_upright) / len(chars) > 0.40:
                     lineas_orientadas = self._extraer_lineas_pagina_orientada(page)
                     if len(lineas_orientadas) >= 3:

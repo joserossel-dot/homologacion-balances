@@ -69,5 +69,21 @@ def test_alternativas_revision_presencia_top1_top3(benchmark_results):
 
     # Mediciones verificadas con el contrato real
     assert sug["denominador_sugerencias"] == 14
-    assert sug["top1_hits"] == 9, f"Esperados 9 aciertos Top-1 (64.3%): obtenidos {sug['top1_hits']}"
-    assert sug["top3_hits"] == 11, f"Esperados 11 aciertos Top-3 (78.6%): obtenidos {sug['top3_hits']}"
+    detalle = benchmark_results["detalle_casos"]
+    top1_ids = {c["id"] for c in detalle if c["top1_ok"]}
+    assert top1_ids == {
+        "EX01", "EX02", "EX03", "EX04", "EX05", "SYN01", "SYN02",
+        "CA02", "TAX02", "PAT01",
+    }
+    assert {c["id"] for c in detalle if c["top3_ok"]} == top1_ids | {"CA01", "TAX01"}
+    assert sug["top1_hits"] == 10
+    assert sug["top3_hits"] == 12
+    assert sug["tasa_top1"] == pytest.approx(10 / 14)
+    assert sug["tasa_top3"] == pytest.approx(12 / 14)
+
+    # El nuevo acierto es una cuenta comercial de activo, no una promoción automática.
+    deudores = next(c for c in detalle if c["id"] == "SYN02")
+    assert deudores["codigo_esperado"] == "AC.03"
+    assert deudores["alts_sugeridas"][0] == "AC.03"
+    assert deudores["requiere_revision"] is True
+    assert deudores["es_automatica"] is False

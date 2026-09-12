@@ -111,7 +111,7 @@ def test_visor_aparece_debajo_de_correccion_a_ancho_completo(monkeypatch):
     monkeypatch.setattr(app, "_visor_documento", lambda archivo, **kwargs: calls.append(("visor", archivo, kwargs)))
     app._mostrar_etapa_correccion_extraccion("archivo", "balance.pdf")
     assert calls[0] == ("correccion", "balance.pdf")
-    assert calls[-1] == ("visor", "archivo", {"altura": "58vh", "mostrar_titulo": False})
+    assert calls[-1] == ("visor", "archivo", {"altura": "58vh", "mostrar_titulo": False, "key_prefix": "extra"})
 
 
 def test_ui_no_habilita_clasificacion_sin_control_independiente():

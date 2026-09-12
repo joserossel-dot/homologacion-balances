@@ -12,7 +12,11 @@ Cada regla incluye:
   - explicacion     : qué detecta.
   - motivo          : por qué se distingue del catálogo genérico.
 
-NO modifica el flujo actual: es una capa de conocimiento pura.
+EXPERIMENTAL: no integrada en el flujo productivo. Los códigos y las confianzas
+son hipótesis del prototipo, no decisiones validadas para contabilizar. Los
+patrones no distinguen suficientemente naturaleza, plazo ni contra-cuentas;
+su salida no debe confirmar categorías ni alimentar aprendizaje automático.
+La integración requiere contrastar catálogo vigente y negativos contables.
 """
 
 from __future__ import annotations

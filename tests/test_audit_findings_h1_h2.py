@@ -23,7 +23,7 @@ def test_h1_is_plausible_account_name_rechaza_ruido_ocr_y_artefactos():
     # Casos reales reproducidos en la auditoría
     assert not HomologationPipeline._is_plausible_account_name("vosrasasss")
     assert not HomologationPipeline._is_plausible_account_name("B 21430509 B 74500008 8 1390058%")
-    
+
     # Casos sintéticos de ruido extremo
     assert not HomologationPipeline._is_plausible_account_name("")
     assert not HomologationPipeline._is_plausible_account_name(None)
@@ -51,7 +51,7 @@ def test_h1_is_plausible_account_name_acepta_nombres_contables_legitimos():
 def test_h1_clasificacion_por_codigo_degrada_confianza_y_exige_revision_en_ruido():
     """Verifica que _classify_by_code no apruebe con 0.95 un nombre no plausible."""
     pipeline = HomologationPipeline()
-    
+
     # Código real de auditoría (2016300579 -> PC.02 por ^201[0-9]), pero nombre corrupto
     res_ruido = pipeline._classify_by_code("2016300579", account_name="vosrasasss")
     assert res_ruido is not None
@@ -81,7 +81,7 @@ def test_h2_compare_pre_post_con_cero_cuentas_no_cuadra_falsamente():
 def test_h2_operational_quality_bloquea_exportacion_si_no_hay_cuentas():
     """Verifica que analyze_operational_quality bloquee la exportación si el DataFrame está vacío."""
     df_vacio = pd.DataFrame(columns=["codigo_original", "nombre_original", "monto", "codigo_clasificado"])
-    
+
     # Caso 1: balance_squared=True pero df vacío
     result = analyze_operational_quality(df_vacio, balance_squared=True, enforce_export=True)
     assert result.export_allowed is False

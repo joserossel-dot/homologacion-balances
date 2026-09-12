@@ -13,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 import re
-from typing import Any, Optional
+from typing import Optional
 
 from parser_universal import OrigenColumna
 

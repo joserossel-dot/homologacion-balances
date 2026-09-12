@@ -387,7 +387,14 @@ def test_benchmark_metricas_denominadores_y_cobertura_trazable():
 
     # Sugerencias UI
     assert m["denominador_alternativas_catalogo"] == 14
-    assert m["top1_hits"] == 9
-    assert m["top3_hits"] == 12
-    assert abs(m["tasa_top1"] - (9 / 14)) < 1e-6
-    assert abs(m["tasa_top3"] - (12 / 14)) < 1e-6
+    assert m["top1_hits"] == 10
+    assert m["top3_hits"] == 13
+    assert abs(m["tasa_top1"] - (10 / 14)) < 1e-6
+    assert abs(m["tasa_top3"] - (13 / 14)) < 1e-6
+    detalle = m["detalle_sugerencias"]
+    assert len(detalle) == m["denominador_alternativas_catalogo"]
+    assert sum(c["codigos_sugeridos"][:1] == [c["codigo_esperado"]] for c in detalle) == m["top1_hits"]
+    assert sum(c["codigo_esperado"] in c["codigos_sugeridos"] for c in detalle) == m["top3_hits"]
+    deudores = next(c for c in detalle if c["id"] == "SYN02")
+    assert deudores["codigo_esperado"] == "AC.03"
+    assert deudores["codigos_sugeridos"][0] == "AC.03"

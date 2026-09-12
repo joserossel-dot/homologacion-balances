@@ -1,9 +1,5 @@
-import pytest
-import pandas as pd
-from datetime import date
 import app_validacion
 from extractor_metadata import extraer_metadata, MetadataEmpresa, _es_ruido_empresa
-from parser_universal import detectar_años_y_monedas
 
 
 def test_extractor_filtra_ruido_erp_en_razon_social():

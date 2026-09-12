@@ -5,7 +5,7 @@ Fecha de corte: 2026-08-30. Fuente reproducible:
 
 ## Alcance y criterio
 
-Este análisis revisa los 46 módulos marcados `orphan` por el grafo estático. No
+Este análisis revisa los módulos marcados `orphan` por el grafo estático. No
 es una autorización de borrado. Para cada módulo se contrastaron:
 
 1. inbound estático desde código de ejecución;
@@ -82,6 +82,19 @@ por una herramienta externa.
 | `validation` | Fachada de validadores y modelos | No observado | Hijos son parte del flujo productivo y certificación | Sin import directo; hijos ampliamente probados | Alto: fachada de paquete productivo | **CONSERVAR** |
 
 ## Lote seguro potencial, no ejecutado
+
+Revisión del candidato del 2026-09-12: `account_name_normalizer` y
+`special_account_rules` se conservan desconectados de producción. Tienen pruebas
+directas de aislamiento de configuración, conservación de calificadores y
+conflictos de candidatos en `tests/test_experimental_account_knowledge.py`.
+Por eso ya no figuran como huérfanos en el inventario que incluye imports de
+pruebas. Ese cambio no significa integración productiva ni certificación Gold.
+Sus coincidencias son hipótesis, no clasificaciones aprobadas. No se añadieron
+imports productivos artificiales para ocultar su estado experimental.
+Antes de integrarlos se requiere resolver naturaleza y plazo de préstamos con
+socios/relacionadas, distinguir patentes tributarias de intangibles y alinear
+impuestos diferidos con el catálogo vigente. No corresponde habilitar todas sus
+reglas por similitud de texto ni elevar sus puntajes a confianza productiva.
 
 El único lote que reúne evidencia negativa múltiple sin arrastrar clústeres
 conectados es:

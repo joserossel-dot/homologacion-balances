@@ -70,6 +70,7 @@ review_workspace/
 # Backups
 *.save
 *.bak
+diccionario_backup_*.json
 
 # Reportes generados
 reports/**/cache/

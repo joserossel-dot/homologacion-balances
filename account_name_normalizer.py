@@ -1,6 +1,7 @@
 """account_name_normalizer.py — Normalizador configurable de nombres de cuentas.
 
-Capa de conocimiento (Sprint 37). NO modifica el Parser Universal ni el
+Capa experimental de conocimiento (Sprint 37), no integrada en producción.
+NO modifica el Parser Universal ni el
 pipeline: es una función pura reutilizable por el motor de sinónimos, las
 reglas especiales y el reporte de cobertura.
 
@@ -14,6 +15,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from copy import deepcopy
 from typing import Any, Dict, List, Optional
 
 
@@ -202,7 +204,6 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "diferencias": "diferencia",
         "ganancias": "ganancia",
         "perdidas": "perdida",
-        "impuestos": "impuesto",
         "documentos": "documento",
         "intereses": "interes",
     },
@@ -225,13 +226,13 @@ class AccountNameNormalizer:
     """
 
     def __init__(self, config: Optional[Dict[str, Any]] = None) -> None:
-        cfg = dict(DEFAULT_CONFIG)
+        cfg = deepcopy(DEFAULT_CONFIG)
         if config:
             for key, value in config.items():
                 if isinstance(value, dict) and isinstance(cfg.get(key), dict):
-                    cfg[key].update(value)
+                    cfg[key].update(deepcopy(value))
                 else:
-                    cfg[key] = value
+                    cfg[key] = deepcopy(value)
         self.config = cfg
         # Abreviaciones ordenadas por longitud (las más largas primero)
         self._abreviaciones = sorted(

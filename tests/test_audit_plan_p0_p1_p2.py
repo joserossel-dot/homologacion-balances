@@ -9,13 +9,10 @@ Cubre:
 6. P2.2: Causa estructurada en reconciliación de balance (compare_pre_post).
 """
 
-import pytest
 from parser_universal import (
     CuentaRaw,
     es_ruido_ocr_no_contable,
     fusionar_continuaciones_verticales,
-    parsear_linea,
-    FormatoCodigo,
 )
 from pipeline.homologation_pipeline import HomologationPipeline
 from validation.prepost_balance import compare_pre_post

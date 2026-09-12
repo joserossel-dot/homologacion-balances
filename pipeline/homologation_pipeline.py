@@ -414,6 +414,11 @@ class HomologationPipeline:
         normalized = self._normalize_name(account_name)
         normalized_section = self._normalize_name(account_section or "")
         sec_code = self._normalize_section_code(account_section)
+        # En balances clasificados la columna física de patrimonio puede ser
+        # PASIVO. Solo una sección patrimonial explícita permite resolver esa
+        # diferencia; una glosa parecida o una sección PC/PNC no la autoriza.
+        if sec_code == "PAT" and account_tipo in {"PASIVO", "DESCONOCIDO", None}:
+            account_tipo = "PATRIMONIO"
         is_no_corriente = "no corrient" in normalized_section or sec_code in {"ANC", "PNC"}
         # Política global aprobada el 2026-09-07: no trasladar una etiqueta
         # de activo corriente a AC.08 cuando la sección acredita largo plazo.

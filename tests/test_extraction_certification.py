@@ -267,7 +267,6 @@ def test_periodos_ignoran_anos_historicos_fuera_de_cabecera():
 
 
 def test_nota_de_tres_digitos_no_se_convierte_en_monto():
-    lines = ["2024 2023", "Nota M$ M$"]
     account = parser.parsear_linea(
         "Propiedades planta y equipo 123 1.500 1.400", 1,
         parser.FormatoCodigo.SIN_CODIGO, ".",
@@ -1338,7 +1337,7 @@ def test_certificacion_acepta_movimientos_cerrados_no_desglosados_si_finales_cua
     assert certification.diferencias["debitos"] == -100
     assert certification.diferencias["creditos"] == -100
     assert certification.columnas_finales_validadas is True
-    assert any("movimientos cerrados" in reason for reason in certification.razones)
+    assert any("no la integridad de los movimientos" in reason for reason in certification.razones)
 
 
 def test_certificacion_ocr_reconcilia_una_fila_y_conserva_trazabilidad():

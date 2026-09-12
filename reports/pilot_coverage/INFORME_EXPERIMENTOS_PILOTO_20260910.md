@@ -1,7 +1,7 @@
 # INFORME DE EXPERIMENTOS: AMPLIACIÓN DE FORMATOS Y REDUCCIÓN DE INTERVENCIÓN HUMANA
- 
-> **NOTA DE ESTADO (HISTÓRICO / EXPLORATORIO - EXCLUIR DE COMMIT):**
-> Este informe refleja la fase exploratoria inicial previa a las actividades de endurecimiento A3-A8 y benchmark B2-B4. Las cifras de casos (20 casos iniciales frente a 22 casos actuales) y las caracterizaciones de formatos 04, 05, 06 (actualmente marcados como defectos conocidos `xfail`) y XLS antiguo (marcado como `skip`) fueron actualizadas y consolidadas en el informe canónico `reports/pilot_coverage/FORMATOS_VERIFICADOS.md`. Se recomienda excluir este archivo histórico de la selección Git.
+
+> **NOTA DE ESTADO: HISTÓRICO / EXPLORATORIO, NO ES EVIDENCIA DE LIBERACIÓN.**
+> Este informe refleja la fase exploratoria inicial previa a las actividades de endurecimiento A3-A8 y benchmark B2-B4. Las cifras de casos (20 casos iniciales frente a 22 casos actuales) y las caracterizaciones de formatos 04, 05, 06 (marcados como defectos conocidos `xfail` en aquella revisión) y XLS antiguo (`skip`) fueron actualizadas en `reports/pilot_coverage/FORMATOS_VERIFICADOS.md`. Este archivo ya está versionado; se conserva como antecedente histórico. Para evaluar el candidato, use las pruebas y los informes vigentes del commit auditado.
 
 Fecha: 2026-09-10
 Rama: `codex/mejoras-pendientes-20260826`

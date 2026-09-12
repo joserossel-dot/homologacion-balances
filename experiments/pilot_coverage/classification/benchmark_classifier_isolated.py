@@ -223,6 +223,7 @@ def ejecutar_benchmark_clasificador_aislado() -> Dict[str, Any]:
 
             top1_hits = 0
             top3_hits = 0
+            detalle_sugerencias = []
             casos_con_esperado = [c for c in CASOS_BENCHMARK if c["esperado"] is not None]
 
             for c in CASOS_BENCHMARK:
@@ -272,6 +273,11 @@ def ejecutar_benchmark_clasificador_aislado() -> Dict[str, Any]:
                         limite=3,
                     )
                     cods = [a["codigo"] for a in alts]
+                    detalle_sugerencias.append({
+                        "id": c["id"],
+                        "codigo_esperado": c_esperado,
+                        "codigos_sugeridos": cods,
+                    })
                     if cods:
                         if cods[0] == c_esperado:
                             top1_hits += 1
@@ -298,6 +304,7 @@ def ejecutar_benchmark_clasificador_aislado() -> Dict[str, Any]:
                 "top3_hits": top3_hits,
                 "tasa_top1": top1_hits / len(casos_con_esperado),
                 "tasa_top3": top3_hits / len(casos_con_esperado),
+                "detalle_sugerencias": detalle_sugerencias,
             }
             return metrics
 

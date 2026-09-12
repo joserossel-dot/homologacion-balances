@@ -679,7 +679,7 @@ class TestAccountCorrection:
         assert df.at[idx, 'codigo_clasificado'] == 'AC.05'
         assert df.at[idx, 'metodo'] == 'manual_revision'
         assert df.at[idx, 'confianza'] == 1.0
-        assert df.at[idx, 'requiere_revision'] == False
+        assert not df.at[idx, 'requiere_revision']
         assert df.at[idx, 'tipo_revision'] == 'correccion_extraccion'
 
         assert _nombre_mostrar(df.iloc[idx]) == 'Clientes nacionales'
@@ -824,7 +824,7 @@ class TestMetodoPersistencia:
 
         assert df.at[0, 'metodo'] == 'manual_revision'
         assert df.at[0, 'confianza'] == 1.0
-        assert df.at[0, 'requiere_revision'] == False
+        assert not df.at[0, 'requiere_revision']
 
     def test_confianza_siempre_uno(self, df_resultados):
         df = df_resultados.copy()
