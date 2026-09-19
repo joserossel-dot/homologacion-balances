@@ -6296,7 +6296,7 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
 
 def _diagnosticar_cuadratura(
         df: pd.DataFrame, agrupado: pd.DataFrame,
-        clasificadas: pd.DataFrame, tolerancia: float = 1_000) -> dict:
+        clasificadas: pd.DataFrame, tolerancia: float = 1.0) -> dict:
     """Concilia el balance homologado y localiza causas probables del descuadre."""
     codigos = agrupado['codigo_clasificado'].fillna('').astype(str)
     activo = agrupado[codigos.str.startswith(('AC.', 'ANC.'))]['monto_total'].sum()
@@ -6320,7 +6320,12 @@ def _diagnosticar_cuadratura(
             incompatibles['impacto_potencial'] - abs(diferencia)
         ).abs() <= tolerancia
 
-    relevantes = _con_saldo_relevante(df[~df['es_total']].copy())
+    filas_base = df[~df['es_total']].copy()
+    if 'es_subtotal' in filas_base.columns:
+        filas_base = filas_base[~filas_base['es_subtotal'].fillna(False)]
+    if 'es_control' in filas_base.columns:
+        filas_base = filas_base[~filas_base['es_control'].fillna(False)]
+    relevantes = _con_saldo_relevante(filas_base)
     sin_clasificar = relevantes[relevantes['codigo_clasificado'] == ''].copy()
     excluidas = relevantes[relevantes['codigo_clasificado'] == '__EXCLUIR__'].copy()
     total_cuentas = len(relevantes)
@@ -6383,6 +6388,10 @@ def _mostrar_resumen_cuadratura(
             "El activo homologado coincide con pasivo más patrimonio dentro de "
             f"la tolerancia de ${diagnostico['tolerancia']:,.0f}."
         )
+        if diagnostico.get("pat04_status") == "omitido_patrimonio_cerrado":
+            st.caption("ℹ️ Patrimonio cerrado: el balance ya cuadra de forma autónoma sin incorporar resultado del ejercicio derivado.")
+        elif diagnostico.get("pat04_status") == "derivado_incorporado":
+            st.caption("ℹ️ Resultado del ejercicio derivado incorporado a patrimonio (cuadratura conciliada).")
         return
 
     st.error(
@@ -6732,7 +6741,8 @@ def _gestionar_reclasificacion_depreciacion(
 
 
 def _preparar_periodo_reporte(
-        df: pd.DataFrame, catalogo: dict, periodo: str, posicion: int) -> dict:
+        df: pd.DataFrame, catalogo: dict, periodo: str, posicion: int,
+        tolerancia: float = 1.0) -> dict:
     """Genera clasificación, conciliación y cuadratura independientes por período."""
     periodo_df = df.copy()
     periodo_df["monto"] = periodo_df.apply(
@@ -6763,28 +6773,63 @@ def _preparar_periodo_reporte(
     agrupado["categoria"] = agrupado["codigo_clasificado"].map(
         lambda code: catalogo.get(code, {}).get("categoria", "")
     )
+    # Cuadratura preliminar sin derivar PAT.04
+    codigos_pre = agrupado["codigo_clasificado"].fillna("").astype(str)
+    activo_pre = float(agrupado[codigos_pre.str.startswith(("AC.", "ANC."))]["monto_total"].sum())
+    pasivo_pat_pre = float(agrupado[codigos_pre.str.startswith(("PC.", "PNC.", "PAT."))]["monto_total"].sum())
+    dif_inicial = float(activo_pre - pasivo_pat_pre)
+    tolerancia_cuadratura = tolerancia
+
+    existentes = set(agrupado["codigo_clasificado"])
+    pat04_status = "sin_resultado"
+    derivados = []
+
     conciliacion = conciliar_resultados(periodo_df.to_dict("records"), catalogo)
     resultado_periodo = conciliacion["resultado_origen"]
-    if resultado_periodo is not None:
-        existentes = set(agrupado["codigo_clasificado"])
-        derivados = []
-        for codigo_resultado in ("ER.11", "PAT.04"):
-            if codigo_resultado in existentes:
-                continue
-            info = catalogo.get(codigo_resultado, {})
+
+    # ER.11: ganancia/pérdida neta calculada para visualización en el Estado de Resultados
+    if "ER.11" not in existentes and (conciliacion["resultado_homologado"] is not None or resultado_periodo is not None):
+        info_er = catalogo.get("ER.11", {})
+        derivados.append({
+            "codigo_clasificado": "ER.11",
+            "monto_total": (
+                conciliacion["resultado_homologado"]
+                if conciliacion["resultado_homologado"] is not None
+                else resultado_periodo
+            ),
+            "num_cuentas": 0,
+            "nombre_estandar": info_er.get("nombre_estandar", "Ganancia (pérdida) neta"),
+            "categoria": info_er.get("categoria", ""),
+        })
+
+    # Contrato estricto de PAT.04
+    if "PAT.04" in existentes:
+        pat04_status = "explicito"
+    elif abs(dif_inicial) <= tolerancia_cuadratura:
+        pat04_status = "omitido_patrimonio_cerrado"
+    elif resultado_periodo is not None:
+        dif_con_resultado = float(activo_pre - (pasivo_pat_pre + resultado_periodo))
+        if abs(dif_con_resultado) <= tolerancia_cuadratura:
+            pat04_status = "derivado_incorporado"
+            info_pat = catalogo.get("PAT.04", {})
             derivados.append({
-                "codigo_clasificado": codigo_resultado,
-                "monto_total": (
-                    conciliacion["resultado_homologado"] or 0.0
-                    if codigo_resultado == "ER.11" else resultado_periodo
-                ),
+                "codigo_clasificado": "PAT.04",
+                "monto_total": resultado_periodo,
                 "num_cuentas": 0,
-                "nombre_estandar": info.get("nombre_estandar", codigo_resultado),
-                "categoria": info.get("categoria", ""),
+                "nombre_estandar": info_pat.get("nombre_estandar", "Resultado del ejercicio"),
+                "categoria": info_pat.get("categoria", ""),
             })
-        if derivados:
-            agrupado = pd.concat([agrupado, pd.DataFrame(derivados)], ignore_index=True)
-    diagnostico = _diagnosticar_cuadratura(periodo_df, agrupado, clasificadas)
+        else:
+            pat04_status = "rechazado_no_explica"
+    else:
+        pat04_status = "sin_resultado_origen"
+
+    if derivados:
+        agrupado = pd.concat([agrupado, pd.DataFrame(derivados)], ignore_index=True)
+
+    diagnostico = _diagnosticar_cuadratura(periodo_df, agrupado, clasificadas, tolerancia=tolerancia)
+    diagnostico["pat04_status"] = pat04_status
+    diagnostico["diferencia_inicial"] = dif_inicial
     return {
         "periodo": periodo, "df": periodo_df, "clasificadas": clasificadas,
         "agrupado": agrupado, "conciliacion": conciliacion,

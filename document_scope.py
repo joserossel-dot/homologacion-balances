@@ -5,9 +5,81 @@ import re
 import pypdfium2 as pdfium
 
 
+def contar_paginas_pdf(source) -> tuple[int, list[str]]:
+    """Obtiene el número de páginas comprobable con respaldo entre pdfplumber y PDFium."""
+    advertencias = []
+    count_plumber = 0
+    count_pdfium = 0
+    error_plumber = None
+    error_pdfium = None
+
+    try:
+        import pdfplumber
+        if isinstance(source, (str, bytes)):
+            if isinstance(source, str):
+                with pdfplumber.open(source) as p:
+                    count_plumber = len(p.pages)
+            else:
+                with pdfplumber.open(BytesIO(source)) as p:
+                    count_plumber = len(p.pages)
+        elif hasattr(source, "__fspath__"):
+            with pdfplumber.open(str(source)) as p:
+                count_plumber = len(p.pages)
+        elif hasattr(source, "read") and hasattr(source, "seek"):
+            pos = source.tell()
+            with pdfplumber.open(source) as p:
+                count_plumber = len(p.pages)
+            source.seek(pos)
+    except Exception as e:
+        error_plumber = str(e)
+
+    try:
+        if isinstance(source, (str, bytes)):
+            with pdfium.PdfDocument(source) as doc:
+                count_pdfium = len(doc)
+        elif hasattr(source, "__fspath__"):
+            with pdfium.PdfDocument(str(source)) as doc:
+                count_pdfium = len(doc)
+        elif hasattr(source, "getvalue"):
+            with pdfium.PdfDocument(source.getvalue()) as doc:
+                count_pdfium = len(doc)
+        elif hasattr(source, "read") and hasattr(source, "seek"):
+            pos = source.tell()
+            content = source.read()
+            source.seek(pos)
+            with pdfium.PdfDocument(content) as doc:
+                count_pdfium = len(doc)
+    except Exception as e:
+        error_pdfium = str(e)
+
+    if count_plumber > 0 and count_pdfium > 0:
+        if count_plumber != count_pdfium:
+            advertencias.append(
+                f"Discrepancia en conteo de páginas: pdfplumber reportó {count_plumber} y PDFium reportó {count_pdfium}; se conserva {max(count_plumber, count_pdfium)}."
+            )
+        return max(count_plumber, count_pdfium), advertencias
+
+    if count_pdfium > 0:
+        if count_plumber == 0 and not error_plumber:
+            advertencias.append(
+                f"Lector principal reportó 0 páginas; PDFium recuperó {count_pdfium} páginas válidas."
+            )
+        return count_pdfium, advertencias
+
+    if count_plumber > 0:
+        return count_plumber, advertencias
+
+    if error_plumber or error_pdfium:
+        advertencias.append(
+            f"No fue posible determinar el número de páginas: pdfplumber ({error_plumber or 'sin páginas'}), PDFium ({error_pdfium or 'sin páginas'})."
+        )
+    return 0, advertencias
+
+
 def page_count(content: bytes) -> int:
-    with pdfium.PdfDocument(content) as doc:
-        return len(doc)
+    count, _ = contar_paginas_pdf(content)
+    return count
+
 
 
 def parse_pages(text: str, count: int) -> list[int]:

@@ -66,7 +66,7 @@ def conciliar_resultados(filas, catalogo, tolerancia=0.01):
     problemas = []
     declarados = {}
     for row in filas:
-        if row.get("es_total", False):
+        if row.get("es_total", False) or row.get("es_subtotal", False) or row.get("es_control", False):
             continue
         codigo = str(row.get("codigo_clasificado") or "")
         nombre = str(row.get("nombre_original") or "")
