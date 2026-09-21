@@ -1177,6 +1177,26 @@ def parsear_monto(valor: str, separador_miles: str) -> Optional[float]:
 
     v = v.replace('(', '').replace(')', '')
 
+    # La detección global del separador es una señal del documento completo,
+    # no un contrato para cada celda OCR. En una misma página Tesseract puede
+    # alternar 1.234.567 y 1,234,567. Si el propio token exhibe grupos de tres
+    # dígitos inequívocos, se privilegia esa evidencia local para no convertir
+    # importes válidos en ``None`` y perder una columna completa de la fila.
+    if separador_miles == ',' and '.' in v:
+        grupos_punto = v.split('.')
+        if len(grupos_punto) > 1 and all(
+            len(grupo) == 3 and grupo.isdigit()
+            for grupo in grupos_punto[1:]
+        ):
+            v = v.replace('.', '')
+    elif separador_miles == '.' and ',' in v:
+        grupos_coma = v.split(',')
+        if len(grupos_coma) > 1 and all(
+            len(grupo) == 3 and grupo.isdigit()
+            for grupo in grupos_coma[1:]
+        ):
+            v = v.replace(',', '')
+
     if separador_miles == '.':
         v = v.replace('.', '').replace(',', '.')
     elif separador_miles == ',':
@@ -3490,8 +3510,20 @@ def normalizar_linea_ocr_tabla(linea: str) -> str:
         .replace("roraL", "TOTAL")
         .replace("TOTALPATRIMONIO", "TOTAL PATRIMONIO")
     )
-    limpia = re.sub(r"(?<=[A-Za-zÁÉÍÓÚáéíóúÑñ])\s+[-—_=`~|\sOAoa]+\s+(?=[(]?\d)", " ", limpia)
-    limpia = re.sub(r"(?<=\d|\))\s*[-—_=`~|\s]+\b[A-Za-z\s]{1,8}$", "", limpia)
+    limpia = re.sub(
+        r"(?<=[A-NP-Za-np-zÁÉÍÓÚÁÉÍÓÚÑñáéíóúñ])\s+[-—_=`~|\s]+\s+(?=[(]?\d)",
+        " ",
+        limpia,
+    )
+    # No elimines ``o``/``O`` finales: dentro de una tabla OCR representan
+    # con frecuencia ceros en las últimas columnas. El filtro conserva la
+    # limpieza de sufijos alfabéticos espurios, pero exige que el primer
+    # carácter del sufijo no sea una de esas representaciones de cero.
+    limpia = re.sub(
+        r"(?<=\d|\))\s*[-—_=`~|\s]+\b(?=[A-NP-Za-np-z])[A-Za-z\s]{1,8}$",
+        "",
+        limpia,
+    )
     return re.sub(r"\s+", " ", limpia).strip()
 
 
@@ -4406,7 +4438,23 @@ def _cuenta_desde_candidato_ocr(
     """Obtiene la variante consistente de una fila OCR con 6 a 8 importes."""
     normalized = normalizar_codigo_ocr(normalizar_linea_ocr_tabla(linea))
     candidates: list[CuentaRaw] = []
-    for suffix in ("", " 0", " 0 0"):
+    base_candidate = parsear_linea(
+        normalized,
+        numero_linea,
+        FormatoCodigo.SIN_CODIGO,
+        ".",
+        0.75,
+    )
+    # Una fila que ya trae sus ocho celdas no debe desplazarse añadiendo ceros
+    # para forzar una identidad aparentemente correcta. Los sufijos son un
+    # rescate exclusivo de filas incompletas, no una alternativa semántica.
+    suffixes = ("",)
+    if (
+        base_candidate is None
+        or set(base_candidate.montos_columnas) != set(RAW_MONETARY_COLUMNS)
+    ):
+        suffixes = ("", " 0", " 0 0")
+    for suffix in suffixes:
         candidate = parsear_linea(
             normalized + suffix,
             numero_linea,
@@ -4693,6 +4741,27 @@ def _extraer_paneles_paralelos_ocr(
             if rotacion != 0:
                 img = img.rotate(rotacion, expand=True)
             w, h = img.size
+
+            # Un balance tributario de ocho columnas también contiene las
+            # palabras "Activo" y "Pasivo", pero no está dividido en dos
+            # estados paralelos: son dos de sus ocho columnas monetarias.
+            # Dar prioridad a esa cabecera evita degradar cada fila a sólo
+            # dos importes y perder la evidencia necesaria para certificarla.
+            for group in _agrupar_palabras_por_linea(words_tsv):
+                labels = {
+                    re.sub(
+                        r"[^A-Z]", "",
+                        _sin_acentos(str(word.get("text", ""))).upper(),
+                    )
+                    for word in group
+                }
+                detected_columns = {
+                    key
+                    for key, aliases in _HEADER_ALIASES.items()
+                    if labels.intersection(aliases)
+                }
+                if len(detected_columns.intersection(RAW_MONETARY_COLUMNS)) >= 6:
+                    return None
 
             # Buscar encabezados de Activo a la izquierda y Pasivo/Patrimonio a la derecha
             left_headers = [

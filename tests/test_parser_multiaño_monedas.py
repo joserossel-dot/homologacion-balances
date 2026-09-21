@@ -56,6 +56,12 @@ def test_parsear_monto_contable(raw, separator, expected):
     assert parsear_monto(raw, separator) == expected
 
 
+def test_parsear_monto_ocr_acepta_separador_local_inequivoco():
+    """Una celda OCR no se pierde si discrepa del separador global de la página."""
+    assert parsear_monto("7.898.698", ",") == 7_898_698.0
+    assert parsear_monto("7,898,698", ".") == 7_898_698.0
+
+
 def test_tolerancia_vertical_une_offset_tipografico():
     words = [
         {"text": "RETENCION", "top": 100.0, "x0": 10.0},

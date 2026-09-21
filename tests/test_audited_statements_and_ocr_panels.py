@@ -328,6 +328,16 @@ def test_normalizar_linea_ocr_limpia_prefijos_y_ruido_conectores():
     assert norm4.startswith("TOTAL ACTIVOS")
 
 
+def test_normalizar_linea_ocr_preserva_ceros_finales_de_ocho_columnas():
+    """Las letras ``o`` de Tesseract son ceros, no basura de una glosa."""
+    line = (
+        "2.4.01.01 Capital Social | o 831.689.848 0 831.689.848 "
+        "o 831.689.848 o o"
+    )
+    normalized = normalizar_linea_ocr_tabla(line)
+    assert normalized.endswith("o 831.689.848 o o")
+
+
 # =============================================================================
 # 5. PRUEBAS DE RECONSTRUCCIÓN GEOMÉTRICA TSV Y PANELES PARALELOS
 # =============================================================================
@@ -531,3 +541,23 @@ def test_extraer_paneles_paralelos_ocr_retorna_none_si_no_es_panel_doble(fake_im
     ]
     res = _extraer_paneles_paralelos_ocr(fake_image_path, words_tsv=words)
     assert res is None
+
+
+def test_paneles_paralelos_no_degrada_balance_tributario_de_ocho_columnas(
+    fake_image_path,
+):
+    """La presencia de Activo/Pasivo no convierte ocho columnas en dos paneles."""
+    words = [
+        {"text": "CUENTA", "x0": 30, "x1": 100, "top": 100, "raw_top": 100, "yc": 100},
+        {"text": "DEBITOS", "x0": 180, "x1": 250, "top": 100, "raw_top": 100, "yc": 100},
+        {"text": "CREDITOS", "x0": 280, "x1": 350, "top": 100, "raw_top": 100, "yc": 100},
+        {"text": "DEUDOR", "x0": 380, "x1": 440, "top": 100, "raw_top": 100, "yc": 100},
+        {"text": "ACREEDOR", "x0": 470, "x1": 540, "top": 100, "raw_top": 100, "yc": 100},
+        {"text": "ACTIVO", "x0": 570, "x1": 630, "top": 100, "raw_top": 100, "yc": 100},
+        {"text": "PASIVO", "x0": 660, "x1": 720, "top": 100, "raw_top": 100, "yc": 100},
+        {"text": "PERDIDAS", "x0": 750, "x1": 820, "top": 100, "raw_top": 100, "yc": 100},
+        {"text": "GANANCIAS", "x0": 850, "x1": 930, "top": 100, "raw_top": 100, "yc": 100},
+        {"text": "CAJA", "x0": 30, "x1": 80, "top": 250, "raw_top": 250, "yc": 250},
+    ]
+
+    assert _extraer_paneles_paralelos_ocr(fake_image_path, words_tsv=words) is None

@@ -67,6 +67,25 @@ def test_extractor_detecta_periodo_textual_chileno():
     assert meta.periodos_detectados == ("2022",)
 
 
+def test_extractor_ocr_detecta_empresa_y_rango_directo_sin_tomar_fila_contable():
+    lineas = [
+        "Frigorífico Aguas Blancas Ltda Balance a 8 Columnas Fecha: 18/11/23",
+        "76792872-6 Hora: 11:23:38",
+        "Chacabuco Nuevo Colorado 152A Ejercicio Local 2021 Página: 1",
+        "Santiago 01/01/2021 Hasta 31/12/2021 (PRELIMINAR)",
+        "2.1.07.01 Cta. Cte. Empresa Relacionada 102.408.835",
+    ]
+
+    meta = extraer_metadata(lineas)
+
+    assert meta.rut == "76792872-6"
+    assert meta.razon_social == "Frigorífico Aguas Blancas Ltda"
+    assert meta.periodo_desde == "01/01/2021"
+    assert meta.periodo_hasta == "31/12/2021"
+    assert meta.anio_cierre == 2021
+    assert meta.periodos_detectados == ("2021",)
+
+
 def test_es_ruido_empresa_identifica_software_y_cabeceras():
     assert _es_ruido_empresa("KAME ONE Balance General") is True
     assert _es_ruido_empresa("SOFTLAND ERP") is True

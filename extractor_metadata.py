@@ -45,6 +45,12 @@ PATRON_PERIODO_DESDE_HASTA = re.compile(
     r'(\d{1,2}[/\-\.]\d{1,2}[/\-\.]\d{2,4})',
     re.IGNORECASE
 )
+PATRON_RANGO_FECHAS_DIRECTO = re.compile(
+    r'(\d{1,2}[/\-\.]\d{1,2}[/\-\.]\d{2,4})'
+    r'\s*(?:hasta|to|al|a|-)\s*'
+    r'(\d{1,2}[/\-\.]\d{1,2}[/\-\.]\d{2,4})',
+    re.IGNORECASE,
+)
 PATRON_PERIODO_TEXTUAL = re.compile(
     r'(?:desde|del?|comprendido(?:\s+el)?)\s+(\d{1,2})\s+de\s+(\w+)\s+(?:de\s+|del\s+)?(\d{4})'
     r'\s+(?:hasta|al?)\s+(\d{1,2})\s+de\s+(\w+)\s+(?:de\s+|del\s+)?(\d{4})',
@@ -130,6 +136,18 @@ def _es_ruido_empresa(texto: str) -> bool:
     return False
 
 
+def _limpiar_razon_social(texto: str) -> str:
+    """Quita campos de cabecera que OCR deja unidos a la razón social."""
+    limpia = re.split(
+        r'\b(?:balance|fecha|hora|p[aá]gina|ejercicio|per[ií]odo|rut|r\.u\.t\.?|'
+        r'direcci[oó]n)\b',
+        str(texto or ''),
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )[0]
+    return re.sub(r'\s+', ' ', limpia).strip(' :.-')
+
+
 def extraer_metadata(lineas: list[str]) -> MetadataEmpresa:
     """
     Extrae metadata de empresa desde las primeras líneas del balance.
@@ -137,6 +155,7 @@ def extraer_metadata(lineas: list[str]) -> MetadataEmpresa:
     """
     meta = MetadataEmpresa()
     texto_encabezado = '\n'.join(lineas[:40])
+    texto_cabecera_inicial = '\n'.join(lineas[:15])
 
     # ── 1. RUT ────────────────────────────────────────────────────────────────
     # Primero buscar con etiqueta explícita
@@ -152,13 +171,18 @@ def extraer_metadata(lineas: list[str]) -> MetadataEmpresa:
                 break
 
     # ── 2. Razón social ───────────────────────────────────────────────────────
-    m = PATRON_EMPRESA_LABEL.search(texto_encabezado)
-    if m and not _es_ruido_empresa(m.group(1)):
-        meta.razon_social = m.group(1).strip().title()
+    m = PATRON_EMPRESA_LABEL.search(texto_cabecera_inicial)
+    # "Empresa relacionada" es una glosa contable frecuente, no una etiqueta
+    # de identidad. Puede aparecer temprano en balances cortos o OCR recortado.
+    if m and re.search(r'\bempresa\s+relacionad', m.group(0), re.IGNORECASE):
+        m = None
+    razon_etiquetada = _limpiar_razon_social(m.group(1)) if m else ''
+    if razon_etiquetada and not _es_ruido_empresa(razon_etiquetada):
+        meta.razon_social = razon_etiquetada.title()
     else:
         # Heurística: preferir líneas con indicadores corporativos (Ltda, SpA, S.A., etc.)
         for linea in lineas[:15]:
-            linea_limpia = linea.strip()
+            linea_limpia = _limpiar_razon_social(linea)
             if (len(linea_limpia) > 4
                     and not _es_ruido_empresa(linea_limpia)
                     and not PATRON_RUT.search(linea_limpia)
@@ -167,7 +191,7 @@ def extraer_metadata(lineas: list[str]) -> MetadataEmpresa:
                 break
         if not meta.razon_social:
             for linea in lineas[:15]:
-                linea_limpia = linea.strip()
+                linea_limpia = _limpiar_razon_social(linea)
                 if (len(linea_limpia) > 4
                         and not _es_ruido_empresa(linea_limpia)
                         and not PATRON_RUT.search(linea_limpia)):
@@ -187,7 +211,10 @@ def extraer_metadata(lineas: list[str]) -> MetadataEmpresa:
         meta.anio_cierre = int(a2)
         meta.periodos_detectados = (str(a2),) if a1 == a2 else (str(a2), str(a1))
     else:
-        m_rango = PATRON_PERIODO_DESDE_HASTA.search(texto_encabezado)
+        m_rango = (
+            PATRON_PERIODO_DESDE_HASTA.search(texto_encabezado)
+            or PATRON_RANGO_FECHAS_DIRECTO.search(texto_encabezado)
+        )
         if m_rango:
             meta.periodo_desde = normalizar_fecha(m_rango.group(1))
             meta.periodo_hasta = normalizar_fecha(m_rango.group(2))

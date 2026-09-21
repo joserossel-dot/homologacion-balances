@@ -63,7 +63,7 @@ from parser_universal import (
     ParserPDF, CuentaRaw, OrigenColumna, RAW_MONETARY_COLUMNS,
     FormatoCodigo, ResultadoParseo, CertificacionExtraccion, certificar_clasificado_final,
     certificar_extraccion_columnas, detectar_años_y_monedas, ocr_pagina,
-    parsear_excel,
+    detectar_rotacion_osd, detectar_rotacion_heuristica, parsear_excel,
 )
 from parsers.column_interpretation import es_ingreso as es_ingreso_col, es_gasto as es_gasto_col
 from parsers.account_type_resolver import (
@@ -4388,14 +4388,20 @@ def _extraer_lineas_encabezado_cached(contenido: bytes, suffix: str) -> list[str
             with pdfplumber.open(BytesIO(contenido)) as pdf:
                 texto = pdf.pages[0].extract_text() or ""
             lineas = texto.split('\n')[:40]
-            if any(re.search(r"(?:19|20)\d{2}", linea) for linea in lineas):
+            # Un año aislado en texto nativo no acredita que el encabezado sea
+            # utilizable. Así evitamos omitir OCR cuando la razón social o el
+            # período real solo están disponibles en la imagen escaneada.
+            if extraer_metadata(lineas).confianza >= (2 / 3):
                 return lineas
 
             png = render_page(contenido, 1)
             with tempfile.TemporaryDirectory() as tmpdir:
                 imagen = Path(tmpdir) / "encabezado.png"
                 imagen.write_bytes(png)
-                texto_ocr = ocr_pagina(imagen, 0, psm=6)
+                rotacion = detectar_rotacion_osd(imagen)
+                if rotacion is None:
+                    rotacion = detectar_rotacion_heuristica(imagen)
+                texto_ocr = ocr_pagina(imagen, rotacion, psm=6)
             return texto_ocr.split('\n')[:60]
         except Exception:
             return []
