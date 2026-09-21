@@ -12,8 +12,9 @@ from dotenv import load_dotenv
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from persistence.neon_store import NeonKnowledgeStore
-from pipeline.homologation_pipeline import HomologationPipeline
+from persistence.neon_store import NeonKnowledgeStore  # noqa: E402
+from persistence.neon_store import normalize_account_name  # noqa: E402
+from pipeline.homologation_pipeline import HomologationPipeline  # noqa: E402
 
 
 def checks_pass(checks: dict) -> bool:
@@ -23,8 +24,47 @@ def checks_pass(checks: dict) -> bool:
         and checks["conflicts_accessible"]
         and checks["catalog_entries"] >= 62
         and checks["dictionary_entries"] >= 876
-        and checks["pipeline_dictionary_entries"] == checks["dictionary_entries"]
+        and checks["dictionary_entries"] == checks["loaded_dictionary_entries"]
+        and checks["pipeline_dictionary_entries"]
+        == checks["classifiable_dictionary_entries"]
+        and checks["unknown_catalog_codes"] == 0
+        and checks["conflicting_dictionary_names"] == 0
     )
+
+
+def dictionary_profile(
+    dictionary: list[dict], catalog: dict, pipeline_entries: int,
+) -> dict[str, int]:
+    """Resume una unica instantanea sin publicar nombres ni datos de conexion."""
+    excluded = [
+        row for row in dictionary
+        if row.get("codigo_estandar") == "__EXCLUIR__"
+    ]
+    classifiable = [
+        row for row in dictionary
+        if row.get("codigo_estandar") != "__EXCLUIR__"
+    ]
+    valid_codes = set(catalog)
+    unknown_codes = {
+        str(row.get("codigo_estandar") or "").strip()
+        for row in classifiable
+        if row.get("codigo_estandar") not in valid_codes
+    }
+    codes_by_name: dict[str, set[str]] = {}
+    for row in classifiable:
+        name = normalize_account_name(row.get("cuenta_original", ""))
+        code = str(row.get("codigo_estandar") or "").strip()
+        if name:
+            codes_by_name.setdefault(name, set()).add(code)
+    conflicting_names = sum(len(codes) > 1 for codes in codes_by_name.values())
+    return {
+        "loaded_dictionary_entries": len(dictionary),
+        "excluded_dictionary_entries": len(excluded),
+        "classifiable_dictionary_entries": len(classifiable),
+        "pipeline_dictionary_entries": pipeline_entries,
+        "unknown_catalog_codes": len(unknown_codes),
+        "conflicting_dictionary_names": conflicting_names,
+    }
 
 def main() -> int:
     parser = argparse.ArgumentParser()
@@ -45,15 +85,18 @@ def main() -> int:
     if args.migrate:
         store.initialize()
 
-    stats = store.learning_statistics()
-    pipeline = HomologationPipeline()
+    catalog = store.load_catalog()
+    dictionary = store.load_dictionary()
+    # La misma instantanea alimenta el perfil y el pipeline. Esto evita que una
+    # promocion concurrente produzca un falso descuadre entre dos lecturas.
+    pipeline = HomologationPipeline(dictionary=dictionary)
     checks = {
         "neon": True,
-        "catalog_entries": stats["catalog_entries"],
-        "dictionary_entries": stats["dictionary_entries"],
-        "pipeline_dictionary_entries": len(pipeline._dictionary),
+        "catalog_entries": len(catalog),
+        "dictionary_entries": len(dictionary),
         "history_accessible": isinstance(store.dictionary_history(1), list),
         "conflicts_accessible": isinstance(store.conflicts(), list),
+        **dictionary_profile(dictionary, catalog, len(pipeline._dictionary)),
     }
     ok = checks_pass(checks)
     print(json.dumps(checks, ensure_ascii=False, sort_keys=True))

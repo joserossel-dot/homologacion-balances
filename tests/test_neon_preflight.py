@@ -3,7 +3,7 @@ from pathlib import Path
 
 import yaml
 
-from scripts.neon_preflight import checks_pass
+from scripts.neon_preflight import checks_pass, dictionary_profile
 
 
 ROOT = Path(__file__).parents[1]
@@ -15,7 +15,12 @@ def _healthy_preflight_checks():
         "neon": True,
         "catalog_entries": 62,
         "dictionary_entries": 876,
+        "loaded_dictionary_entries": 876,
+        "excluded_dictionary_entries": 0,
+        "classifiable_dictionary_entries": 876,
         "pipeline_dictionary_entries": 876,
+        "unknown_catalog_codes": 0,
+        "conflicting_dictionary_names": 0,
         "history_accessible": True,
         "conflicts_accessible": True,
     }
@@ -27,6 +32,68 @@ def test_preflight_exige_historial_y_conflictos_accesibles():
     for key in ("history_accessible", "conflicts_accessible"):
         unavailable = dict(checks, **{key: False})
         assert not checks_pass(unavailable)
+
+
+def test_preflight_acepta_exclusiones_fuera_del_diccionario_operativo():
+    checks = dict(
+        _healthy_preflight_checks(),
+        dictionary_entries=878,
+        loaded_dictionary_entries=878,
+        excluded_dictionary_entries=2,
+        classifiable_dictionary_entries=876,
+    )
+    assert checks_pass(checks)
+
+
+def test_preflight_rechaza_diferencias_operativas_y_estadisticas():
+    assert not checks_pass(dict(
+        _healthy_preflight_checks(), pipeline_dictionary_entries=875,
+    ))
+    assert not checks_pass(dict(
+        _healthy_preflight_checks(), loaded_dictionary_entries=875,
+    ))
+
+
+def test_preflight_rechaza_codigos_desconocidos_y_nombres_conflictivos():
+    assert not checks_pass(dict(
+        _healthy_preflight_checks(), unknown_catalog_codes=1,
+    ))
+    assert not checks_pass(dict(
+        _healthy_preflight_checks(), conflicting_dictionary_names=1,
+    ))
+
+
+def test_dictionary_profile_no_expone_nombres_y_separa_exclusiones():
+    dictionary = [
+        {"cuenta_original": "Caja", "codigo_estandar": "AC.01"},
+        {"cuenta_original": "Control privado", "codigo_estandar": "__EXCLUIR__"},
+    ]
+    profile = dictionary_profile(dictionary, {"AC.01": {}}, 1)
+
+    assert profile == {
+        "loaded_dictionary_entries": 2,
+        "excluded_dictionary_entries": 1,
+        "classifiable_dictionary_entries": 1,
+        "pipeline_dictionary_entries": 1,
+        "unknown_catalog_codes": 0,
+        "conflicting_dictionary_names": 0,
+    }
+    assert "Caja" not in str(profile)
+    assert "Control privado" not in str(profile)
+
+
+def test_dictionary_profile_detecta_codigo_desconocido_y_conflicto():
+    dictionary = [
+        {"cuenta_original": "Cuenta X", "codigo_estandar": "AC.01"},
+        {"cuenta_original": "cuenta-x", "codigo_estandar": "PC.01"},
+        {"cuenta_original": "Otra", "codigo_estandar": "ZZ.99"},
+    ]
+    profile = dictionary_profile(
+        dictionary, {"AC.01": {}, "PC.01": {}}, 3,
+    )
+
+    assert profile["unknown_catalog_codes"] == 1
+    assert profile["conflicting_dictionary_names"] == 1
 
 
 def test_preflight_no_expone_database_url():
