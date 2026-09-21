@@ -121,7 +121,9 @@ services:
   caddy-volume-init:
     image: ${CADDY_INIT_IMAGE:-alpine:3.20}
     user: "0:0"
-    command: ["sh", "-c", "chown -R 10001:10001 /data /config"]
+    # Caddy corre sin root. En un volumen nuevo necesita que sus directorios
+    # de estado existan antes de crear la CA interna y el autosave.
+    command: ["sh", "-c", "mkdir -p /data/caddy /config/caddy && chown -R 10001:10001 /data /config"]
     volumes:
       - caddy_data:/data
       - caddy_config:/config

@@ -127,6 +127,10 @@ def test_security_defaults_are_enabled() -> None:
     assert services["bootstrap"]["environment"]["PERSISTENCE_MODE"] == "local"
     assert services["app-volume-init"]["user"] == "0:0"
     assert services["app-volume-init"]["read_only"] is True
+    caddy_init_command = services["caddy-volume-init"]["command"]
+    assert "/data/caddy" in caddy_init_command[-1]
+    assert "/config/caddy" in caddy_init_command[-1]
+    assert "chown -R 10001:10001 /data /config" in caddy_init_command[-1]
     assert services["app"]["user"] == "10001:10001"
     assert all(
         "no-new-privileges:true" in services[name].get("security_opt", [])
