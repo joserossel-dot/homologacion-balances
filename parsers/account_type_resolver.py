@@ -14,14 +14,29 @@ from dataclasses import dataclass, field
 from enum import Enum
 import re
 from typing import Optional
+import unicodedata
 
 from parser_universal import OrigenColumna
+
+
+def _compact_account_name(name: str | None) -> str:
+    """Normaliza glosas OCR que pueden perder espacios y acentos.
+
+    Conserva el reconocimiento normal por palabras en los llamadores y solo
+    entrega una forma compacta para detectar expresiones contables canónicas
+    cuando el OCR une sus palabras, por ejemplo ``DepreciacionAcumulada``.
+    """
+    decomposed = unicodedata.normalize("NFKD", str(name or "").lower())
+    without_accents = "".join(
+        char for char in decomposed if not unicodedata.combining(char)
+    )
+    return re.sub(r"[^a-z0-9]+", "", without_accents)
 
 
 def is_contra_asset_name(name: str | None) -> bool:
     """True para cuentas acreedoras que reducen activos no corrientes."""
     normalized = re.sub(r"\s+", " ", str(name or "").lower()).strip()
-    return any(
+    conventional_match = any(
         re.search(pattern, normalized)
         for pattern in (
             r"depreciaci[oó]n(?:es)? acumulada",
@@ -29,6 +44,16 @@ def is_contra_asset_name(name: str | None) -> bool:
             r"deterioro acumulado",
         )
     )
+    if conventional_match:
+        return True
+
+    compact = _compact_account_name(name)
+    return bool(re.search(
+        r"(?:depreciacion(?:es)?acumulad[ao]s?|"
+        r"amortizacion(?:es)?acumulad[ao]s?|"
+        r"deterioroacumulad[ao]s?)",
+        compact,
+    ))
 
 
 def is_ppe_depreciation_name(name: str | None) -> bool:
@@ -38,12 +63,15 @@ def is_ppe_depreciation_name(name: str | None) -> bool:
     No debe extenderse a amortización acumulada de intangibles ni deterioro.
     """
     normalized = re.sub(r"\s+", " ", str(name or "").lower()).strip()
-    if re.search(r"\b(?:amortizaci[oó]n|intangibl)", normalized):
+    compact = _compact_account_name(name)
+    if (re.search(r"\b(?:amortizaci[oó]n|intangibl)", normalized)
+            or "amortizacion" in compact or "intangibl" in compact):
         return False
     return bool(
         re.search(r"\bdepreciaci[oó]n(?:es)?\s+acumulad[ao]s?\b", normalized)
         or re.search(r"\bdep(?:r)?\.?\s*acum(?:ulad[ao]s?)?\b", normalized)
         or re.fullmatch(r"depreciaci[oó]n(?:es)?", normalized)
+        or re.search(r"depreciacion(?:es)?acumulad[ao]s?", compact)
     )
 
 

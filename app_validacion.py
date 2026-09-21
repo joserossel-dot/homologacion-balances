@@ -5892,6 +5892,9 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
     for idx, row in visible.iterrows():
         seleccionada = idx in st.session_state.lote_seleccion
         with st.container(border=seleccionada):
+            # El mensaje debe ocupar todo el ancho de la tarjeta. La tercera
+            # columna es deliberadamente angosta para el botón de confirmación.
+            feedback = st.empty()
             c0, c1, c2, c3 = st.columns([0.04, 0.44, 0.40, 0.12], vertical_alignment="center")
             with c0:
                 checkbox_key = f"{checkbox_prefix}_{idx}"
@@ -6177,7 +6180,7 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                                 nombre_existente = catalogo[candidato].get(
                                     'nombre_estandar', candidato,
                                 )
-                                st.error(
+                                feedback.error(
                                     f'El código {candidato} ya existe como '
                                     f'“{nombre_existente}”. Use un código libre. '
                                     'No se puede redefinir una categoría '
@@ -6185,14 +6188,14 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                                 )
                                 st.stop()
                             if not candidato.startswith(prefijos[nuevo_cat]):
-                                st.error(
+                                feedback.error(
                                     'El código debe comenzar con el prefijo '
                                     f'{prefijos[nuevo_cat]} correspondiente a '
                                     f'{nuevo_cat}. La categoría no fue creada.'
                                 )
                                 st.stop()
                             if not _codigo_compatible_con_origen(candidato, row.get('origen_columna'), row.get('monto'), _nombre_contable_fila(row), {**catalogo, candidato: nueva_entrada}):
-                                st.error('La nueva categoría contradice la naturaleza de esta cuenta. No fue creada.')
+                                feedback.error('La nueva categoría contradice la naturaleza de esta cuenta. No fue creada.')
                                 st.stop()
                             persistido_catalogo = _persistir_catalogo(nueva_entrada)
                             if not persistido_catalogo and _legacy_json_fallback_allowed():
@@ -6202,9 +6205,9 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                                     )
                                     persistido_catalogo = True
                                 except Exception:
-                                    st.error('No se pudo guardar el respaldo de la categoría.')
+                                    feedback.error('No se pudo guardar el respaldo de la categoría.')
                             if not persistido_catalogo:
-                                st.error(
+                                feedback.error(
                                     'La categoría no fue guardada. La clasificación '
                                     'de la cuenta permanece sin cambios; vuelva a intentarlo.'
                                 )
@@ -6255,7 +6258,7 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
 
                     if codigo_final:
                         if not _codigo_compatible_con_origen(codigo_final, row.get('origen_columna'), row.get('monto'), _nombre_contable_fila(row), catalogo):
-                            st.error('La categoría contradice la naturaleza contable. No se cambió la cuenta ni se guardó en el diccionario.')
+                            feedback.error('La categoría contradice la naturaleza contable. No se cambió la cuenta ni se guardó en el diccionario.')
                             st.stop()
                         _persist_streamlit_correction(
                             archivo_nombre, row_reference=idx,

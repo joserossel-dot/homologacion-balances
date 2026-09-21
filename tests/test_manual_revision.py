@@ -320,6 +320,14 @@ class TestOrigenContableEnRevision:
             'ANC.01.01', 'pasivo', 8371044, 'Depreciación Acumulada'
         )
 
+    def test_depreciacion_acumulada_ocr_sin_espacios_permite_activo_fijo(self):
+        nombre_contable = 'DepreciacionAcumuladaPlantasYEquipos'
+
+        assert _origen_efectivo('pasivo', 363072893, nombre_contable) == 'activo'
+        assert _codigo_compatible_con_origen(
+            'ANC.01.01', 'pasivo', 363072893, nombre_contable,
+        )
+
     def test_detalle_generico_bajo_depreciacion_acumulada_es_contra_activo(self):
         nombre_contable = 'DEPRECIACIÓN ACUMULADA DEPRECIACIONES'
 
