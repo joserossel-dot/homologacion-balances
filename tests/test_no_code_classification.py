@@ -80,6 +80,21 @@ def test_diccionario_migra_depreciacion_acumulada_al_subcodigo(tmp_path):
     assert result['standard_code'] == 'ANC.01.01'
 
 
+def test_diccionario_ambiguo_no_clasifica_de_forma_arbitraria(tmp_path):
+    pipeline = HomologationPipeline(
+        db_path=tmp_path / 'gold.db',
+        dictionary=[
+            {'cuenta_original': 'Cuenta ambigua', 'codigo_estandar': 'AC.03'},
+            {'cuenta_original': 'cuenta-ambigua', 'codigo_estandar': 'PC.01'},
+            {'cuenta_original': 'Caja', 'codigo_estandar': 'AC.01'},
+        ],
+    )
+
+    assert pipeline._classify_by_dictionary_exact('Cuenta ambigua') is None
+    assert pipeline._classify_by_dictionary_fuzzy('Cuenta ambigua') is None
+    assert pipeline._classify_by_dictionary_exact('Caja')['standard_code'] == 'AC.01'
+
+
 def test_subcuenta_bancaria_hereda_caja_y_bancos_del_control(tmp_path):
     pipeline = HomologationPipeline(db_path=tmp_path / 'gold.db')
 

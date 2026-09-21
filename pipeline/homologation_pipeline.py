@@ -56,6 +56,9 @@ class HomologationPipeline:
             )
         else:
             self._dictionary = self._load_dictionary()
+        self._ambiguous_dictionary_names = self._find_ambiguous_dictionary_names(
+            self._dictionary
+        )
         self._semantic_engine = SemanticEngine()
         self._cmcc_classifier = CMCCClassifier()
         self._decision_engine = DecisionEngine()
@@ -279,6 +282,21 @@ class HomologationPipeline:
         name = re.sub(r"\s+", " ", name).strip()
         return name
 
+    @classmethod
+    def _find_ambiguous_dictionary_names(
+        cls, dictionary: list[dict[str, Any]],
+    ) -> set[str]:
+        """Identifica glosas normalizadas asociadas a mas de un codigo."""
+        codes_by_name: dict[str, set[str]] = {}
+        for entry in dictionary:
+            name = cls._normalize_name(entry.get("cuenta_original", ""))
+            code = str(entry.get("codigo_estandar") or "").strip()
+            if name and code:
+                codes_by_name.setdefault(name, set()).add(code)
+        return {
+            name for name, codes in codes_by_name.items() if len(codes) > 1
+        }
+
     @staticmethod
     def _infer_company(source_file: str) -> str:
         name = Path(source_file).stem
@@ -364,6 +382,8 @@ class HomologationPipeline:
 
     def _classify_by_dictionary_exact(self, account_name: str) -> dict[str, Any] | None:
         normalized = self._normalize_name(account_name)
+        if normalized in self._ambiguous_dictionary_names:
+            return None
         for entry in self._dictionary:
             if self._normalize_name(entry["cuenta_original"]) == normalized:
                 code = (
@@ -459,6 +479,8 @@ class HomologationPipeline:
         best_entry: dict[str, str] | None = None
         for entry in self._dictionary:
             dict_name = self._normalize_name(entry["cuenta_original"])
+            if dict_name in self._ambiguous_dictionary_names:
+                continue
             score = fuzz.token_sort_ratio(normalized, dict_name)
             if score > best_score:
                 best_score = score

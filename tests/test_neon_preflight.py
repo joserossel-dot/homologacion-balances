@@ -21,6 +21,7 @@ def _healthy_preflight_checks():
         "pipeline_dictionary_entries": 876,
         "unknown_catalog_codes": 0,
         "conflicting_dictionary_names": 0,
+        "protected_conflicting_dictionary_names": 0,
         "history_accessible": True,
         "conflicts_accessible": True,
     }
@@ -61,6 +62,11 @@ def test_preflight_rechaza_codigos_desconocidos_y_nombres_conflictivos():
     assert not checks_pass(dict(
         _healthy_preflight_checks(), conflicting_dictionary_names=1,
     ))
+    assert checks_pass(dict(
+        _healthy_preflight_checks(),
+        conflicting_dictionary_names=1,
+        protected_conflicting_dictionary_names=1,
+    ))
 
 
 def test_dictionary_profile_no_expone_nombres_y_separa_exclusiones():
@@ -68,7 +74,7 @@ def test_dictionary_profile_no_expone_nombres_y_separa_exclusiones():
         {"cuenta_original": "Caja", "codigo_estandar": "AC.01"},
         {"cuenta_original": "Control privado", "codigo_estandar": "__EXCLUIR__"},
     ]
-    profile = dictionary_profile(dictionary, {"AC.01": {}}, 1)
+    profile = dictionary_profile(dictionary, {"AC.01": {}}, 1, 0)
 
     assert profile == {
         "loaded_dictionary_entries": 2,
@@ -77,6 +83,7 @@ def test_dictionary_profile_no_expone_nombres_y_separa_exclusiones():
         "pipeline_dictionary_entries": 1,
         "unknown_catalog_codes": 0,
         "conflicting_dictionary_names": 0,
+        "protected_conflicting_dictionary_names": 0,
     }
     assert "Caja" not in str(profile)
     assert "Control privado" not in str(profile)
@@ -89,11 +96,12 @@ def test_dictionary_profile_detecta_codigo_desconocido_y_conflicto():
         {"cuenta_original": "Otra", "codigo_estandar": "ZZ.99"},
     ]
     profile = dictionary_profile(
-        dictionary, {"AC.01": {}, "PC.01": {}}, 3,
+        dictionary, {"AC.01": {}, "PC.01": {}}, 3, 1,
     )
 
     assert profile["unknown_catalog_codes"] == 1
     assert profile["conflicting_dictionary_names"] == 1
+    assert profile["protected_conflicting_dictionary_names"] == 1
 
 
 def test_preflight_no_expone_database_url():

@@ -13,7 +13,6 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from persistence.neon_store import NeonKnowledgeStore  # noqa: E402
-from persistence.neon_store import normalize_account_name  # noqa: E402
 from pipeline.homologation_pipeline import HomologationPipeline  # noqa: E402
 
 
@@ -28,12 +27,14 @@ def checks_pass(checks: dict) -> bool:
         and checks["pipeline_dictionary_entries"]
         == checks["classifiable_dictionary_entries"]
         and checks["unknown_catalog_codes"] == 0
-        and checks["conflicting_dictionary_names"] == 0
+        and checks["protected_conflicting_dictionary_names"]
+        == checks["conflicting_dictionary_names"]
     )
 
 
 def dictionary_profile(
     dictionary: list[dict], catalog: dict, pipeline_entries: int,
+    protected_conflicts: int,
 ) -> dict[str, int]:
     """Resume una unica instantanea sin publicar nombres ni datos de conexion."""
     excluded = [
@@ -52,7 +53,9 @@ def dictionary_profile(
     }
     codes_by_name: dict[str, set[str]] = {}
     for row in classifiable:
-        name = normalize_account_name(row.get("cuenta_original", ""))
+        name = HomologationPipeline._normalize_name(
+            row.get("cuenta_original", "")
+        )
         code = str(row.get("codigo_estandar") or "").strip()
         if name:
             codes_by_name.setdefault(name, set()).add(code)
@@ -64,6 +67,7 @@ def dictionary_profile(
         "pipeline_dictionary_entries": pipeline_entries,
         "unknown_catalog_codes": len(unknown_codes),
         "conflicting_dictionary_names": conflicting_names,
+        "protected_conflicting_dictionary_names": protected_conflicts,
     }
 
 def main() -> int:
@@ -96,7 +100,12 @@ def main() -> int:
         "dictionary_entries": len(dictionary),
         "history_accessible": isinstance(store.dictionary_history(1), list),
         "conflicts_accessible": isinstance(store.conflicts(), list),
-        **dictionary_profile(dictionary, catalog, len(pipeline._dictionary)),
+        **dictionary_profile(
+            dictionary,
+            catalog,
+            len(pipeline._dictionary),
+            len(pipeline._ambiguous_dictionary_names),
+        ),
     }
     ok = checks_pass(checks)
     print(json.dumps(checks, ensure_ascii=False, sort_keys=True))
