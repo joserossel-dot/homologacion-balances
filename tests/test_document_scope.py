@@ -51,7 +51,7 @@ def test_scope_ui_does_not_extract_before_confirmation():
     assert not at.exception and not at.success
     at.radio[0].set_value("Sólo las seleccionadas")
     at.text_input[0].set_value("2-3")
-    at.button[0].click().run()
+    at.button(key="document_scope_submit").click().run()
     assert not at.exception
     assert at.session_state.document_pages["balance.pdf"] == [2, 3]
     assert at.success
@@ -59,14 +59,14 @@ def test_scope_ui_does_not_extract_before_confirmation():
     at.session_state.resultados = {"balance.pdf": "decisiones confirmadas"}
     at.session_state.document_scope_editing = True
     at.run()
-    at.button[0].click().run()
+    at.button(key="document_scope_submit").click().run()
     assert at.session_state.resultados == {"balance.pdf": "decisiones confirmadas"}
     # Una selección diferente sí invalida sólo el documento modificado.
     at.session_state.resultados["otro.xlsx"] = "conservar"
     at.session_state.document_scope_editing = True
     at.run()
     at.text_input[0].set_value("1")
-    at.button[0].click().run()
+    at.button(key="document_scope_submit").click().run()
     assert at.session_state.resultados == {"otro.xlsx": "conservar"}
     assert at.session_state.document_pages["balance.pdf"] == [1]
 
@@ -109,6 +109,7 @@ def test_manual_reextraction_clears_only_derived_state(monkeypatch):
     state = {
         "resultados": {"balance.pdf": "antiguo", "otro.pdf": "conservar"},
         "extraction_pending": {"balance.pdf": "pendiente"},
+        "header_ocr_rotation_warnings": {"balance.pdf": {"rotacion_aplicada": "0"}},
         "extraction_revisions": {"balance.pdf": 4},
         "file_metadata": {"balance.pdf": {"file_digest": "abc"}},
     }
@@ -118,5 +119,6 @@ def test_manual_reextraction_clears_only_derived_state(monkeypatch):
     assert "balance.pdf" not in state["resultados"]
     assert state["resultados"]["otro.pdf"] == "conservar"
     assert "balance.pdf" not in state["extraction_pending"]
+    assert "balance.pdf" not in state["header_ocr_rotation_warnings"]
     assert state["file_metadata"]["balance.pdf"]["file_digest"] == "abc"
     assert state["extraction_revisions"]["balance.pdf"] == 5

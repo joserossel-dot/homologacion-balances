@@ -200,11 +200,11 @@ st.session_state.setdefault("extraction_certifications", {"balance.pdf": Certifi
     totales_impresos={"debitos": 250},
 )})
 app._mostrar_advertencias_auxiliares(st.session_state.extraction_certifications["balance.pdf"])
-st.button("Otra acción")
+st.button("Otra acción", key="other_action")
 ''').run()
     assert not at.exception
     assert "no se certifican las ocho columnas" in at.warning[0].value
-    at.button[0].click().run()
+    at.button(key="other_action").click().run()
     assert not at.exception
     assert "Clasificación habilitada" in at.warning[0].value
 

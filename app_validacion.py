@@ -23,6 +23,7 @@ Funcionalidad:
 import hashlib
 import calendar
 import json
+import logging
 import math
 import os
 import re
@@ -113,11 +114,12 @@ CERTIFIABLE_CONTENT_VERSION = "certifiable_rows.v1"
 # Incrementar cuando cambie la interpretación de filas o columnas.  La sesión
 # de Streamlit puede sobrevivir a una reconstrucción del contenedor y no debe
 # reutilizar una extracción producida por una versión anterior del parser.
-# v3 incorpora correcciones de segmentación OCR (páginas de firma, URL de pie
-# y separadores verticales leídos dentro de importes). Obliga a recalcular los
-# resultados de una sesión anterior sin alterar archivo, páginas ni metadata.
-EXTRACTION_PIPELINE_VERSION = "ocr_rows_columns.v3"
+# v4 incorpora la contingencia visible de rotación OCR. Obliga a recalcular
+# resultados derivados sin alterar archivo, páginas ni metadata.
+EXTRACTION_PIPELINE_VERSION = "ocr_rows_columns.v4"
 AUTH_STAGING_VALUES = frozenset({"", "0", "false", "off", "disabled", "staging"})
+
+LOGGER = logging.getLogger(__name__)
 
 
 def _auth_enforced() -> bool:
@@ -3306,6 +3308,7 @@ def _limpiar_estado_derivado_extraccion(filename: str) -> bool:
         "extraction_pending", "extraction_resolved",
         "extraction_certifications", "classified_source_snapshots",
         "processed_at", "quality_controls", "depreciation_reclassifications",
+        "header_ocr_rotation_warnings",
     )
     changed = False
     for state_key in derived_state_keys:
@@ -3412,7 +3415,11 @@ def _confirmar_alcance_documentos(archivos) -> bool:
                     selections[archivo.name] = list(range(1, count + 1)) if mode == "Todas" else parse_pages(text, count)
                 except ValueError as exc:
                     errors.append(f"{archivo.name}: {exc}")
-            submitted = st.form_submit_button("Confirmar páginas y continuar", use_container_width=True)
+            submitted = st.form_submit_button(
+                "Confirmar páginas y continuar",
+                key="document_scope_submit",
+                use_container_width=True,
+            )
 
         if submitted:
             if errors:
@@ -4432,7 +4439,9 @@ def _visor_documento(
 
 
 @st.cache_data(max_entries=12, show_spinner=False)
-def _extraer_lineas_encabezado_cached(contenido: bytes, suffix: str) -> list[str]:
+def _extraer_lineas_encabezado_cached(
+    contenido: bytes, suffix: str,
+) -> tuple[list[str], dict[str, str] | None]:
     import tempfile
     if suffix == '.pdf':
         try:
@@ -4444,19 +4453,46 @@ def _extraer_lineas_encabezado_cached(contenido: bytes, suffix: str) -> list[str
             # utilizable. Así evitamos omitir OCR cuando la razón social o el
             # período real solo están disponibles en la imagen escaneada.
             if extraer_metadata(lineas).confianza >= (2 / 3):
-                return lineas
+                return lineas, None
 
             png = render_page(contenido, 1)
             with tempfile.TemporaryDirectory() as tmpdir:
                 imagen = Path(tmpdir) / "encabezado.png"
                 imagen.write_bytes(png)
-                rotacion = detectar_rotacion_osd(imagen)
+                incidencias_rotacion: list[str] = []
+                try:
+                    rotacion = detectar_rotacion_osd(imagen)
+                except Exception as exc:
+                    incidencias_rotacion.append(f"osd:{type(exc).__name__}")
+                    rotacion = None
                 if rotacion is None:
-                    rotacion = detectar_rotacion_heuristica(imagen)
+                    try:
+                        rotacion = detectar_rotacion_heuristica(imagen)
+                    except Exception as exc:
+                        incidencias_rotacion.append(
+                            f"heuristica:{type(exc).__name__}",
+                        )
+                        rotacion = None
+                contingencia = rotacion is None
+                if contingencia:
+                    rotacion = 0
+                    LOGGER.warning(
+                        "header_ocr_rotation_fallback rotation=0 stages=%s",
+                        ",".join(incidencias_rotacion) or "sin_resultado",
+                    )
                 texto_ocr = ocr_pagina(imagen, rotacion, psm=6)
-            return texto_ocr.split('\n')[:60]
-        except Exception:
-            return []
+            advertencia = (
+                {
+                    "tipo": "rotacion_ocr_contingencia",
+                    "rotacion_aplicada": "0",
+                    "detalle": ",".join(incidencias_rotacion) or "sin_resultado",
+                }
+                if contingencia else None
+            )
+            return texto_ocr.split('\n')[:60], advertencia
+        except Exception as exc:
+            LOGGER.warning("header_ocr_extraction_failed error=%s", type(exc).__name__)
+            return [], {"tipo": "encabezado_ocr_no_disponible"}
     else:
         try:
             df = pd.read_excel(BytesIO(contenido), header=None, nrows=15).fillna('')
@@ -4465,16 +4501,29 @@ def _extraer_lineas_encabezado_cached(contenido: bytes, suffix: str) -> list[str
                 vals = [str(v) for v in row if str(v) not in ('nan', 'None', '')]
                 if vals:
                     lineas.append(' '.join(vals))
-            return lineas
-        except Exception:
-            return []
+            return lineas, None
+        except Exception as exc:
+            LOGGER.warning("header_excel_extraction_failed error=%s", type(exc).__name__)
+            return [], {"tipo": "encabezado_excel_no_disponible"}
 
 
 def _extraer_lineas_encabezado(archivo) -> list[str]:
     suffix = Path(archivo.name).suffix.lower()
     archivo.seek(0)
     contenido = _contenido_para_extraer(archivo)
-    return _extraer_lineas_encabezado_cached(contenido, suffix)
+    lineas, advertencia = _extraer_lineas_encabezado_cached(contenido, suffix)
+    advertencias = st.session_state.setdefault("header_ocr_rotation_warnings", {})
+    if advertencia:
+        advertencias[archivo.name] = advertencia
+        if advertencia.get("tipo") == "rotacion_ocr_contingencia":
+            st.warning(
+                "No fue posible detectar la rotación del encabezado. Se aplicó OCR "
+                "con rotación 0° por contingencia. Revise razón social y período "
+                "contra el documento original antes de continuar."
+            )
+    else:
+        advertencias.pop(archivo.name, None)
+    return lineas
 
 
 def _documento_no_es_balance(signature) -> bool:
@@ -4978,6 +5027,18 @@ def _mostrar_correccion_extraccion(filename: str) -> None:
         "La extracción aún no puede certificarse. La clasificación está pausada "
         "para evitar que una lectura incorrecta llegue al balance homologado."
     )
+    advertencia_rotacion = st.session_state.get(
+        "header_ocr_rotation_warnings", {},
+    ).get(filename)
+    if (
+        advertencia_rotacion
+        and advertencia_rotacion.get("tipo") == "rotacion_ocr_contingencia"
+    ):
+        st.warning(
+            "No fue posible detectar la rotación del encabezado. Se aplicó OCR "
+            "con rotación 0° por contingencia. Revise razón social y período "
+            "contra el documento original antes de continuar."
+        )
     if st.button(
         "Volver a extraer este documento con el motor actual",
         key=f"reextract_{filename}_{revision}",
@@ -5154,7 +5215,10 @@ def _mostrar_correccion_extraccion(filename: str) -> None:
                 value=False,
                 key=f"man_conf_{filename}",
             )
-            agregar_manual = st.form_submit_button("Agregar cuenta a la extracción")
+            agregar_manual = st.form_submit_button(
+                "Agregar cuenta a la extracción",
+                key=f"manual_submit_{filename}",
+            )
         if agregar_manual:
             ok, msg, nueva = _ejecutar_incorporar_cuenta_omitida(
                 filename,

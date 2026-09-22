@@ -1144,7 +1144,7 @@ def test_apptest_formulario_ingreso_cuenta_omitida_flujo_completo(tmp_path):
     at.checkbox(key=f"man_conf_{fname}").check()
 
     # Enviar formulario
-    at.button[0].click().run()
+    at.button(key=f"manual_submit_{fname}").click().run()
 
     # Verificar recuperación de fila, recertificación exitosa y snapshot prístino inmutable
     cuentas_actuales = at.session_state["extraction_pending"][fname].cuentas

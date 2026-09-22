@@ -85,9 +85,14 @@ def test_encabezado_pdf_escaneado_usa_ocr_para_detectar_periodos(monkeypatch):
         def __exit__(self, *_args):
             return None
 
+    app_validacion._extraer_lineas_encabezado_cached.clear()
+    state = {}
+    monkeypatch.setattr(app_validacion.st, "session_state", state)
+    monkeypatch.setattr(app_validacion.st, "warning", lambda _message: None)
     monkeypatch.setattr(app_validacion, "_contenido_para_extraer", lambda _archivo: b"pdf")
     monkeypatch.setattr("pdfplumber.open", lambda _contenido: FakePDF())
     monkeypatch.setattr(app_validacion, "render_page", lambda _contenido, _pagina: b"png")
+    monkeypatch.setattr(app_validacion, "detectar_rotacion_osd", lambda _imagen: 0)
     monkeypatch.setattr(
         app_validacion, "ocr_pagina",
         lambda _imagen, _rotacion, psm=6: (
@@ -101,6 +106,100 @@ def test_encabezado_pdf_escaneado_usa_ocr_para_detectar_periodos(monkeypatch):
     assert app_validacion._detectar_periodos_comparativos(lineas, 2026) == (
         "2018", "2017",
     )
+
+
+def test_encabezado_ocr_continua_a_cero_y_marca_contingencia_rotacion(
+    monkeypatch, caplog,
+):
+    class Upload(BytesIO):
+        name = "auditado.pdf"
+
+    class FakePage:
+        def extract_text(self):
+            return ""
+
+    class FakePDF:
+        pages = [FakePage()]
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+    app_validacion._extraer_lineas_encabezado_cached.clear()
+    state = {}
+    warnings = []
+    monkeypatch.setattr(app_validacion.st, "session_state", state)
+    monkeypatch.setattr(app_validacion.st, "warning", warnings.append)
+    monkeypatch.setattr(app_validacion, "_contenido_para_extraer", lambda _archivo: b"otro-pdf")
+    monkeypatch.setattr("pdfplumber.open", lambda _contenido: FakePDF())
+    monkeypatch.setattr(app_validacion, "render_page", lambda _contenido, _pagina: b"png")
+    monkeypatch.setattr(
+        app_validacion, "detectar_rotacion_osd",
+        lambda _imagen: (_ for _ in ()).throw(RuntimeError("osd")),
+    )
+    monkeypatch.setattr(
+        app_validacion, "detectar_rotacion_heuristica",
+        lambda _imagen: (_ for _ in ()).throw(RuntimeError("heuristica")),
+    )
+    rotations = []
+    monkeypatch.setattr(
+        app_validacion, "ocr_pagina",
+        lambda _imagen, rotation, psm=6: (
+            rotations.append(rotation)
+            or "Estado de Situación Financiera\\nAl 31 de diciembre de 2018 y 2017"
+        ),
+    )
+
+    lineas = app_validacion._extraer_lineas_encabezado(Upload(b"pdf"))
+
+    assert rotations == [0]
+    assert app_validacion._detectar_periodos_comparativos(lineas, 2026) == (
+        "2018", "2017",
+    )
+    assert state["header_ocr_rotation_warnings"]["auditado.pdf"]["rotacion_aplicada"] == "0"
+    assert warnings and "rotación 0° por contingencia" in warnings[0]
+    assert "header_ocr_rotation_fallback" in caplog.text
+
+
+def test_reextraccion_exitosa_limpia_advertencia_previa_de_rotacion(monkeypatch):
+    class Upload(BytesIO):
+        name = "auditado.pdf"
+
+    class FakePage:
+        def extract_text(self):
+            return ""
+
+    class FakePDF:
+        pages = [FakePage()]
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+    app_validacion._extraer_lineas_encabezado_cached.clear()
+    state = {
+        "header_ocr_rotation_warnings": {
+            "auditado.pdf": {"rotacion_aplicada": "0"},
+        },
+    }
+    monkeypatch.setattr(app_validacion.st, "session_state", state)
+    monkeypatch.setattr(app_validacion.st, "warning", lambda _message: None)
+    monkeypatch.setattr(app_validacion, "_contenido_para_extraer", lambda _archivo: b"pdf-ok")
+    monkeypatch.setattr("pdfplumber.open", lambda _contenido: FakePDF())
+    monkeypatch.setattr(app_validacion, "render_page", lambda _contenido, _pagina: b"png")
+    monkeypatch.setattr(app_validacion, "detectar_rotacion_osd", lambda _imagen: 270)
+    monkeypatch.setattr(
+        app_validacion, "ocr_pagina",
+        lambda _imagen, rotation, psm=6: "Al 31 de diciembre de 2023",
+    )
+
+    app_validacion._extraer_lineas_encabezado(Upload(b"pdf"))
+
+    assert "auditado.pdf" not in state["header_ocr_rotation_warnings"]
 
 
 def test_valor_fila_periodo_conserva_actual_y_anterior():
