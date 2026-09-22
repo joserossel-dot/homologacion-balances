@@ -112,6 +112,25 @@ def test_pat04_rechazado_cuando_no_explica_diferencia():
     assert diag["diferencia"] == 300.0
 
 
+def test_pat04_ocr_admite_residuo_minimo_sin_ocultar_descuadre_material():
+    """Un residuo OCR de pocos pesos no debe impedir incorporar una pérdida que cierra el balance."""
+    cat = catalogo_local()
+    filas = [
+        _crear_fila("Caja y Bancos", 1_374_719_360.0, "activo", "AC.01"),
+        _crear_fila("Capital", 1_437_541_691.0, "pasivo", "PAT.01"),
+        _crear_fila("Ventas", 557_284_683.0, "ganancia", "ER.01"),
+        _crear_fila("Costos", 620_107_008.0, "perdida", "ER.02"),
+    ]
+    reporte = _preparar_periodo_reporte(
+        pd.DataFrame(filas), cat, "2021", 0, tolerancia=10.0,
+    )
+
+    assert reporte["diagnostico"]["pat04_status"] == "derivado_incorporado"
+    assert reporte["diagnostico"]["cuadra"] is True
+    pat04 = reporte["agrupado"].query("codigo_clasificado == 'PAT.04'").iloc[0]
+    assert pat04["monto_total"] == -62_822_325.0
+
+
 def test_pat04_explicito_no_se_duplica():
     """Si el balance ya contiene PAT.04 explícito, se conserva sin inyectar otro derivado."""
     cat = catalogo_local()
@@ -302,6 +321,28 @@ def test_garbage_patterns_filtra_encabezados_y_preserva_saldos():
     assert _es_linea_basura("1.1.01 Caja y Bancos 2.019") is False
     assert _es_linea_basura("Gastos Diciembre 2.019 50.000") is False
     assert _es_linea_basura("PROVISION BENEFICIOS EMPLEADOS 531.474") is False
+
+
+def test_garbage_patterns_descarta_pie_kame_ocr_con_cifras_adjuntas():
+    assert _es_linea_basura(
+        "httos://www.kameone.cl/Reporte/EmisionBalanceGeneral?"
+        "fechaD=01/01/2023 fechaH=31/12/2023 emision=8 habilitar=S 1/4"
+    ) is True
+    assert _es_linea_basura("5 1 1 1 49 6 1593 2150 29 17 2/4") is True
+
+
+def test_pagina_de_firmas_ocr_no_se_trata_como_tabla():
+    from parser_universal import _es_pagina_firmas_ocr
+
+    assert _es_pagina_firmas_ocr(
+        "RUT: 13.884.014-6\nCONTADOR GENERAL\nVOB Gerencia\nFirma"
+    ) is True
+    assert _es_pagina_firmas_ocr(
+        "KAME ONE Balance General\nwww.kameone.cl/Reporte/EmisionBalanceGeneral 4/4"
+    ) is True
+    assert _es_pagina_firmas_ocr(
+        "CUENTA DEBITOS CREDITOS SALDO ACTIVO\n1.01.01 Caja 100 0 100 100"
+    ) is False
 
 
 def test_garbage_patterns_filtra_firmas_y_auditores():

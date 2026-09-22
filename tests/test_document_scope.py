@@ -78,3 +78,45 @@ def test_extractor_receives_only_selected_pdf(monkeypatch):
     monkeypatch.setattr(app.st, "session_state", {"document_pages": {"balance.pdf": [2]}})
     assert page_count(app._contenido_para_extraer(source)) == 1
     assert page_count(source.getvalue()) == 3
+
+
+def test_pipeline_update_invalidates_only_derived_result_for_same_document(monkeypatch):
+    import app_validacion as app
+
+    source = BytesIO(pdf_bytes())
+    source.name = "balance.pdf"
+    other = "otro.xlsx"
+    state = {
+        "resultados": {source.name: "resultado antiguo", other: "conservar"},
+        "extraction_certifications": {source.name: "certificado antiguo", other: "conservar"},
+        "document_intel": {source.name: "intel antiguo"},
+        "extraction_revisions": {source.name: 2},
+        "extraction_pipeline_versions": {source.name: "ocr_rows_columns.v1"},
+    }
+    monkeypatch.setattr(app.st, "session_state", state)
+
+    assert app._invalidar_extracciones_de_version_anterior([source]) is True
+    assert source.name not in state["resultados"]
+    assert state["resultados"][other] == "conservar"
+    assert source.name not in state["extraction_certifications"]
+    assert state["extraction_revisions"][source.name] == 3
+    assert state["extraction_pipeline_versions"][source.name] == app.EXTRACTION_PIPELINE_VERSION
+
+
+def test_manual_reextraction_clears_only_derived_state(monkeypatch):
+    import app_validacion as app
+
+    state = {
+        "resultados": {"balance.pdf": "antiguo", "otro.pdf": "conservar"},
+        "extraction_pending": {"balance.pdf": "pendiente"},
+        "extraction_revisions": {"balance.pdf": 4},
+        "file_metadata": {"balance.pdf": {"file_digest": "abc"}},
+    }
+    monkeypatch.setattr(app.st, "session_state", state)
+
+    assert app._limpiar_estado_derivado_extraccion("balance.pdf") is True
+    assert "balance.pdf" not in state["resultados"]
+    assert state["resultados"]["otro.pdf"] == "conservar"
+    assert "balance.pdf" not in state["extraction_pending"]
+    assert state["file_metadata"]["balance.pdf"]["file_digest"] == "abc"
+    assert state["extraction_revisions"]["balance.pdf"] == 5

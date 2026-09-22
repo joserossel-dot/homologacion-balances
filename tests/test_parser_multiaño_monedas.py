@@ -7,6 +7,7 @@ from account_qualification import qualify_cuentas, safe_mode_enabled
 from parser_universal import (
     OrigenColumna,
     ParserPDF,
+    _es_cierre_final_balance,
     _agrupar_palabras_por_linea,
     certificar_extraccion_columnas,
     parsear_excel,
@@ -60,6 +61,17 @@ def test_parsear_monto_ocr_acepta_separador_local_inequivoco():
     """Una celda OCR no se pierde si discrepa del separador global de la página."""
     assert parsear_monto("7.898.698", ",") == 7_898_698.0
     assert parsear_monto("7,898,698", ".") == 7_898_698.0
+
+
+def test_token_ocr_recupera_barra_intermedia_de_monto_sin_tocar_fechas():
+    from parser_universal import normalizar_token_ocr
+
+    assert normalizar_token_ocr("20/839.810") == "20.839.810"
+    assert normalizar_token_ocr("01/01/2023") == "01/01/2023"
+
+
+def test_sumas_iguales_cierra_tabla_tributaria_antes_de_firmas():
+    assert _es_cierre_final_balance("SUMAS IGUALES") is True
 
 
 def test_tolerancia_vertical_une_offset_tipografico():

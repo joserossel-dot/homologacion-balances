@@ -110,6 +110,13 @@ MESES_SELECCION = [
 ]
 
 CERTIFIABLE_CONTENT_VERSION = "certifiable_rows.v1"
+# Incrementar cuando cambie la interpretación de filas o columnas.  La sesión
+# de Streamlit puede sobrevivir a una reconstrucción del contenedor y no debe
+# reutilizar una extracción producida por una versión anterior del parser.
+# v3 incorpora correcciones de segmentación OCR (páginas de firma, URL de pie
+# y separadores verticales leídos dentro de importes). Obliga a recalcular los
+# resultados de una sesión anterior sin alterar archivo, páginas ni metadata.
+EXTRACTION_PIPELINE_VERSION = "ocr_rows_columns.v3"
 AUTH_STAGING_VALUES = frozenset({"", "0", "false", "off", "disabled", "staging"})
 
 
@@ -3292,6 +3299,45 @@ def _contenido_para_extraer(archivo) -> bytes:
     return content
 
 
+def _limpiar_estado_derivado_extraccion(filename: str) -> bool:
+    """Elimina sólo los resultados que se derivan de un archivo cargado."""
+    derived_state_keys = (
+        "resultados", "document_intel", "document_families",
+        "extraction_pending", "extraction_resolved",
+        "extraction_certifications", "classified_source_snapshots",
+        "processed_at", "quality_controls", "depreciation_reclassifications",
+    )
+    changed = False
+    for state_key in derived_state_keys:
+        state = st.session_state.get(state_key)
+        if isinstance(state, dict) and filename in state:
+            state.pop(filename, None)
+            changed = True
+    if changed:
+        revisions = st.session_state.setdefault("extraction_revisions", {})
+        revisions[filename] = revisions.get(filename, 0) + 1
+    return changed
+
+
+def _invalidar_extracciones_de_version_anterior(archivos) -> bool:
+    """Descarta resultados derivados por una versión anterior del extractor.
+
+    El archivo, sus páginas seleccionadas y su huella permanecen intactos. Así
+    se evita que una sesión reutilice cuentas, certificaciones o controles
+    calculados antes de una corrección del parser para el mismo PDF.
+    """
+    versions = st.session_state.setdefault("extraction_pipeline_versions", {})
+    refreshed = False
+    for archivo in archivos:
+        name = archivo.name
+        if versions.get(name) == EXTRACTION_PIPELINE_VERSION:
+            continue
+        if _limpiar_estado_derivado_extraccion(name):
+            refreshed = True
+        versions[name] = EXTRACTION_PIPELINE_VERSION
+    return refreshed
+
+
 def _confirmar_alcance_documentos(archivos) -> bool:
     if len({a.name for a in archivos}) != len(archivos):
         st.error("Hay archivos con el mismo nombre. Renómbrelos para mantener separadas sus páginas y correcciones.")
@@ -3525,6 +3571,12 @@ def main():
     except (ProcessPersistenceError, AuthorizationDenied, ValueError) as exc:
         st.error(f"No se pudo recuperar el procesamiento durable: {exc}")
         st.stop()
+
+    if _invalidar_extracciones_de_version_anterior(archivos):
+        st.info(
+            "Se actualizaron resultados generados con una versión anterior del extractor. "
+            "El documento se procesará nuevamente con sus páginas ya seleccionadas."
+        )
 
     if not _confirmar_alcance_documentos(archivos):
         return
@@ -4926,6 +4978,19 @@ def _mostrar_correccion_extraccion(filename: str) -> None:
         "La extracción aún no puede certificarse. La clasificación está pausada "
         "para evitar que una lectura incorrecta llegue al balance homologado."
     )
+    if st.button(
+        "Volver a extraer este documento con el motor actual",
+        key=f"reextract_{filename}_{revision}",
+        help=(
+            "Descarta sólo las filas y controles derivados de esta lectura. "
+            "Conserva el archivo y las páginas seleccionadas."
+        ),
+    ):
+        _limpiar_estado_derivado_extraccion(filename)
+        st.session_state.setdefault("extraction_pipeline_versions", {})[filename] = (
+            EXTRACTION_PIPELINE_VERSION
+        )
+        st.rerun()
     rows = []
     certification = getattr(resultado, "certificacion_extraccion", None)
     if getattr(certification, "estado", "") == "no_evaluable":
@@ -6850,8 +6915,23 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
     st.button('Revisar o cambiar clasificaciones', on_click=_solicitar_revision_completa,
               args=(archivo_nombre,), use_container_width=True)
     periodos = _periodos_seleccionados()
+    certificacion_previa = st.session_state.get(
+        "extraction_certifications", {},
+    ).get(archivo_nombre)
+    # Las cifras impresas por OCR pueden tener una diferencia residual de unos
+    # pocos pesos. No se relaja la validación de documentos digitales: sólo se
+    # admite la misma tolerancia limitada al decidir si el resultado del
+    # ejercicio explica exactamente la ecuación patrimonial de un OCR.
+    tolerancia_periodo = (
+        10.0
+        if str(getattr(certificacion_previa, "metodo", "")).startswith("ocr_")
+        else 1.0
+    )
     reportes_periodo = [
-        _preparar_periodo_reporte(df, catalogo, periodo, posicion)
+        _preparar_periodo_reporte(
+            df, catalogo, periodo, posicion,
+            tolerancia=tolerancia_periodo,
+        )
         for posicion, periodo in enumerate(periodos)
     ]
     ajustes_depreciacion, pendientes_depreciacion = (

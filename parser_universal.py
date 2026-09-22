@@ -683,6 +683,7 @@ def _es_cierre_final_balance(nombre: str) -> bool:
     normalized = re.sub(r"\s+", " ", normalized).strip()
     return normalized in {
         "TOTALES", "TOTAL GENERAL", "SUMAS TOTALES", "TOTALES IGUALES",
+        "SUMAS IGUALES",
     }
 
 
@@ -3291,6 +3292,15 @@ def _es_token_cero_ocr_en_celda(token: str) -> bool:
 def normalizar_token_ocr(token: str) -> str:
     if _OCR_CERO.match(token):
         return '0'
+    # En balances Kame escaneados, una separación vertical puede leerse como
+    # barra dentro de un importe, por ejemplo ``20/839.810``. Se acepta solo
+    # cuando a la derecha existe un agrupamiento de miles completo, para no
+    # confundir fechas ni códigos con montos.
+    token = re.sub(
+        r"(?<=\d)/(?=\d{3}(?:[.,]\d{3})+\b)",
+        ".",
+        token,
+    )
     # Los dos puntos aparecen como sustituto del punto de miles en escaneos
     # tenues (p. ej. ``3.732:989.407``). Se limita al contexto entre dígitos.
     return re.sub(r"(?<=\d):(?=\d)", ".", token)
@@ -3441,7 +3451,70 @@ def _es_linea_basura(linea: str) -> bool:
     for patron in GARBAGE_PATTERNS:
         if patron.match(linea):
             return True
+    # En reportes Kame el pie de cada página incluye una URL de emisión. En
+    # OCR esa URL puede venir con cifras de navegación o fragmentos de la
+    # tabla adjuntos, por lo que no coincide con el patrón de URL completa.
+    # Nunca es una cuenta: se descarta antes de que sus números se interpreten
+    # como importes contables.
+    normalizada = re.sub(r"\s+", "", linea).lower()
+    if (
+        re.search(r"h(?:tt|tt?o)s?[:/]", normalizada)
+        or "kameone" in normalizada
+        or "emisionbalancegeneral" in normalizada
+    ):
+        return True
+    # Un renglón compuesto solamente por cifras, signos y separadores sin un
+    # código contable identificable es navegación o ruido de OCR, no una
+    # glosa. Los códigos válidos se preservan mediante PATRON_CODIGO_OCR.
+    if (
+        re.fullmatch(r"[\d\s.,/:;|\\\\'\"()\-_=]+", linea.strip())
+        and not PATRON_CODIGO_OCR.match(linea.strip())
+    ):
+        return True
     return False
+
+
+def _es_pagina_firmas_ocr(texto: str) -> bool:
+    """Identifica una página de firmas sin tabla contable.
+
+    Una página final de firmas puede contener RUT, nombres, la URL de emisión
+    y números aislados. No aporta cuentas y no debe alimentar la certificación
+    ni la cola de corrección. Se exige la ausencia de encabezados de columnas
+    o códigos contables para no omitir una última página que sí tenga tabla.
+    """
+    normalizado = _sin_acentos(texto or "").lower()
+    firmas = sum(
+        marcador in normalizado
+        for marcador in (
+            "firma", "contador", "representante", "gerencia", "gerente",
+            "vob", "auditor", "rut",
+        )
+    )
+    indicadores_tabla = sum(
+        bool(re.search(rf"\b{marcador}\b", normalizado))
+        for marcador in (
+            "debito", "credito", "saldo", "activo", "pasivo", "perdida",
+            "ganancia",
+        )
+    )
+    # Un RUT tiene una forma visual parecida a un código 1.2.3.4, pero no
+    # transforma una página de firmas en una tabla.
+    sin_ruts = re.sub(
+        r"\b\d{1,2}[.,-]\d{3}[.,-]\d{3}\s*[- ]?\s*[0-9k]\b",
+        "",
+        normalizado,
+    )
+    # Para esta decisión de página no se consideran separadores '/': fechas
+    # como 7/5/24 no son códigos de cuenta. Los códigos de balance de este
+    # extractor se preservan con punto o coma.
+    tiene_codigos = bool(re.search(
+        r"(?:\d{1,2}[.,]){2,4}\d{1,2}(?:\s|$)", sin_ruts,
+    ))
+    pie_kame = (
+        "kameone" in normalizado
+        and bool(re.search(r"\b\d+\s*/\s*\d+\b", normalizado))
+    )
+    return (firmas >= 2 or pie_kame) and indicadores_tabla == 0 and not tiene_codigos
 
 # OCR confunde '.' y ',' dentro de códigos de cuenta tipo X.XX.XX.XX,
 # produciendo cosas como "1.1.01,01" o "1,1,08,05". Se detecta un prefijo
@@ -5799,7 +5872,8 @@ class ParserPDF:
                 normalizar_linea_ocr_tabla(line)
                 for line in texto.splitlines()
                 if normalizar_linea_ocr_tabla(line).strip()
-            ]
+        ]
+
 
     @staticmethod
     def _debe_corregir_rotacion(context: Optional[ExtractionContext]) -> bool:
@@ -5890,6 +5964,12 @@ class ParserPDF:
                     timeout_events=page_timeout_events, page_number=pagina,
                 )
                 texto_principal = texto
+                if _es_pagina_firmas_ocr(texto_principal):
+                    self._ocr_advertencias.append(
+                        f"Página {pagina}: se omitió por contener solo firmas y "
+                        "metadatos, sin tabla contable."
+                    )
+                    continue
                 tabla_coordenadas_usada = False
                 if words_tsv:
                     tabla_ocr, detected_centers = _extraer_tabla_balance_por_coordenadas(
