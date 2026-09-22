@@ -9,6 +9,7 @@ from scripts.certify_local_corpus import (
     _detected_dimensions,
     _has_execution_failure,
     build_corpus_measurement,
+    certify,
     certify_isolated,
     evaluate_gold_rows,
     evaluate_expectations,
@@ -71,6 +72,149 @@ def _result(*, valid=True, result=100, unclassified=0):
             }
         ],
     }
+
+
+def test_certify_keeps_account_snapshot_under_accounts_schema_key(monkeypatch, tmp_path):
+    """El contrato público usa ``accounts``; no admite una clave alternativa.
+
+    Evita que un consumidor de la certificación confunda el nombre del campo
+    con una implementación interna y concluya que cuentas presentes faltan.
+    """
+    account = CuentaRaw(
+        linea=1,
+        codigo="110101",
+        nombre="Caja",
+        monto=100.0,
+        origen_columna=OrigenColumna.ACTIVO,
+        montos_columnas={"activo": 100.0},
+    )
+    monkeypatch.setattr(
+        "scripts.certify_local_corpus._parse",
+        lambda _path: ([account], None, [], False, 0, ["2024"], ["CLP"], []),
+    )
+    document = tmp_path / "esquema.pdf"
+    document.write_bytes(b"fixture de contrato")
+
+    result = certify(document, HomologationPipeline(db_path=tmp_path / "schema.db"))
+
+    # 1. Clave estable obligatoria
+    assert "accounts" in result, "El contrato público de certify() debe incluir la clave 'accounts'"
+    assert "accounts_snapshot" not in result, "No debe aparecer la clave alternativa incompatible 'accounts_snapshot'"
+
+    # 2. Tipo de dato estricto
+    assert isinstance(result["accounts"], list), "El tipo de 'accounts' debe ser estrictamente list"
+    assert len(result["accounts"]) == 1
+
+    # 3. Campos mínimos por cuenta y tipos de datos
+    acc = result["accounts"][0]
+    assert isinstance(acc, dict), "Cada elemento de 'accounts' debe ser un dict"
+
+    campos_minimos = {"line", "name", "requires_review"}
+    assert campos_minimos <= set(acc), f"Faltan campos mínimos en la cuenta: {campos_minimos - set(acc)}"
+
+    # 4. Verificación de tipos de campos obligatorios
+    assert isinstance(acc["line"], int)
+    assert isinstance(acc["name"], str)
+    assert isinstance(acc["requires_review"], bool)
+    assert isinstance(acc["account_code"], str)
+    assert isinstance(acc["accounting_hierarchy"], str)
+    assert isinstance(acc["origin"], str)
+    assert isinstance(acc["amount"], (int, float))
+    assert isinstance(acc["is_total"], bool)
+    assert isinstance(acc["confidence"], (int, float))
+    assert isinstance(acc["column_amounts"], dict)
+    assert isinstance(acc["period_amounts"], dict)
+    assert isinstance(acc["derived_columns"], list)
+    assert isinstance(acc["extraction_review_reasons"], list)
+    assert isinstance(acc["standard_code"], str)
+    assert isinstance(acc["classification_method"], str)
+
+
+def test_certify_contract_fails_when_accounts_key_missing_or_renamed():
+    """Valida que los consumidores y verificadores fallen si 'accounts' falta o se renombra."""
+    def validar_contrato_certify(payload: dict) -> None:
+        if "accounts" not in payload:
+            raise KeyError("Falta la clave obligatoria 'accounts'")
+        if "accounts_snapshot" in payload:
+            raise KeyError("Clave prohibida 'accounts_snapshot' detectada")
+        if not isinstance(payload["accounts"], list):
+            raise TypeError("La clave 'accounts' debe ser una lista")
+        for acc in payload["accounts"]:
+            if not isinstance(acc, dict):
+                raise TypeError("Cada cuenta debe ser un diccionario")
+            for campo in ("line", "name", "requires_review"):
+                if campo not in acc:
+                    raise KeyError(f"Falta el campo mínimo '{campo}' en la cuenta")
+
+    # Caso 1: Falta 'accounts'
+    with pytest.raises(KeyError, match="Falta la clave obligatoria 'accounts'"):
+        validar_contrato_certify({"status": "ok", "raw_accounts": 1})
+
+    # Caso 2: Clave incompatible 'accounts_snapshot'
+    with pytest.raises(KeyError, match="Clave prohibida 'accounts_snapshot' detectada"):
+        validar_contrato_certify({"accounts": [], "accounts_snapshot": []})
+
+    # Caso 3: Tipo de datos incorrecto para 'accounts'
+    with pytest.raises(TypeError, match="La clave 'accounts' debe ser una lista"):
+        validar_contrato_certify({"accounts": {"1": "Caja"}})
+
+    # Caso 4: Faltan campos mínimos en un elemento de 'accounts'
+    with pytest.raises(KeyError, match="Falta el campo mínimo 'requires_review'"):
+        validar_contrato_certify({"accounts": [{"line": 1, "name": "Caja"}]})
+
+    with pytest.raises(KeyError, match="Falta el campo mínimo 'name'"):
+        validar_contrato_certify({"accounts": [{"line": 1, "requires_review": False}]})
+
+    with pytest.raises(KeyError, match="Falta el campo mínimo 'line'"):
+        validar_contrato_certify({"accounts": [{"name": "Caja", "requires_review": False}]})
+
+
+def test_certify_accounts_contract_multiple_account_types(monkeypatch, tmp_path):
+    """Verifica el contrato con cuentas de detalle, totales, saldos cero y sospechosas."""
+    c_detalle = CuentaRaw(linea=1, codigo="1101", nombre="Caja", monto=5000.0, origen_columna=OrigenColumna.ACTIVO)
+    c_cero = CuentaRaw(linea=2, codigo="1102", nombre="Fondo Fijo", monto=0.0, origen_columna=OrigenColumna.ACTIVO)
+    c_total = CuentaRaw(linea=3, codigo=None, nombre="TOTAL ACTIVO", monto=5000.0, es_total=True)
+    c_sospechosa = CuentaRaw(
+        linea=4, codigo=None, nombre="Caja 1000 Proveedores", monto=1000.0,
+        requiere_revision_extraccion=True, razones_revision_extraccion=["multiples_glosas_separadas_por_monto"],
+    )
+
+    accounts = [c_detalle, c_cero, c_total, c_sospechosa]
+    monkeypatch.setattr(
+        "scripts.certify_local_corpus._parse",
+        lambda _path: (accounts, None, [], False, 0, ["2024"], ["CLP"], []),
+    )
+    document = tmp_path / "multi_accounts.pdf"
+    document.write_bytes(b"fixture multi accounts")
+
+    result = certify(document, HomologationPipeline(db_path=tmp_path / "schema.db"))
+
+    assert "accounts" in result
+    assert len(result["accounts"]) == 4
+
+    for acc in result["accounts"]:
+        assert {"line", "name", "requires_review"} <= set(acc)
+        assert isinstance(acc["line"], int)
+        assert isinstance(acc["name"], str)
+        assert isinstance(acc["requires_review"], bool)
+
+    # Detalle clasificado o pendiente
+    assert result["accounts"][0]["line"] == 1
+    assert result["accounts"][0]["is_total"] is False
+
+    # Saldo cero
+    assert result["accounts"][1]["line"] == 2
+    assert result["accounts"][1]["amount"] == 0.0
+
+    # Total de control
+    assert result["accounts"][2]["line"] == 3
+    assert result["accounts"][2]["is_total"] is True
+    assert result["accounts"][2]["requires_review"] is False
+
+    # Sospechosa exige revisión
+    assert result["accounts"][3]["line"] == 4
+    assert result["accounts"][3]["requires_review"] is True
+    assert "multiples_glosas_separadas_por_monto" in result["accounts"][3]["extraction_review_reasons"]
 
 
 def test_expectations_validate_totals_result_and_account():
