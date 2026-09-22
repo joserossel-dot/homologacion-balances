@@ -302,7 +302,7 @@ def detectar_columna_nota_comparativa(
 
 def split_side_by_side(line: str) -> list[str]:
     tokens = line.split()
-    if len(tokens) < 6:
+    if len(tokens) < 4:
         return [line]
 
     # Una fila tributaria completa ya trae ocho celdas monetarias al final.
@@ -334,12 +334,41 @@ def split_side_by_side(line: str) -> list[str]:
             index + 1 < len(tokens)
             and re.search(r'[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]', tokens[index + 1])
         )
-        # Una ``o`` entre palabras es la conjunción de la glosa, no un cero
-        # OCR. Fuera de ese contexto se conserva el tratamiento numérico para
-        # celdas como ``... O`` o ``... o`` al final de una tabla.
-        o_es_conjuncion = t_stripped in ('o', 'O') and previous_is_text and next_is_text
+        prev_tok_norm = tokens[index - 1].upper().rstrip(".:") if index > 0 else ""
+        es_identificador_legal = prev_tok_norm in {
+            "ART", "ARTICULO", "ARTÍCULO", "LEY", "DFL", "DL", "CIRCULAR",
+            "RESOLUCION", "RESOLUCIÓN", "NOTA", "NOTAS", "LOCAL", "OFICINA", "DEPTO", "RUT",
+        }
+        # Una ``o`` entre palabras completas es la conjunción de la glosa, no un cero
+        # OCR. Si antecede o sucede a números, ceros o letras sueltas, es un cero de celda.
+        prev_is_word = bool(
+            index > 0
+            and len(tokens[index - 1]) >= 2
+            and re.search(r'[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]', tokens[index - 1])
+            and not re.search(r'\d', tokens[index - 1])
+        )
+        next_is_word = bool(
+            index + 1 < len(tokens)
+            and len(tokens[index + 1]) >= 2
+            and re.search(r'[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]', tokens[index + 1])
+            and not re.search(r'\d', tokens[index + 1])
+        )
+        o_es_conjuncion = t_stripped.lower() == 'o' and prev_is_word and next_is_word
+        # Un número de 1 o 2 dígitos entre palabras (ej. "5" en "Caja 5 Digitos" o "31" en "al 31 de diciembre")
+        # es parte de la glosa, no el importe de una columna contable.
+        es_digito_glosa_intermedio = bool(
+            previous_is_text
+            and next_is_text
+            and t_stripped.isdigit()
+            and len(t_stripped) <= 2
+        )
+        es_guion_intermedio = bool(
+            previous_is_text
+            and next_is_text
+            and t in ('-', '—', '−', ':')
+        )
         is_num = False
-        if (
+        if not es_identificador_legal and not es_digito_glosa_intermedio and not es_guion_intermedio and (
             re.search(r'\d', t_stripped)
             or t in ('-', '—', '−')
             or t_stripped in ('', '-', '—', '−')
@@ -364,8 +393,8 @@ def split_side_by_side(line: str) -> list[str]:
     # Build the collapsed pattern string
     pattern = "".join(g[0] for g in groups)
 
-    # Check if we have a side-by-side transition 'TNTN'
-    if "TNTN" in pattern:
+    # Check if we have a side-by-side transition 'TNT'
+    if "TNT" in pattern:
         t_count = 0
         split_token_idx = -1
         for g_idx, (g_type, g_start, g_end) in enumerate(groups):
@@ -394,7 +423,8 @@ def split_side_by_side(line: str) -> list[str]:
                     split_token_idx -= 1
             left_line = " ".join(tokens[:split_token_idx]).strip(' .-–—−')
             right_line = " ".join(tokens[split_token_idx:]).strip(' .-–—−')
-            return [left_line, right_line]
+            if left_line and right_line:
+                return [left_line, *split_side_by_side(right_line)]
 
     return [line]
 
@@ -411,8 +441,12 @@ def _es_token_codigo_inicio(linea: str) -> bool:
 
 
 def _linea_tiene_monto_final(linea: str) -> bool:
-    """Verifica si la línea termina con un token de importe monetario."""
-    return bool(re.search(r'(?:\d{1,3}(?:[.,]\d{3})+|\(?\d{4,}\)?|\b0\b)\s*$', linea.strip()))
+    """Verifica si la línea termina con un token de importe monetario o saldo contable."""
+    limpia = linea.strip()
+    return bool(re.search(
+        r'(?:(?:\(?\s*-?\s*\d[\d.,]*\s*\)?)|[-—−]|(?:\b[oO]\b))\s*$',
+        limpia,
+    ))
 
 
 def asociar_lineas_verticales(lineas: list[str]) -> list[str]:
@@ -1324,7 +1358,7 @@ _LEGAL_AND_TAX_IDENTIFIER = re.compile(
 )
 _LETTER_BLOCK = r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ][A-Za-zÁÉÍÓÚÜÑáéíóúüñ\s./()-]{2,}"
 _FUSED_LABELS = re.compile(
-    rf"(?P<left>{_LETTER_BLOCK}?)\s+(?P<amount>\(?-?\d{{1,3}}(?:[.,]\d{{3}})+(?:[.,]\d+)?\)?)\s+"
+    rf"(?P<left>{_LETTER_BLOCK}?)\s+(?P<amount>\(?-?\d+(?:[.,]\d+)*\)?)\s+"
     rf"(?P<right>{_LETTER_BLOCK})$"
 )
 
@@ -3391,8 +3425,7 @@ GARBAGE_PATTERNS: list[re.Pattern] = [
     ),
     # Títulos de estados auditados que incorporan años o duración del período.
     re.compile(
-        r'^\s*estados?\s+de\s+(?:situaci[oó]n\s+financiera|resultados?'
-        r'(?:\s+integrales?)?)\b.*$',
+        r'^\s*(?:estados?\s+de\s+(?:situaci[oó]n\s+financiera|resultados?(?:\s+integrales?)?)|balance(?:\s+(?:general|tributario|consolidado|clasificado|ocho\s+columnas)|\s*[-–—:]\s*|\s*$))\b.*$',
         re.I,
     ),
     re.compile(r'^\s*\d{1,2}/\d{1,2}/\d{2,4}\s*$'),
@@ -3824,13 +3857,26 @@ def parsear_linea(
     i = len(tokens) - 1
     while i >= 0 and len(montos_tokens) < 8:
         tok_norm = normalizar_token_ocr(tokens[i])
+        prev_tok = tokens[i - 1].upper().rstrip(".:") if i > 0 else ""
+        es_identificador_glosa = prev_tok in {
+            "ART", "ARTICULO", "ARTÍCULO", "LEY", "DFL", "DL", "CIRCULAR",
+            "RESOLUCION", "RESOLUCIÓN", "LOCAL", "OFICINA", "DEPTO", "RUT",
+        }
+        if es_identificador_glosa:
+            break
         if tok_norm == '-':
             montos_tokens.insert(0, '0')
             i -= 1
         elif PATRON_MONTOS.fullmatch(tok_norm.replace('$', '')):
             montos_tokens.insert(0, tok_norm.replace('$', ''))
             i -= 1
-        elif montos_tokens and len(tok_norm) <= 2 and not re.search(r'\d', tok_norm):
+        elif (
+            i > 0
+            and montos_tokens
+            and len(tok_norm) <= 2
+            and not re.search(r'\d', tok_norm)
+            and (_es_token_cero_ocr_en_celda(tokens[i]) or not tok_norm.isupper())
+        ):
             # En tablas de ocho columnas Tesseract ocasionalmente convierte
             # un cero intermedio en ruido breve (p. ej. ``ly``). Una vez
             # iniciada la cola numérica se conserva la posición como cero.
@@ -3843,7 +3889,7 @@ def parsear_linea(
     # La raya visual entre codigo y descripcion no forma parte de la cuenta.
     nombre = ' '.join(nombre_tokens).strip(' .-–—−')
 
-    if not nombre or len(nombre) < 3:
+    if not nombre or len(nombre) < 2:
         return None
 
     nombre_para_total = re.sub(r"^[^\w]+", "", nombre).strip()
