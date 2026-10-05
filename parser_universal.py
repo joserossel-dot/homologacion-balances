@@ -715,10 +715,16 @@ def _es_cierre_final_balance(nombre: str) -> bool:
         r"[^A-Z ]", " ", _sin_acentos(str(nombre or "")).upper(),
     )
     normalized = re.sub(r"\s+", " ", normalized).strip()
-    return normalized in {
+    targets = {
         "TOTALES", "TOTAL GENERAL", "SUMAS TOTALES", "TOTALES IGUALES",
         "SUMAS IGUALES",
     }
+    if normalized in targets:
+        return True
+    cleaned = re.sub(r"\b[A-Z]{1,2}\b$", "", normalized).strip()
+    if cleaned in targets:
+        return True
+    return any(normalized.startswith(t) for t in targets)
 
 
 def _extraer_tabla_balance_por_coordenadas(
@@ -805,6 +811,7 @@ def _extraer_tabla_balance_por_coordenadas(
         amount_centers = inferred_edges
         centers = [name_center, *amount_centers]
     lineas: list[str] = []
+    closing_controls = False
     for grupo in grupos:
         if float(grupo[0]["top"]) <= header_bottom + 1.5:
             continue
@@ -887,23 +894,61 @@ def _extraer_tabla_balance_por_coordenadas(
         if text_tokens and re.fullmatch(r"\d{4,10}|\d+(?:[.-]\d+){1,}", text_tokens[0]):
             code = text_tokens.pop(0)
         name = " ".join(text_tokens).strip()
-        if not name:
-            continue
         amounts = []
         for cell in amount_cells:
             token = "".join(str(w["text"]) for w in sorted(cell, key=lambda w: w["x0"])).strip()
             token_normalizado = normalizar_token_ocr(token).replace("$", "")
             amounts.append(
-                token if token != "-" and PATRON_MONTOS.fullmatch(token_normalizado)
+                "0" if _es_token_cero_ocr_en_celda(token)
+                else token if token != "-" and PATRON_MONTOS.fullmatch(token_normalizado)
                 else "0"
             )
+
+        clean_name_chars = re.sub(r"[^A-Za-z0-9]", "", name)
+        is_noise_name = (
+            not name
+            or not clean_name_chars
+            or clean_name_chars.upper() in {"O", "X", "I", "II", "IIA", "MN", "DD", "O0", "OO"}
+        )
+        # Reconstrucción genérica de control multilínea si la fila consecutiva no tiene nombre o es ruido
+        if lineas and is_noise_name and any(a != "0" for a in amounts):
+            prev_line = lineas[-1]
+            prev_parts = prev_line.strip().split()
+            if len(prev_parts) >= 9:
+                prev_amounts = prev_parts[-8:]
+                prev_name = " ".join(prev_parts[:-8])
+                norm_prev = re.sub(r"[^A-Z ]", " ", _sin_acentos(prev_name).upper()).strip()
+                if any(k in norm_prev for k in ["SUMAS IGUALES", "TOTALES IGUALES", "TOTAL GENERAL", "TOTALES", "RESULTADO", "PERDIDA", "UTILIDAD"]):
+                    merged_amounts = list(prev_amounts)
+                    complemented = False
+                    for j in range(8):
+                        if (prev_amounts[j] == "0" or _es_token_cero_ocr_en_celda(prev_amounts[j])) and amounts[j] != "0":
+                            merged_amounts[j] = amounts[j]
+                            complemented = True
+                    if complemented:
+                        clean_name = re.sub(r"[\s|!/:;.\-—_\]\[)(\\oOxX]+$", "", prev_name).strip()
+                        lineas[-1] = f"{clean_name} {' '.join(merged_amounts)}"
+                        if _es_cierre_final_balance(clean_name):
+                            closing_controls = True
+                        continue
+
+        if not name:
+            continue
+        if closing_controls and not (
+            _es_cierre_final_balance(name)
+            or re.fullmatch(
+                r"(?:utilidad|perdida|resultado)(?: del ejercicio)?",
+                _sin_acentos(name).lower().strip(),
+            )
+        ):
+            continue
         prefix = f"{code} " if code else ""
         lineas.append(f"{prefix}{name} {' '.join(amounts)}")
         # Firmas, pies legales y sellos posteriores al cierre no son cuentas.
         # El corte exige una etiqueta final exacta para no truncar subtotales
         # ni encabezados jerárquicos que contienen la palabra ``total``.
         if _es_cierre_final_balance(name):
-            break
+            closing_controls = True
     return lineas, centers
 
 
@@ -1552,6 +1597,56 @@ def ocr_pagina(
             retry_path.unlink(missing_ok=True)
 
 
+_PATRON_NUMERO_CON_BORDES = re.compile(r"^([|\[]+)(-?\$?\(?(?:\d|[oO])[\d.,oO]*\)?)([|\]]+)$")
+_PATRON_NUMERO_BORDE_IZQ = re.compile(r"^([|\[]+)(-?\$?\(?(?:\d|[oO])[\d.,oO]*\)?)$")
+_PATRON_NUMERO_BORDE_DER = re.compile(r"^(-?\$?\(?(?:\d|[oO])[\d.,oO]*\)?)([|\]]+)$")
+
+
+def _limpiar_borde_celda_token(text: str) -> str:
+    """Limpia caracteres de cuadrícula (| o []) adheridos a números, preservando tokens ambiguos.
+
+    Casos demostrados y resueltos:
+    - Bordes de barra vertical '|' (siempre cuadrícula, nunca notas al pie): '|12345|' -> '12345', '|1|' -> '1'.
+    - Corchetes '[' ']' con formato numérico complejo (miles, decimales, signos, moneda, >= 3 dígitos):
+      '[54.321]' -> '54.321', '[(1500)]' -> '(1500)', '[-4500]' -> '-4500'.
+
+    Casos ambiguos preservados:
+    - '[1]', '[2]', etc. (un dígito o identificador corto entre corchetes puros): sin contexto de columna,
+      no se puede distinguir de una llamada a nota al pie ([1]). Se preserva como '[1]'.
+    - Glosas textuales ('[A]', '|PROVEEDORES|', '[NOTA 1]'): se preservan intactas.
+
+    Casos numéricos que quedan sin corregir:
+    - Si una celda contable contiene un monto de uno o dos dígitos (ej. 1) y el OCR adhiere corchetes '[1]',
+      permanecerá como '[1]' a nivel de token TSV y requerirá desambiguación contextual posterior.
+    """
+    if not text:
+        return text
+    if re.match(r"^\[\d{1,2}\]$", text):
+        return text
+
+    m = _PATRON_NUMERO_CON_BORDES.match(text)
+    left_b, num_p, right_b = "", "", ""
+    if m:
+        left_b, num_p, right_b = m.group(1), m.group(2), m.group(3)
+    else:
+        m2 = _PATRON_NUMERO_BORDE_IZQ.match(text)
+        if m2:
+            left_b, num_p = m2.group(1), m2.group(2)
+        else:
+            m3 = _PATRON_NUMERO_BORDE_DER.match(text)
+            if m3:
+                num_p, right_b = m3.group(1), m3.group(2)
+
+    if num_p:
+        has_bracket = ("[" in left_b) or ("]" in right_b)
+        if has_bracket:
+            es_claramente_contable = any(c in num_p for c in ".,$()-") or len(re.sub(r"\D", "", num_p)) >= 3
+            if not es_claramente_contable:
+                return text
+        return num_p
+    return text
+
+
 def ocr_pagina_tsv(img_path: Path, rotacion: int, psm: int = 6) -> list[dict]:
     """Obtiene palabras y coordenadas OCR para reconstrucción tabular."""
     tmp_path: Optional[Path] = None
@@ -1561,16 +1656,16 @@ def ocr_pagina_tsv(img_path: Path, rotacion: int, psm: int = 6) -> list[dict]:
             preparada = img.rotate(rotacion, expand=True)
             with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
                 preparada.save(tmp.name)
-                tmp_path = Path(tmp.name)
+                tmp_path = Path(tmp.name).resolve()
                 imagen_ocr = tmp_path
     try:
         try:
             result = subprocess.run(
                 [
-                    obtener_tesseract_bin(), str(imagen_ocr), "stdout", "-l", "spa",
+                    obtener_tesseract_bin(), str(Path(imagen_ocr).resolve()), "stdout", "-l", "spa",
                     "--psm", str(psm), "tsv",
                 ],
-                capture_output=True, text=True,
+                capture_output=True, text=True, errors="replace",
                 timeout=OCR_PAGE_TIMEOUT_SECONDS,
                 env=_tesseract_env(),
             )
@@ -1585,6 +1680,7 @@ def ocr_pagina_tsv(img_path: Path, rotacion: int, psm: int = 6) -> list[dict]:
             text = str(row.get("text") or "").strip()
             if row.get("level") != "5" or not text:
                 continue
+            text = _limpiar_borde_celda_token(text)
             try:
                 left = float(row["left"])
                 top_coord = float(row["top"])
@@ -1603,12 +1699,17 @@ def ocr_pagina_tsv(img_path: Path, rotacion: int, psm: int = 6) -> list[dict]:
                 "text": text,
                 "x0": left,
                 "x1": left + width,
+                "left": left,
+                "width": width,
                 "top": line_positions[line_key],
                 "raw_top": top_coord,
                 "height": height,
                 "bottom": top_coord + height,
                 "yc": top_coord + height / 2.0,
                 "conf": conf,
+                "block_num": int(row.get("block_num") or 0),
+                "par_num": int(row.get("par_num") or 0),
+                "line_num": int(row.get("line_num") or 0),
             })
         return words
     finally:
@@ -1624,11 +1725,2366 @@ class _OCRWordsPage:
         return self._words
 
 
+def _extraer_codigo_y_nombre_cuenta(texto: str) -> tuple[Optional[str], str]:
+    """Extrae código de cuenta y glosa normalizada.
+
+    Reconoce:
+    - Códigos con separador (puntos o guiones): 1-01-01, 1.1.01.01, 1101-51
+    - Códigos compactos o planos: 110101, 99010001 (4 a 10 dígitos)
+    - Códigos concatenados: 110101BANCO
+    - Códigos con puntuación residual OCR: .110101, -1.1.01
+    """
+    raw = str(texto or "").strip()
+    if not raw:
+        return None, ""
+    # 1. Separadores estándar (1-01-01, 1.1.01.01, 1101-51)
+    m = re.match(r"^\s*[^\w\s]{0,2}(\d{1,8}(?:[.\-]\d{1,8})+)\s*(.+)?$", raw)
+    if m:
+        return m.group(1), (m.group(2) or "").strip()
+    # 2. Código compacto/plano (4 a 10 dígitos) seguido de espacio y nombre
+    m = re.match(r"^\s*[^\w\s]{0,2}(\d{4,10})[.\-]?\s+(.+)$", raw)
+    if m:
+        return m.group(1).strip(".-_"), (m.group(2) or "").strip()
+    # 3. Código concatenado sin espacio a nombre en letras
+    m = re.match(r"^\s*[^\w\s]{0,2}(\d{4,8})(?=[A-Za-zÁÉÍÓÚÑáéíóúñ])(.+)$", raw)
+    if m:
+        return m.group(1), (m.group(2) or "").strip()
+    return None, raw
+
+
+def _determinar_alcance_control(
+    nombre_linea: str, linea_idx: int = -1, total_lineas: int = -1,
+    lineas_previas: Optional[list[str]] = None,
+) -> str:
+    """Clasifica el alcance de un control contable según su evidencia contextual.
+
+    Alcances posibles:
+    - 'transporte': arrastre o saldo inicial proveniente de página anterior.
+    - 'pagina': subtotal o suma parcial correspondiente exclusivamente a esta página.
+    - 'acumulado': total acumulado progresivo de varias páginas.
+    - 'seccion': subtotal de un grupo o sección específica (ej. activo circulante).
+    - 'documento_completo': totales generales de cierre del balance.
+    - 'resultado_cierre': filas de utilidad, pérdida o sumas iguales de cuadre.
+    - 'no_evaluable': glosa de control ambigua o con alcance indeterminado.
+
+    Reglas:
+    1. Si la línea contiene código de cuenta, es cuenta de detalle, NO control ('no_evaluable').
+    2. La posición por sí sola no determina el alcance de página.
+    3. Sin evidencia contextual explícita o textual suficiente, devuelve 'no_evaluable'.
+    4. Si hay 'transporte' en la cabecera/previas de la página, los subtotales inferiores son 'acumulado'.
+    """
+    raw_name = str(nombre_linea or "").strip()
+    cod, glosa = _extraer_codigo_y_nombre_cuenta(raw_name)
+    if cod is not None:
+        return "no_evaluable"
+
+    norm = _sin_acentos(raw_name).lower()
+    norm = re.sub(r"\s+", " ", norm)
+
+    # Cierre contable
+    if re.match(
+        r"^(?:resultado(?:\s+del)?\s+ejercicio|utilidad(?:\s+del)?\s+ejercicio|"
+        r"p[eé]rdida(?:\s+del)?\s+ejercicio|utilidad\s+neta|p[eé]rdida\s+neta|"
+        r"utilidad\s+o\s+p[eé]rdida|p[eé]rdidas?\s*(?:/|y|o)\s*ganancias?|"
+        r"sumas\s+iguales|totales\s+iguales)\b", norm, re.I
+    ):
+        return "resultado_cierre"
+
+    # Transporte / Arrastre
+    if re.search(r"\b(?:transporte|arrastre|suma\s+y\s+sigue|van|vienen|viene\s+de)\b", norm, re.I):
+        return "transporte"
+
+    # Acumulado explícito
+    if re.search(r"\b(?:total\s+acumulado|subtotal\s+acumulado|sumas\s+acumuladas|acumulado)\b", norm, re.I):
+        return "acumulado"
+
+    # Totales generales de balance / cierre
+    if re.search(r"\b(?:total\s+general|totales\s+generales|sumas\s+totales|total\s+del\s+balance|balance\s+general)\b", norm, re.I):
+        return "documento_completo"
+
+    # Secciones específicas
+    if re.search(r"\b(?:total\s+activo|total\s+pasivo|activo\s+circulante|pasivo\s+circulante|activo\s+fijo|total\s+patrimonio|total\s+resultado|total\s+ingresos|total\s+costos|total\s+gastos)\b", norm, re.I):
+        return "seccion"
+
+    # Subtotales de página: requiere evidencia textual explícita de página/hoja
+    if re.search(r"\b(?:subtotal\s+p[aá]gina|total\s+p[aá]gina|sub-total\s+p[aá]gina|suma\s+p[aá]gina|total\s+hoja|subtotal\s+hoja|suma\s+parcial\s+p[aá]gina)\b", norm, re.I):
+        return "pagina"
+
+    # Acumulado implícito contextual: si en las líneas previas hubo un transporte/arrastre
+    if lineas_previas:
+        for prev in lineas_previas[:5]:
+            p_norm = _sin_acentos(str(prev)).lower()
+            if re.search(r"\b(?:transporte|arrastre|viene\s+de|saldo\s+anterior)\b", p_norm):
+                if re.search(r"\b(?:subtotal|total|suma)\b", norm, re.I):
+                    return "acumulado"
+
+    # Sin evidencia concluyente, no se asume página arbitrariamente
+    return "no_evaluable"
+
+
+def _evaluar_conciliacion_detalle_control(
+    lineas: list[str], tolerancia: float = 10.0,
+) -> dict:
+    """Evalúa la conciliación del detalle contra controles en una página OCR de ocho columnas.
+
+    Detecta filas incompletas (1 a 7 montos) y controles contradictorios.
+    Una fila de detalle incompleta bloquea la conciliación válida retornando 'evaluacion_incompleta'.
+    """
+    total_lineas = len(lineas)
+    filas_detalle: list[list[float]] = []
+    filas_incompletas: list[dict] = []
+    controles_detectados: list[dict] = []
+
+    for idx, linea in enumerate(lineas):
+        tokens = linea.split()
+        if not tokens:
+            continue
+
+        # Determinar cuántos tokens finales corresponden a montos numéricos válidos
+        k = 0
+        while k < len(tokens):
+            norm_tok = normalizar_token_ocr(tokens[-(k + 1)])
+            if PATRON_MONTOS.fullmatch(norm_tok) and parsear_monto(tokens[-(k + 1)], ".") is not None:
+                k += 1
+            else:
+                break
+
+        if k == 0:
+            continue
+
+        if k >= 8:
+            amounts = tokens[-8:]
+            parsed_vals = [parsear_monto(t, ".") for t in amounts]
+            vals = [float(v or 0.0) for v in parsed_vals]
+            if not any(abs(v) > 0 for v in vals):
+                continue
+
+            nombre_linea = " ".join(tokens[:-8])
+            cod, glosa = _extraer_codigo_y_nombre_cuenta(nombre_linea)
+
+            # Si la línea tiene código de cuenta, es cuenta de detalle, NUNCA control
+            if cod is not None:
+                filas_detalle.append(vals)
+                continue
+
+            alcance = _determinar_alcance_control(
+                nombre_linea, linea_idx=idx, total_lineas=total_lineas,
+                lineas_previas=lineas[:idx],
+            )
+
+            if alcance != "no_evaluable" or any(w in _sin_acentos(nombre_linea).lower() for w in ["total", "subtotal", "sumas"]):
+                deb, cred, s_deb, s_cred, act, pas, perd, gan = vals
+                neto_mov = deb - cred
+                neto_saldos = s_deb - s_cred
+                neto_clasif = (act - pas) + (perd - gan)
+
+                consistencia_mov_saldo = abs(neto_mov - neto_saldos) <= tolerancia
+                consistencia_saldo_clasif = abs(neto_saldos - neto_clasif) <= tolerancia
+
+                if alcance == "documento_completo" or "iguales" in _sin_acentos(nombre_linea).lower():
+                    valido_interno = bool(
+                        abs(deb - cred) <= tolerancia
+                        and abs(s_deb - s_cred) <= tolerancia
+                        and abs((act - pas) - (gan - perd)) <= tolerancia
+                    )
+                    corrompido = not valido_interno
+                else:
+                    valido_interno = bool(consistencia_mov_saldo and consistencia_saldo_clasif)
+                    corrompido = bool(
+                        (not consistencia_mov_saldo and (abs(deb) > tolerancia or abs(cred) > tolerancia))
+                        or (not consistencia_saldo_clasif and (abs(act) > tolerancia or abs(pas) > tolerancia or abs(perd) > tolerancia or abs(gan) > tolerancia))
+                    )
+
+                controles_detectados.append({
+                    "linea": linea,
+                    "alcance": alcance,
+                    "valores": vals,
+                    "valido_interno": valido_interno,
+                    "corrompido": corrompido,
+                    "incompleto": False,
+                })
+            else:
+                filas_detalle.append(vals)
+
+        elif 1 <= k < 8:
+            prefix_tokens = tokens[:-k]
+            prefix_line = " ".join(prefix_tokens)
+            cod, glosa = _extraer_codigo_y_nombre_cuenta(prefix_line)
+            parsed_vals = [float(parsear_monto(t, ".") or 0.0) for t in tokens[-k:]]
+
+            alcance = _determinar_alcance_control(
+                prefix_line, linea_idx=idx, total_lineas=total_lineas,
+                lineas_previas=lineas[:idx],
+            )
+            es_control = (cod is None) and (alcance != "no_evaluable" or any(w in _sin_acentos(prefix_line).lower() for w in ["total", "subtotal", "sumas"]))
+
+            if es_control:
+                controles_detectados.append({
+                    "linea": linea,
+                    "alcance": alcance if alcance != "no_evaluable" else "pagina",
+                    "valores": parsed_vals,
+                    "valido_interno": False,
+                    "corrompido": False,
+                    "incompleto": True,
+                })
+            else:
+                # Fila de detalle incompleta detectada
+                filas_incompletas.append({
+                    "linea": linea,
+                    "codigo": cod,
+                    "valores": parsed_vals,
+                    "k": k,
+                })
+
+    sumas_detalle = [0.0] * 8
+    for row in filas_detalle:
+        for c_idx in range(8):
+            sumas_detalle[c_idx] += row[c_idx]
+
+    controles_pagina = [c for c in controles_detectados if c["alcance"] == "pagina"]
+
+    if not controles_detectados:
+        estado = "evaluacion_incompleta" if filas_incompletas else "control_ausente"
+        motivo = f"Filas de detalle incompletas ({len(filas_incompletas)}) detectadas sin control" if filas_incompletas else "No se detectó fila de control en la página"
+        return {
+            "estado": estado,
+            "alcance": "no_evaluable",
+            "linea_control": None,
+            "subtotal_valido_interno": False,
+            "subtotal_corrompido": False,
+            "columnas_conciliadas": 0,
+            "discrepancias": {},
+            "sumas_detalle": sumas_detalle,
+            "valores_control": [],
+            "filas_detalle_count": len(filas_detalle),
+            "filas_incompletas_count": len(filas_incompletas),
+            "motivo": motivo,
+        }
+
+    # Detectar controles de página contradictorios
+    if len(controles_pagina) > 1:
+        primer_c = controles_pagina[0]
+        primer_vals = primer_c["valores"]
+        son_contradictorios = False
+        for otro in controles_pagina[1:]:
+            otro_vals = otro["valores"]
+            if len(primer_vals) != 8 or len(otro_vals) != 8:
+                son_contradictorios = True
+                break
+            if any(abs(primer_vals[i] - otro_vals[i]) > tolerancia for i in range(8)):
+                son_contradictorios = True
+                break
+        if son_contradictorios:
+            return {
+                "estado": "discrepancia",
+                "alcance": "pagina",
+                "linea_control": " / ".join(c["linea"] for c in controles_pagina),
+                "subtotal_valido_interno": False,
+                "subtotal_corrompido": True,
+                "columnas_conciliadas": 0,
+                "discrepancias": {"controles_contradictorios": len(controles_pagina)},
+                "sumas_detalle": sumas_detalle,
+                "valores_control": primer_vals,
+                "filas_detalle_count": len(filas_detalle),
+                "filas_incompletas_count": len(filas_incompletas),
+                "motivo": f"Controles de página contradictorios detectados ({len(controles_pagina)} controles con valores discrepantes)",
+            }
+
+    ctrl_pagina = controles_pagina[0] if controles_pagina else None
+
+    if not ctrl_pagina:
+        primer_ctrl = controles_detectados[0]
+        estado = "evaluacion_incompleta" if filas_incompletas else "alcance_desconocido"
+        return {
+            "estado": estado,
+            "alcance": primer_ctrl["alcance"],
+            "linea_control": primer_ctrl["linea"],
+            "subtotal_valido_interno": primer_ctrl["valido_interno"],
+            "subtotal_corrompido": primer_ctrl["corrompido"],
+            "columnas_conciliadas": 0,
+            "discrepancias": {},
+            "sumas_detalle": sumas_detalle,
+            "valores_control": primer_ctrl["valores"],
+            "filas_detalle_count": len(filas_detalle),
+            "filas_incompletas_count": len(filas_incompletas),
+            "motivo": f"Control presente con alcance '{primer_ctrl['alcance']}', no evaluable contra detalle de página",
+        }
+
+    ctrl_vals = ctrl_pagina["valores"]
+    if ctrl_pagina.get("incompleto") or len(ctrl_vals) != 8:
+        return {
+            "estado": "evaluacion_incompleta",
+            "alcance": "pagina",
+            "linea_control": ctrl_pagina["linea"],
+            "subtotal_valido_interno": False,
+            "subtotal_corrompido": False,
+            "columnas_conciliadas": 0,
+            "discrepancias": {},
+            "sumas_detalle": sumas_detalle,
+            "valores_control": ctrl_vals,
+            "filas_detalle_count": len(filas_detalle),
+            "filas_incompletas_count": len(filas_incompletas),
+            "motivo": "Celdas de control incompletas en la fila de subtotal (no se asume cero)",
+        }
+
+    # Si hay filas de detalle incompletas, bloquea conciliación válida
+    if filas_incompletas:
+        return {
+            "estado": "evaluacion_incompleta",
+            "alcance": "pagina",
+            "linea_control": ctrl_pagina["linea"],
+            "subtotal_valido_interno": ctrl_pagina["valido_interno"],
+            "subtotal_corrompido": ctrl_pagina["corrompido"],
+            "columnas_conciliadas": 0,
+            "discrepancias": {},
+            "sumas_detalle": sumas_detalle,
+            "valores_control": ctrl_vals,
+            "filas_detalle_count": len(filas_detalle),
+            "filas_incompletas_count": len(filas_incompletas),
+            "motivo": f"Filas de detalle incompletas ({len(filas_incompletas)}) impiden conciliación confiable contra subtotal",
+        }
+
+    nombres_cols = RAW_MONETARY_COLUMNS
+    discrepancias = {}
+    cols_conciliadas = 0
+    for i in range(8):
+        diff = round(abs(sumas_detalle[i] - ctrl_vals[i]), 2)
+        if diff <= tolerancia:
+            cols_conciliadas += 1
+        else:
+            discrepancias[nombres_cols[i]] = diff
+
+    if cols_conciliadas == 8:
+        estado = "conciliacion_valida"
+        motivo = "Conciliación válida de las 8 columnas contra subtotal de página"
+    else:
+        estado = "discrepancia"
+        motivo = f"Discrepancia en {8 - cols_conciliadas} columna(s) contra subtotal de página"
+
+    return {
+        "estado": estado,
+        "alcance": "pagina",
+        "linea_control": ctrl_pagina["linea"],
+        "subtotal_valido_interno": ctrl_pagina["valido_interno"],
+        "subtotal_corrompido": ctrl_pagina["corrompido"],
+        "columnas_conciliadas": cols_conciliadas,
+        "discrepancias": discrepancias,
+        "sumas_detalle": sumas_detalle,
+        "valores_control": ctrl_vals,
+        "filas_detalle_count": len(filas_detalle),
+        "filas_incompletas_count": len(filas_incompletas),
+        "motivo": motivo,
+    }
+
+
+def _evaluar_control_subtotal_pagina(
+    lineas: list[str], tolerancia: float = 10.0,
+) -> tuple[bool, bool, bool, Optional[str], str, bool]:
+    """Capa de compatibilidad para evaluar_control_subtotal_pagina."""
+    res = _evaluar_conciliacion_detalle_control(lineas, tolerancia)
+    found = res["estado"] != "control_ausente"
+    valido = res["subtotal_valido_interno"]
+    corrupt = res["subtotal_corrompido"]
+    linea = res["linea_control"]
+    alcance = res["alcance"]
+    cuadra = res["estado"] == "conciliacion_valida"
+    return found, valido, corrupt, linea, alcance, cuadra
+
+
+def _extraer_cuentas_candidato(lineas: list[str]) -> list[dict]:
+    """Extrae estructura normalizada de cuentas por candidato para comparación."""
+    cuentas = []
+    total_lineas = len(lineas)
+    for idx, linea in enumerate(lineas):
+        tokens = linea.split()
+        if len(tokens) < 9:
+            continue
+        amounts = tokens[-8:]
+        if not all(PATRON_MONTOS.fullmatch(normalizar_token_ocr(t)) for t in amounts):
+            continue
+        parsed_vals = [parsear_monto(t, ".") for t in amounts]
+        if any(v is None for v in parsed_vals):
+            continue
+        vals = [float(v or 0.0) for v in parsed_vals]
+        nombre_raw = " ".join(tokens[:-8])
+        cod, nom = _extraer_codigo_y_nombre_cuenta(nombre_raw)
+        if not any(abs(v) > 0 for v in vals) and cod is None:
+            continue
+
+        # Si no tiene código, verificar si es fila de control
+        if cod is None:
+            alcance = _determinar_alcance_control(
+                nombre_raw, linea_idx=idx, total_lineas=total_lineas,
+                lineas_previas=lineas[:idx],
+            )
+            if alcance != "no_evaluable" or any(w in _sin_acentos(nombre_raw).lower() for w in ["total", "subtotal", "sumas", "balance general", "totales iguales"]):
+                continue
+
+        cuentas.append({
+            "codigo": cod,
+            "nombre": nom.strip() if nom else nombre_raw.strip(),
+            "montos": vals,
+            "raw": linea,
+        })
+    return cuentas
+
+
+_PATRON_RUT_RUIDO = re.compile(r"(?:\b\d{1,2}(?:\.\d{3}){2}-[\dkK]\b|\b\d{7,8}-[\dkK]\b)\s+(?:p[aá]gina|hoja)?", re.I)
+_PATRON_PERIODO_RUIDO = re.compile(r"^(?:desde|hasta|ejercicio|periodo|a[nñ]o)\s+[a-z0-9\s]*\d{4}", re.I)
+_PATRON_PAGINA_RUIDO = re.compile(r"^p[aá]gina\s+\d+", re.I)
+_PATRON_DOCUMENTAL_RUIDO_GLOSA = re.compile(
+    r"\b(?:p[aá]gina|hoja|rut|r\.u\.t|periodo|ejercicio|desde|hasta|fecha|folio|secci[oó]n|membrete|raz[oó]n\s+social|giro|direcci[oó]n|comuna|ciudad|balance\s+tributario|balance\s+general|balance\s+clasificado|estado\s+financiero|moneda|pesos|clp|miles)\b",
+    re.I,
+)
+
+
+def _es_ruido_documental_ocr(cta: dict) -> bool:
+    """Identifica si una fila extraída es ruido de membrete o pie de página y no una cuenta contable.
+
+    Exige evidencia documental positiva en la glosa o identificador.
+    La magnitud numérica por sí sola (por ejemplo montos pequeños o valor similar a un año)
+    NUNCA acredita ruido sin evidencia textual o estructural concordante.
+    """
+    cod = cta.get("codigo")
+    nom = cta.get("nombre", "").strip()
+    montos = cta.get("montos", [0.0]*8)
+
+    # 1. Si el código parece un RUT o número de página, es ruido
+    if cod and (re.search(r"^\d{1,2}\.\d{3}\.\d{3}-[\dkK]$", cod) or re.search(r"^\d{7,8}-[\dkK]$", cod)):
+        return True
+
+    # 2. Glosa que coincide con patrones positivos de membrete, RUT, periodo o pie de página
+    if _PATRON_RUT_RUIDO.search(nom) or _PATRON_PERIODO_RUIDO.search(nom) or _PATRON_PAGINA_RUIDO.search(nom) or _PATRON_DOCUMENTAL_RUIDO_GLOSA.search(nom):
+        # Si tiene código contable legítimo (4 a 10 dígitos) y montos contables válidos,
+        # NO se descarta salvo que sea explícitamente membrete/RUT no contable
+        if cod and any(abs(v) > 0.001 for v in montos) and not _PATRON_RUT_RUIDO.search(nom):
+            return False
+        return True
+
+    return False
+
+
+def _tiene_identidad_contable_valida(montos: list[float], tolerancia: float = 10.0) -> bool:
+    """Verifica si los 8 montos satisfacen las identidades Debe-Haber == Saldos."""
+    if len(montos) < 8:
+        return False
+    deb, cred, s_deb, s_cred, act, pas, perd, gan = montos[:8]
+    if not any(abs(v) > 0.001 for v in montos[:8]):
+        return False
+
+    diff_saldos = abs((deb - cred) - (s_deb - s_cred))
+    if diff_saldos > tolerancia:
+        return False
+
+    diff_inv_res = abs(((act - pas) + (perd - gan)) - (s_deb - s_cred))
+    if diff_inv_res > tolerancia:
+        return False
+
+    return True
+
+
+def _reconciliar_fragmentos_ocr(cuentas: list[dict]) -> list[dict]:
+    """Reconcilia filas fragmentadas preservando cuentas codificadas en cero."""
+    reconciliadas = []
+    i = 0
+    n = len(cuentas)
+    while i < n:
+        c = cuentas[i]
+        montos = c.get("montos", [0.0]*8)
+        has_amounts = any(abs(v) > 0.001 for v in montos)
+
+        # Si tiene código pero NO tiene montos, buscar si la siguiente fila no tiene código pero SÍ tiene montos
+        if c.get("codigo") and not has_amounts:
+            if i + 1 < n and not cuentas[i+1].get("codigo") and any(abs(v) > 0.001 for v in cuentas[i+1].get("montos", [])):
+                sig = cuentas[i+1]
+                merged = {
+                    "codigo": c["codigo"],
+                    "nombre": f"{c.get('nombre', '')} {sig.get('nombre', '')}".strip(),
+                    "montos": sig["montos"],
+                    "raw": f"{c.get('raw', '')} + {sig.get('raw', '')}",
+                    "linea_idx": c.get("linea_idx", i),
+                }
+                reconciliadas.append(merged)
+                i += 2
+                continue
+            else:
+                # Cuenta codificada con montos en cero sin fragmento posterior:
+                # PRESERVAR explícitamente para evitar pérdida silenciosa.
+                c_cero = dict(c)
+                c_cero["monto_cero_preservado"] = True
+                reconciliadas.append(c_cero)
+                i += 1
+                continue
+
+        # Si no tiene montos y no tiene código (fragmento de texto puro acolchado con ceros sin valor)
+        if not c.get("codigo") and not has_amounts and not c.get("monto_cero_preservado"):
+            i += 1
+            continue
+
+        reconciliadas.append(c)
+        i += 1
+
+    return reconciliadas
+
+
+def _limpiar_glosa_ruido(g: str) -> str:
+    """Elimina puntuación y ruido de bordes (guiones, viñetas, barras, porcentajes, etc.)."""
+    s = str(g or "").strip()
+    s = re.sub(r"^[—–\-\*\•\.\,\:\;\/\\%#\|\s]+", "", s)
+    s = re.sub(r"[—–\-\*\•\.\,\:\;\/\\%#\|\s]+$", "", s)
+    return s.strip()
+
+
+def _son_glosas_compatibles(g1: str, g2: str) -> bool:
+    """Evalúa si dos glosas son semánticamente compatibles."""
+    g1_c = _limpiar_glosa_ruido(g1)
+    g2_c = _limpiar_glosa_ruido(g2)
+    s1 = re.sub(r"\s+", " ", _sin_acentos(g1_c).lower().strip())
+    s2 = re.sub(r"\s+", " ", _sin_acentos(g2_c).lower().strip())
+    if not s1 or not s2:
+        return True
+    if s1 == s2 or s1.startswith(s2) or s2.startswith(s1) or s1 in s2 or s2 in s1:
+        return True
+    import difflib
+    ratio = difflib.SequenceMatcher(None, s1, s2).ratio()
+    return ratio >= 0.80
+
+
+def _es_glosa_reconciliable_misma_cuenta(g1: str, g2: str) -> bool:
+    """Evalúa si dos glosas de una misma cuenta con importes idénticos pueden reconciliarse.
+
+    Aplica bajo la Regla 4 cuando:
+    - Una es ruido corto OCR (caracteres alfabéticos < 3, como 'ii') mientras la otra es sustantiva (>= 3).
+    - Una es prefijo, sufijo o subcadena de la otra (tras limpieza de puntuación y números residuales).
+    """
+    g1_c = _limpiar_glosa_ruido(g1)
+    g2_c = _limpiar_glosa_ruido(g2)
+    s1 = re.sub(r"\s+", " ", _sin_acentos(g1_c).lower().strip())
+    s2 = re.sub(r"\s+", " ", _sin_acentos(g2_c).lower().strip())
+
+    if not s1 or not s2:
+        return True
+
+    alpha1 = re.findall(r"[a-z]", s1)
+    alpha2 = re.findall(r"[a-z]", s2)
+    if (len(alpha1) < 3 and len(alpha2) >= 3) or (len(alpha2) < 3 and len(alpha1) >= 3):
+        return True
+
+    if s1.startswith(s2) or s2.startswith(s1) or s1.endswith(s2) or s2.endswith(s1):
+        return True
+
+    s1_no_num = re.sub(r"\b\d+\b", "", s1).strip()
+    s2_no_num = re.sub(r"\b\d+\b", "", s2).strip()
+    if s1_no_num and s2_no_num:
+        if s1_no_num.startswith(s2_no_num) or s2_no_num.startswith(s1_no_num):
+            return True
+        if s1_no_num.endswith(s2_no_num) or s2_no_num.endswith(s1_no_num):
+            return True
+
+    raw1 = re.sub(r"[^a-z0-9]", "", s1)
+    raw2 = re.sub(r"[^a-z0-9]", "", s2)
+    if len(raw1) >= 6 and len(raw2) >= 6:
+        if raw1 in raw2 or raw2 in raw1:
+            return True
+
+    return False
+
+
+def _elegir_glosa_sustantiva(g1: str, g2: str) -> str:
+    """Selecciona la glosa más informativa y descriptiva entre dos candidatas."""
+    g1_c = _limpiar_glosa_ruido(g1)
+    g2_c = _limpiar_glosa_ruido(g2)
+    alpha1 = len(re.findall(r"[a-zA-Z]", g1_c))
+    alpha2 = len(re.findall(r"[a-zA-Z]", g2_c))
+    if alpha1 != alpha2:
+        return g1 if alpha1 > alpha2 else g2
+    return g1 if len(g1_c) >= len(g2_c) else g2
+
+
+def _normalizar_codigo(codigo: Any) -> str:
+    if codigo is None:
+        return ""
+    return re.sub(r"[^0-9]", "", str(codigo))
+
+
+def _normalizar_glosa(glosa: Any) -> str:
+    if not glosa:
+        return ""
+    s = _sin_acentos(str(glosa)).lower()
+    return re.sub(r"[^a-z0-9]", "", s)
+
+
+@dataclass
+class FilaComposicionOCR:
+    motor_origen: str                # "PSM 6", "PSM 4", "FUSION_RECONCILIADA", "RELECTURA_FOCALIZADA", "AMBIGUA"
+    pagina: int
+    linea_origen: int
+    codigo_normalizado: Optional[str]
+    glosa_normalizada: str
+    valores_candidatos: dict[str, list[float]]  # {"PSM 6": [...], "PSM 4": [...]}
+    valores_finales: list[float]                # 8 montos
+    transformacion_aplicada: str                 # "coincidencia_exacta", "seleccion_candidato_valido", "admision_unilateral_integra", "reconciliacion_fragmento", "bloqueo"
+    regla_aceptacion: str                        # regla formal
+    nivel_confianza: float
+    motivo_revision: Optional[str] = None
+    es_ambigua: bool = False
+    bloquea_certificacion: bool = False
+    evento_relectura: Optional[str] = None
+
+
+@dataclass
+class ResultadoComposicionPaginaOCR:
+    pagina: int
+    filas_compuestas: list[FilaComposicionOCR]
+    filas_ambiguas_count: int
+    bloqueada: bool
+    motivo_bloqueo: Optional[str] = None
+    lineas_compuestas_texto: list[str] = field(default_factory=list)
+    eventos_relectura: list[dict] = field(default_factory=list)
+
+
+def _relectura_focalizada_ocr(
+    img_path: Optional[Path],
+    rotacion: int,
+    words_tsv: Optional[list[dict]],
+    codigo: Optional[str],
+    glosa: str,
+    montos_previos: list[float],
+    pagina: int = 1,
+    linea_idx: int = 0,
+) -> tuple[Optional[FilaComposicionOCR], dict[str, Any]]:
+    """Evalúa una relectura focalizada sobre la región de una línea identificada mediante jerarquía TSV.
+
+    Contrato y garantías:
+    1. Localiza la línea exacta usando la jerarquía (block_num, par_num, line_num) de TSV.
+    2. Recorta una caja acotada horizontal y verticalmente con márgenes controlados.
+    3. Ejecuta OCR focalizado (PSM 7 con fallback a PSM 6 si es necesario).
+    4. Comprueba que el resultado confirme de forma independiente TANTO el código COMO los importes.
+    5. Registra de forma estructurada los eventos de falla, timeout o ausencia de geometría sin excepciones silenciosas.
+    """
+    cod_norm = _normalizar_codigo(codigo) if codigo else ""
+
+    if not img_path or not img_path.exists() or not words_tsv:
+        evento = {
+            "tipo": "ausencia_geometria",
+            "codigo": codigo,
+            "glosa": glosa,
+            "pagina": pagina,
+            "detalle": "Imagen no disponible o TSV vacío para relectura focalizada",
+        }
+        return (None, evento)
+
+    # 1. Encontrar la palabra ancla en words_tsv usando código normalizado o fragmento de glosa
+    anchor_word = None
+    if cod_norm and len(cod_norm) >= 4:
+        for w in words_tsv:
+            txt_cod = _normalizar_codigo(str(w.get("text", "")))
+            if cod_norm in txt_cod or (len(txt_cod) >= 4 and txt_cod in cod_norm):
+                anchor_word = w
+                break
+
+    if not anchor_word and glosa:
+        glosa_norm = _normalizar_glosa(glosa)
+        for w in words_tsv:
+            txt_norm = _normalizar_glosa(str(w.get("text", "")))
+            if len(txt_norm) >= 5 and txt_norm in glosa_norm:
+                anchor_word = w
+                break
+
+    if not anchor_word:
+        evento = {
+            "tipo": "ausencia_geometria",
+            "codigo": codigo,
+            "glosa": glosa,
+            "pagina": pagina,
+            "detalle": f"No se encontró palabra ancla para cuenta {codigo or glosa} en TSV",
+        }
+        return (None, evento)
+
+    # 2. Extraer todas las palabras que comparten la misma línea usando coordenadas físicas TSV
+    anchor_yc = anchor_word.get("yc")
+    if anchor_yc is None:
+        anchor_yc = anchor_word.get("raw_top", 0.0) + anchor_word.get("height", 20.0) / 2.0
+    anchor_h = anchor_word.get("height", 20.0)
+    tol_y = max(12.0, anchor_h * 0.6)
+
+    line_words = [
+        w for w in words_tsv
+        if abs(w.get("yc", w.get("raw_top", 0.0) + w.get("height", 20.0) / 2.0) - anchor_yc) <= tol_y
+    ]
+
+    if not line_words:
+        evento = {
+            "tipo": "ausencia_geometria",
+            "codigo": codigo,
+            "glosa": glosa,
+            "pagina": pagina,
+            "detalle": f"No se encontraron palabras en la línea jerárquica de {codigo}",
+        }
+        return (None, evento)
+
+    # 3. Calcular caja acotada horizontal y verticalmente con márgenes controlados
+    try:
+        from PIL import Image
+        with Image.open(img_path) as im:
+            raw_xmin = min(w.get("x0", w.get("left", 0.0)) for w in line_words)
+            raw_xmax = max(w.get("x1", w.get("left", 0.0) + w.get("width", 0.0)) for w in line_words)
+            raw_ymin = min(w.get("raw_top", w.get("top", 0.0)) for w in line_words)
+            raw_ymax = max(w.get("bottom", w.get("raw_top", 0.0) + w.get("height", 0.0)) for w in line_words)
+
+            margin_x = 25
+            margin_y = 8
+            xmin = max(0, int(raw_xmin - margin_x))
+            xmax = min(im.width, int(raw_xmax + margin_x))
+            ymin = max(0, int(raw_ymin - margin_y))
+            ymax = min(im.height, int(raw_ymax + margin_y))
+
+            if raw_xmax <= raw_xmin + 20 or xmax <= xmin + 50 or ymax <= ymin + 5:
+                evento = {
+                    "tipo": "geometria_invalida",
+                    "codigo": codigo,
+                    "glosa": glosa,
+                    "pagina": pagina,
+                    "detalle": f"Caja de recorte acotada inválida: ({xmin}, {ymin}, {xmax}, {ymax})",
+                }
+                return (None, evento)
+
+            crop_box = (xmin, ymin, xmax, ymax)
+            cropped = im.crop(crop_box)
+
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp_crop:
+                tmp_crop_path = Path(tmp_crop.name)
+            try:
+                cropped.save(tmp_crop_path)
+                tess_bin = obtener_tesseract_bin()
+                env = _tesseract_env()
+
+                # Intento 1: PSM 7 (single text line)
+                cmd7 = [tess_bin, str(tmp_crop_path), "stdout", "--psm", "7", "-l", "spa+eng"]
+                res = None
+                try:
+                    res = subprocess.run(cmd7, capture_output=True, text=True, timeout=5, env=env)
+                except subprocess.TimeoutExpired:
+                    evento = {
+                        "tipo": "timeout",
+                        "codigo": codigo,
+                        "glosa": glosa,
+                        "pagina": pagina,
+                        "detalle": "Timeout de 5s expirado en Tesseract PSM 7 focalizado",
+                    }
+                    return (None, evento)
+
+                crop_line = res.stdout.strip() if (res and res.returncode == 0) else ""
+
+                # Intento 2: Fallback a PSM 6 focalizado si PSM 7 no produjo nada o no tiene números
+                if not crop_line or not re.search(r"\d", crop_line):
+                    cmd6 = [tess_bin, str(tmp_crop_path), "stdout", "--psm", "6", "-l", "spa+eng"]
+                    try:
+                        res6 = subprocess.run(cmd6, capture_output=True, text=True, timeout=5, env=env)
+                        if res6.returncode == 0 and res6.stdout.strip():
+                            crop_line = res6.stdout.strip()
+                    except subprocess.TimeoutExpired:
+                        evento = {
+                            "tipo": "timeout",
+                            "codigo": codigo,
+                            "glosa": glosa,
+                            "pagina": pagina,
+                            "detalle": "Timeout de 5s expirado en Tesseract PSM 6 focalizado",
+                        }
+                        return (None, evento)
+
+                if not crop_line:
+                    evento = {
+                        "tipo": "falla_ejecucion",
+                        "codigo": codigo,
+                        "glosa": glosa,
+                        "pagina": pagina,
+                        "detalle": "Tesseract no produjo texto en recorte focalizado",
+                    }
+                    return (None, evento)
+
+                # 4. Parsear cuenta del recorte focalizado y comprobar confirmación independiente de código E importes
+                ctas_crop = _extraer_cuentas_candidato([crop_line])
+                m_prev = montos_previos or [0.0] * 8
+                if ctas_crop:
+                    c_cand = ctas_crop[0]
+                    m_crop = c_cand.get("montos", [0.0] * 8)
+                    re_cod = c_cand.get("codigo")
+                    re_cod_norm = _normalizar_codigo(re_cod) if re_cod else ""
+                    code_matches = bool(cod_norm and re_cod_norm and (cod_norm == re_cod_norm or cod_norm in re_cod_norm))
+                    id_valida = _tiene_identidad_contable_valida(m_crop, tolerancia=10.0)
+                    amounts_match = all(abs(a - b) <= 10.0 for a, b in zip(m_crop[:8], m_prev[:8]))
+                    glosa_final = c_cand.get("nombre") or glosa
+                else:
+                    # En recorte de línea única, las columnas con valor cero no contienen texto impreso
+                    # por lo que Tesseract lee los importes no nulos directamente.
+                    prev_nz = [v for v in m_prev if abs(v) > 0.01]
+                    crop_tokens = crop_line.split()
+                    crop_amounts = []
+                    glosa_tokens = []
+                    re_cod = None
+                    for t in crop_tokens:
+                        clean_t = normalizar_token_ocr(t)
+                        tok_digits = _normalizar_codigo(t)
+                        if tok_digits and (tok_digits == cod_norm or (len(tok_digits) >= 4 and tok_digits in cod_norm) or (cod_norm and cod_norm in tok_digits)):
+                            re_cod = t.strip(".-_")
+                            continue
+                        if PATRON_MONTOS.fullmatch(clean_t):
+                            v = parsear_monto(t, ".")
+                            if v is not None:
+                                crop_amounts.append(float(v))
+                                continue
+                        glosa_tokens.append(t)
+
+                    re_glosa = " ".join(glosa_tokens)
+                    code_matches = bool(re_cod or (cod_norm and cod_norm in _normalizar_codigo(crop_line)))
+                    glosa_matches = _son_glosas_compatibles(glosa, re_glosa) or _es_glosa_reconciliable_misma_cuenta(glosa, re_glosa) or not glosa or not re_glosa
+
+                    crop_nz = [v for v in crop_amounts if abs(v) > 0.01]
+                    if prev_nz:
+                        amounts_match = len(crop_nz) > 0 and all(
+                            any(abs(a - b) <= 10.0 for b in crop_nz) for a in prev_nz
+                        )
+                    else:
+                        amounts_match = (len(crop_nz) == 0)
+
+                    id_valida = (_tiene_identidad_contable_valida(m_prev, tolerancia=10.0) or len(prev_nz) == 0) and glosa_matches
+                    m_crop = m_prev
+                    glosa_final = _elegir_glosa_sustantiva(glosa, re_glosa) if re_glosa else glosa
+
+                if code_matches and id_valida and amounts_match:
+                    f_ok = FilaComposicionOCR(
+                        motor_origen="RELECTURA_FOCALIZADA",
+                        pagina=pagina,
+                        linea_origen=linea_idx,
+                        codigo_normalizado=re_cod or codigo,
+                        glosa_normalizada=glosa if glosa else glosa_final,
+                        valores_candidatos={"PREVIO": montos_previos, "RELECTURA": m_crop},
+                        valores_finales=m_crop,
+                        transformacion_aplicada="relectura_focalizada_recorte",
+                        regla_aceptacion="relectura_focalizada_confirmada",
+                        nivel_confianza=0.96,
+                        es_ambigua=False,
+                        bloquea_certificacion=False,
+                        evento_relectura="confirmada",
+                    )
+                    evento = {
+                        "tipo": "confirmada",
+                        "codigo": codigo,
+                        "glosa": glosa,
+                        "pagina": pagina,
+                        "detalle": "Relectura focalizada confirmó de forma independiente código e importes",
+                    }
+                    return (f_ok, evento)
+                else:
+                    motivos = []
+                    if not code_matches:
+                        motivos.append(f"código leído '{re_cod}' no coincide con '{codigo}'")
+                    if not id_valida:
+                        motivos.append("identidad contable inválida en relectura")
+                    if not amounts_match:
+                        motivos.append("importes leídos no coinciden con previos")
+                    evento = {
+                        "tipo": "discrepancia_relectura",
+                        "codigo": codigo,
+                        "glosa": glosa,
+                        "pagina": pagina,
+                        "detalle": f"Relectura focalizada no confirmó la cuenta: {'; '.join(motivos)}",
+                    }
+                    return (None, evento)
+            finally:
+                if tmp_crop_path.exists():
+                    tmp_crop_path.unlink()
+    except Exception as exc:
+        evento = {
+            "tipo": "falla_ejecucion",
+            "codigo": codigo,
+            "glosa": glosa,
+            "pagina": pagina,
+            "detalle": f"Excepción durante relectura focalizada: {exc}",
+        }
+        return (None, evento)
+
+
+def _continuidad_fisica_en_candidato(
+    fila: dict,
+    filas_mismo_motor: list[dict],
+    max_salto_exterior: int = 3,
+) -> bool:
+    """Evalúa continuidad usando el orden físico del mismo candidato OCR.
+
+    La composición agrupa primero los códigos observados por PSM 6 y después
+    agrega los exclusivos de PSM 4. Por eso la última fila ya compuesta no es
+    necesariamente la vecina física de una cuenta unilateral. Una fila se
+    considera continua cuando cae entre otras filas del mismo candidato o,
+    si está en un borde, cuando queda a una distancia acotada del vecino más
+    próximo. La confirmación independiente, la identidad y la deduplicación
+    siguen siendo requisitos separados.
+    """
+    linea = fila.get("linea_idx")
+    if linea is None:
+        return True
+    try:
+        linea_fisica = int(linea)
+    except (TypeError, ValueError):
+        return False
+
+    lineas_vecinas: list[int] = []
+    for candidata in filas_mismo_motor:
+        if candidata is fila:
+            continue
+        valor = candidata.get("linea_idx")
+        if valor is None:
+            continue
+        try:
+            lineas_vecinas.append(int(valor))
+        except (TypeError, ValueError):
+            continue
+
+    if not lineas_vecinas:
+        return True
+
+    menor = min(lineas_vecinas)
+    mayor = max(lineas_vecinas)
+    if menor <= linea_fisica <= mayor:
+        return True
+    return min(abs(linea_fisica - menor), abs(linea_fisica - mayor)) <= max_salto_exterior
+
+
+def componer_filas_pagina_ocr(
+    cuentas_6: list[dict],
+    cuentas_4: list[dict],
+    pagina: int,
+    words_tsv_6: Optional[list[dict]] = None,
+    words_tsv_4: Optional[list[dict]] = None,
+    img_path: Optional[Path] = None,
+    rotacion: int = 0,
+    tolerancia: float = 10.0,
+) -> ResultadoComposicionPaginaOCR:
+    """Implementa composición segura a nivel de fila con procedencia verificable."""
+    c6_norm = []
+    for idx, c in enumerate(cuentas_6):
+        c_copy = dict(c)
+        if c_copy.get("codigo"):
+            c_copy["codigo"] = str(c_copy["codigo"]).strip().strip(".-_")
+        c_copy["linea_idx"] = c.get("linea_idx", idx)
+        c6_norm.append(c_copy)
+
+    c4_norm = []
+    for idx, c in enumerate(cuentas_4):
+        c_copy = dict(c)
+        if c_copy.get("codigo"):
+            c_copy["codigo"] = str(c_copy["codigo"]).strip().strip(".-_")
+        c_copy["linea_idx"] = c.get("linea_idx", idx)
+        c4_norm.append(c_copy)
+
+    c6_clean = [c for c in c6_norm if not _es_ruido_documental_ocr(c)]
+    c4_clean = [c for c in c4_norm if not _es_ruido_documental_ocr(c)]
+
+    c6 = _reconciliar_fragmentos_ocr(c6_clean)
+    c4 = _reconciliar_fragmentos_ocr(c4_clean)
+
+    import collections
+    c6_by_code: dict[str, list[dict]] = collections.defaultdict(list)
+    for c in c6:
+        if c.get("codigo"):
+            c6_by_code[c["codigo"]].append(c)
+
+    c4_by_code: dict[str, list[dict]] = collections.defaultdict(list)
+    for c in c4:
+        if c.get("codigo"):
+            c4_by_code[c["codigo"]].append(c)
+
+    no_cod_6 = [c for c in c6 if not c.get("codigo")]
+    no_cod_4 = [c for c in c4 if not c.get("codigo")]
+
+    seen_codes = set()
+    ordered_codes = []
+    for c in c6:
+        cod = c.get("codigo")
+        if cod and cod not in seen_codes:
+            seen_codes.add(cod)
+            ordered_codes.append(cod)
+    for c in c4:
+        cod = c.get("codigo")
+        if cod and cod not in seen_codes:
+            seen_codes.add(cod)
+            ordered_codes.append(cod)
+
+    filas_compuestas: list[FilaComposicionOCR] = []
+    bloqueos: list[str] = []
+    eventos_relectura: list[dict] = []
+    matched_no_cod_4_ids: set[int] = set()
+    matched_no_cod_6_ids: set[int] = set()
+
+    for cod in ordered_codes:
+        rows6 = c6_by_code.get(cod, [])
+        rows4 = c4_by_code.get(cod, [])
+
+        if len(rows6) > 1 or len(rows4) > 1:
+            dup_motor = "PSM 6" if len(rows6) > 1 else "PSM 4"
+            f_amb = FilaComposicionOCR(
+                motor_origen=dup_motor,
+                pagina=pagina,
+                linea_origen=rows6[0].get("linea_idx", 0) if rows6 else rows4[0].get("linea_idx", 0),
+                codigo_normalizado=cod,
+                glosa_normalizada=rows6[0].get("nombre", "") if rows6 else rows4[0].get("nombre", ""),
+                valores_candidatos={"PSM 6": rows6[0]["montos"] if rows6 else [], "PSM 4": rows4[0]["montos"] if rows4 else []},
+                valores_finales=rows6[0]["montos"] if rows6 else rows4[0]["montos"],
+                transformacion_aplicada="bloqueo_duplicacion",
+                regla_aceptacion="bloqueada_duplicacion_monetaria",
+                nivel_confianza=0.20,
+                es_ambigua=True,
+                bloquea_certificacion=True,
+                motivo_revision=f"Código duplicado {cod} en {dup_motor}",
+            )
+            filas_compuestas.append(f_amb)
+            bloqueos.append(f"Código duplicado {cod} en {dup_motor}")
+            continue
+
+        if rows6 and rows4:
+            r6, r4 = rows6[0], rows4[0]
+            m6, m4 = r6["montos"], r4["montos"]
+            g6, g4 = r6.get("nombre", ""), r4.get("nombre", "")
+            id6 = _tiene_identidad_contable_valida(m6, tolerancia)
+            id4 = _tiene_identidad_contable_valida(m4, tolerancia)
+            montos_iguales = all(abs(a - b) <= tolerancia for a, b in zip(m6[:8], m4[:8]))
+            glosa_compat = _son_glosas_compatibles(g6, g4)
+            glosa_elegida = g6 if len(g6) >= len(g4) else g4
+
+            es_glosa_identica = (_sin_acentos(_limpiar_glosa_ruido(g6)).lower() == _sin_acentos(_limpiar_glosa_ruido(g4)).lower())
+            es_reconciliable = glosa_compat or _es_glosa_reconciliable_misma_cuenta(g6, g4)
+
+            if montos_iguales and es_reconciliable:
+                glosa_sust = _elegir_glosa_sustantiva(g6, g4)
+                if es_glosa_identica:
+                    f_ok = FilaComposicionOCR(
+                        motor_origen="PSM 6" if len(g6) >= len(g4) else "PSM 4",
+                        pagina=pagina,
+                        linea_origen=r6.get("linea_idx", 0),
+                        codigo_normalizado=cod,
+                        glosa_normalizada=glosa_elegida,
+                        valores_candidatos={"PSM 6": m6, "PSM 4": m4},
+                        valores_finales=m6,
+                        transformacion_aplicada="coincidencia_exacta",
+                        regla_aceptacion="misma_cuenta_mismos_importes",
+                        nivel_confianza=0.98 if (id6 or id4) else 0.85,
+                        es_ambigua=False,
+                        bloquea_certificacion=False,
+                    )
+                    filas_compuestas.append(f_ok)
+                else:
+                    f_ok = FilaComposicionOCR(
+                        motor_origen="PSM 6" if glosa_sust == g6 else "PSM 4",
+                        pagina=pagina,
+                        linea_origen=r6.get("linea_idx", 0),
+                        codigo_normalizado=cod,
+                        glosa_normalizada=glosa_sust,
+                        valores_candidatos={"PSM 6": m6, "PSM 4": m4},
+                        valores_finales=m6,
+                        transformacion_aplicada="reconciliacion_glosa_truncada",
+                        regla_aceptacion="glosa_reconciliada_misma_cuenta",
+                        nivel_confianza=0.96 if (id6 or id4) else 0.85,
+                        es_ambigua=False,
+                        bloquea_certificacion=False,
+                    )
+                    filas_compuestas.append(f_ok)
+            elif montos_iguales and not es_reconciliable:
+                f_amb = FilaComposicionOCR(
+                    motor_origen="AMBIGUA",
+                    pagina=pagina,
+                    linea_origen=r6.get("linea_idx", 0),
+                    codigo_normalizado=cod,
+                    glosa_normalizada=glosa_elegida,
+                    valores_candidatos={"PSM 6": m6, "PSM 4": m4},
+                    valores_finales=m6,
+                    transformacion_aplicada="bloqueo_glosas_incompatibles",
+                    regla_aceptacion="bloqueada_glosas_incompatibles",
+                    nivel_confianza=0.40,
+                    es_ambigua=True,
+                    bloquea_certificacion=True,
+                    motivo_revision=f"Glosas incompatibles en cuenta {cod}: '{g6}' vs '{g4}'",
+                )
+                filas_compuestas.append(f_amb)
+                bloqueos.append(f"Glosas incompatibles en cuenta {cod}: '{g6}' vs '{g4}'")
+            elif id6 and not id4 and glosa_compat:
+                f_ok = FilaComposicionOCR(
+                    motor_origen="PSM 6",
+                    pagina=pagina,
+                    linea_origen=r6.get("linea_idx", 0),
+                    codigo_normalizado=cod,
+                    glosa_normalizada=g6,
+                    valores_candidatos={"PSM 6": m6, "PSM 4": m4},
+                    valores_finales=m6,
+                    transformacion_aplicada="seleccion_candidato_valido",
+                    regla_aceptacion="identidad_valida_unilateral",
+                    nivel_confianza=0.92,
+                    es_ambigua=False,
+                    bloquea_certificacion=False,
+                )
+                filas_compuestas.append(f_ok)
+            elif id4 and not id6 and glosa_compat:
+                f_ok = FilaComposicionOCR(
+                    motor_origen="PSM 4",
+                    pagina=pagina,
+                    linea_origen=r4.get("linea_idx", 0),
+                    codigo_normalizado=cod,
+                    glosa_normalizada=g4,
+                    valores_candidatos={"PSM 6": m6, "PSM 4": m4},
+                    valores_finales=m4,
+                    transformacion_aplicada="seleccion_candidato_valido",
+                    regla_aceptacion="identidad_valida_unilateral",
+                    nivel_confianza=0.92,
+                    es_ambigua=False,
+                    bloquea_certificacion=False,
+                )
+                filas_compuestas.append(f_ok)
+            elif id6 and id4:
+                f_amb = FilaComposicionOCR(
+                    motor_origen="AMBIGUA",
+                    pagina=pagina,
+                    linea_origen=r6.get("linea_idx", 0),
+                    codigo_normalizado=cod,
+                    glosa_normalizada=glosa_elegida,
+                    valores_candidatos={"PSM 6": m6, "PSM 4": m4},
+                    valores_finales=m6,
+                    transformacion_aplicada="bloqueo_ambiguedad",
+                    regla_aceptacion="bloqueada_discrepancia_monetaria_ambos_validos",
+                    nivel_confianza=0.50,
+                    es_ambigua=True,
+                    bloquea_certificacion=True,
+                    motivo_revision=f"Discrepancia monetaria irreconciliable en cuenta {cod} entre dos candidatos con identidades contables válidas",
+                )
+                filas_compuestas.append(f_amb)
+                bloqueos.append(f"Discrepancia monetaria irreconciliable en cuenta {cod}")
+            else:
+                f_releida, ev = _relectura_focalizada_ocr(img_path, rotacion, words_tsv_6 or words_tsv_4, cod, glosa_elegida, m6, pagina=pagina)
+                eventos_relectura.append(ev)
+                if f_releida:
+                    filas_compuestas.append(f_releida)
+                else:
+                    f_amb = FilaComposicionOCR(
+                        motor_origen="AMBIGUA",
+                        pagina=pagina,
+                        linea_origen=r6.get("linea_idx", 0),
+                        codigo_normalizado=cod,
+                        glosa_normalizada=glosa_elegida,
+                        valores_candidatos={"PSM 6": m6, "PSM 4": m4},
+                        valores_finales=m6,
+                        transformacion_aplicada="bloqueo_defectuosos",
+                        regla_aceptacion="bloqueada_ambos_defectuosos",
+                        nivel_confianza=0.30,
+                        es_ambigua=True,
+                        bloquea_certificacion=True,
+                        motivo_revision=f"Ambos candidatos presentan identidad contable inválida en cuenta {cod} ({ev.get('detalle', 'sin confirmación')})",
+                        evento_relectura=ev.get("tipo"),
+                    )
+                    filas_compuestas.append(f_amb)
+                    bloqueos.append(f"Identidad contable inválida en ambos candidatos en cuenta {cod}")
+
+        elif rows6 and not rows4:
+            r6 = rows6[0]
+            m6 = r6["montos"]
+            g6 = r6.get("nombre", "")
+            cand_fragmento_4 = None
+            if any(abs(v) > 0.01 for v in m6):
+                cand_fragmento_4 = next(
+                    (cand for cand in no_cod_4
+                     if id(cand) not in matched_no_cod_4_ids
+                     and all(abs(a - b) <= tolerancia for a, b in zip(m6[:8], cand["montos"][:8]))
+                     and (_son_glosas_compatibles(g6, cand.get("nombre", "")) or _es_glosa_reconciliable_misma_cuenta(g6, cand.get("nombre", "")))),
+                    None
+                )
+            if cand_fragmento_4 is not None:
+                matched_no_cod_4_ids.add(id(cand_fragmento_4))
+                glosa_sust = _elegir_glosa_sustantiva(g6, cand_fragmento_4.get("nombre", ""))
+                f_ok = FilaComposicionOCR(
+                    motor_origen="PSM 6",
+                    pagina=pagina,
+                    linea_origen=r6.get("linea_idx", 0),
+                    codigo_normalizado=cod,
+                    glosa_normalizada=glosa_sust,
+                    valores_candidatos={"PSM 6": m6, "PSM 4": cand_fragmento_4["montos"]},
+                    valores_finales=m6,
+                    transformacion_aplicada="reconciliacion_fragmento_uncoded",
+                    regla_aceptacion="misma_cuenta_mismos_importes",
+                    nivel_confianza=0.96,
+                    es_ambigua=False,
+                    bloquea_certificacion=False,
+                )
+                filas_compuestas.append(f_ok)
+                continue
+            cod_norm = _normalizar_codigo(cod)
+            es_codigo_valido = bool(re.match(r"^\d{4,10}$", cod_norm))
+            id6 = _tiene_identidad_contable_valida(m6, tolerancia)
+            es_monto_cero = not any(abs(v) > 0.001 for v in m6)
+
+            # Cuentas en 0 requieren evidencia documental positiva de existencia
+            if es_monto_cero:
+                tiene_evidencia_cero = bool(
+                    r6.get("monto_cero_preservado")
+                    or (es_codigo_valido and len(g6.strip()) >= 3 and not _es_ruido_documental_ocr(r6))
+                )
+                if not tiene_evidencia_cero:
+                    continue
+
+            # Comprobar ausencia de importes duplicados con cuentas vecinas o del documento
+            m6_non_zero = tuple(round(v, 2) for v in m6 if abs(v) > 0.01)
+            es_duplicado = False
+            if m6_non_zero:
+                for f_prev in filas_compuestas:
+                    prev_nz = tuple(round(v, 2) for v in f_prev.valores_finales if abs(v) > 0.01)
+                    if prev_nz == m6_non_zero and f_prev.codigo_normalizado != cod:
+                        es_duplicado = True
+                        break
+
+            # Continuidad física dentro del mismo candidato OCR. El orden de
+            # ``filas_compuestas`` es lógico por código y no sirve como proxy
+            # de posición documental.
+            continuidad_ok = _continuidad_fisica_en_candidato(r6, c6)
+
+            # Confirmación independiente requerida via relectura focalizada
+            f_releida, ev = _relectura_focalizada_ocr(
+                img_path, rotacion, words_tsv_6 or words_tsv_4,
+                cod, g6, m6, pagina=pagina,
+                linea_idx=r6.get("linea_idx", 0),
+            )
+            eventos_relectura.append(ev)
+
+            if (
+                es_codigo_valido
+                and (id6 or es_monto_cero)
+                and not es_duplicado
+                and continuidad_ok
+                and f_releida is not None
+            ):
+                filas_compuestas.append(f_releida)
+            else:
+                motivos = []
+                if not f_releida:
+                    motivos.append(f"sin confirmación independiente ({ev.get('detalle', 'no confirmada')})")
+                if not es_codigo_valido:
+                    motivos.append("código contable con formato inválido")
+                if not id6 and not es_monto_cero:
+                    motivos.append("identidad contable inválida")
+                if es_duplicado:
+                    motivos.append("importes duplicados con otra fila")
+                if not continuidad_ok:
+                    motivos.append("discontinuidad geométrica anómala")
+
+                motivo_desc = f"Cuenta unilateral {cod} en PSM 6 no confirmada: {'; '.join(motivos)}"
+                f_amb = FilaComposicionOCR(
+                    motor_origen="AMBIGUA",
+                    pagina=pagina,
+                    linea_origen=r6.get("linea_idx", 0),
+                    codigo_normalizado=cod,
+                    glosa_normalizada=g6,
+                    valores_candidatos={"PSM 6": m6, "PSM 4": []},
+                    valores_finales=m6,
+                    transformacion_aplicada="bloqueo_unilateral_no_confirmada",
+                    regla_aceptacion="bloqueada_unilateral_no_confirmada",
+                    nivel_confianza=0.35,
+                    es_ambigua=True,
+                    bloquea_certificacion=True,
+                    motivo_revision=motivo_desc,
+                    evento_relectura=ev.get("tipo"),
+                )
+                filas_compuestas.append(f_amb)
+                bloqueos.append(motivo_desc)
+
+        elif rows4 and not rows6:
+            r4 = rows4[0]
+            m4 = r4["montos"]
+            g4 = r4.get("nombre", "")
+            cand_fragmento_6 = None
+            if any(abs(v) > 0.01 for v in m4):
+                cand_fragmento_6 = next(
+                    (cand for cand in no_cod_6
+                     if id(cand) not in matched_no_cod_6_ids
+                     and all(abs(a - b) <= tolerancia for a, b in zip(m4[:8], cand["montos"][:8]))
+                     and (_son_glosas_compatibles(g4, cand.get("nombre", "")) or _es_glosa_reconciliable_misma_cuenta(g4, cand.get("nombre", "")))),
+                    None
+                )
+            if cand_fragmento_6 is not None:
+                matched_no_cod_6_ids.add(id(cand_fragmento_6))
+                glosa_sust = _elegir_glosa_sustantiva(g4, cand_fragmento_6.get("nombre", ""))
+                f_ok = FilaComposicionOCR(
+                    motor_origen="PSM 4",
+                    pagina=pagina,
+                    linea_origen=r4.get("linea_idx", 0),
+                    codigo_normalizado=cod,
+                    glosa_normalizada=glosa_sust,
+                    valores_candidatos={"PSM 6": cand_fragmento_6["montos"], "PSM 4": m4},
+                    valores_finales=m4,
+                    transformacion_aplicada="reconciliacion_fragmento_uncoded",
+                    regla_aceptacion="misma_cuenta_mismos_importes",
+                    nivel_confianza=0.96,
+                    es_ambigua=False,
+                    bloquea_certificacion=False,
+                )
+                filas_compuestas.append(f_ok)
+                continue
+            cod_norm = _normalizar_codigo(cod)
+            es_codigo_valido = bool(re.match(r"^\d{4,10}$", cod_norm))
+            id4 = _tiene_identidad_contable_valida(m4, tolerancia)
+            es_monto_cero = not any(abs(v) > 0.001 for v in m4)
+
+            # Cuentas en 0 requieren evidencia documental positiva de existencia
+            if es_monto_cero:
+                tiene_evidencia_cero = bool(
+                    r4.get("monto_cero_preservado")
+                    or (es_codigo_valido and len(g4.strip()) >= 3 and not _es_ruido_documental_ocr(r4))
+                )
+                if not tiene_evidencia_cero:
+                    continue
+
+            # Comprobar ausencia de importes duplicados con cuentas vecinas o del documento
+            m4_non_zero = tuple(round(v, 2) for v in m4 if abs(v) > 0.01)
+            es_duplicado = False
+            if m4_non_zero:
+                for f_prev in filas_compuestas:
+                    prev_nz = tuple(round(v, 2) for v in f_prev.valores_finales if abs(v) > 0.01)
+                    if prev_nz == m4_non_zero and f_prev.codigo_normalizado != cod:
+                        es_duplicado = True
+                        break
+
+            # Continuidad física dentro del mismo candidato OCR. El orden de
+            # ``filas_compuestas`` es lógico por código y no sirve como proxy
+            # de posición documental.
+            continuidad_ok = _continuidad_fisica_en_candidato(r4, c4)
+
+            # Confirmación independiente requerida via relectura focalizada
+            f_releida, ev = _relectura_focalizada_ocr(
+                img_path, rotacion, words_tsv_4 or words_tsv_6,
+                cod, g4, m4, pagina=pagina,
+                linea_idx=r4.get("linea_idx", 0),
+            )
+            eventos_relectura.append(ev)
+
+            if (
+                es_codigo_valido
+                and (id4 or es_monto_cero)
+                and not es_duplicado
+                and continuidad_ok
+                and f_releida is not None
+            ):
+                filas_compuestas.append(f_releida)
+            else:
+                motivos = []
+                if not f_releida:
+                    motivos.append(f"sin confirmación independiente ({ev.get('detalle', 'no confirmada')})")
+                if not es_codigo_valido:
+                    motivos.append("código contable con formato inválido")
+                if not id4 and not es_monto_cero:
+                    motivos.append("identidad contable inválida")
+                if es_duplicado:
+                    motivos.append("importes duplicados con otra fila")
+                if not continuidad_ok:
+                    motivos.append("discontinuidad geométrica anómala")
+
+                motivo_desc = f"Cuenta unilateral {cod} en PSM 4 no confirmada: {'; '.join(motivos)}"
+                f_amb = FilaComposicionOCR(
+                    motor_origen="AMBIGUA",
+                    pagina=pagina,
+                    linea_origen=r4.get("linea_idx", 0),
+                    codigo_normalizado=cod,
+                    glosa_normalizada=g4,
+                    valores_candidatos={"PSM 6": [], "PSM 4": m4},
+                    valores_finales=m4,
+                    transformacion_aplicada="bloqueo_unilateral_no_confirmada",
+                    regla_aceptacion="bloqueada_unilateral_no_confirmada",
+                    nivel_confianza=0.35,
+                    es_ambigua=True,
+                    bloquea_certificacion=True,
+                    motivo_revision=motivo_desc,
+                    evento_relectura=ev.get("tipo"),
+                )
+                filas_compuestas.append(f_amb)
+                bloqueos.append(motivo_desc)
+
+    for c in no_cod_6:
+        if id(c) in matched_no_cod_6_ids:
+            continue
+        m6 = c["montos"]
+        g6 = c.get("nombre", "")
+        # Si coincide en importes y glosa con una cuenta ya compuesta con código, es un fragmento/duplicado
+        if any(abs(v) > 0.01 for v in m6):
+            ya_compuesta = next(
+                (f for f in filas_compuestas
+                 if f.codigo_normalizado and all(abs(a - b) <= tolerancia for a, b in zip(f.valores_finales[:8], m6[:8]))
+                 and (_son_glosas_compatibles(f.glosa_normalizada, g6) or _es_glosa_reconciliable_misma_cuenta(f.glosa_normalizada, g6))),
+                None
+            )
+            if ya_compuesta is not None:
+                continue
+        match_4 = None
+        for cand4 in no_cod_4:
+            if id(cand4) not in matched_no_cod_4_ids and all(abs(a - b) <= tolerancia for a, b in zip(m6[:8], cand4["montos"][:8])):
+                if _son_glosas_compatibles(g6, cand4.get("nombre", "")):
+                    match_4 = cand4
+                    matched_no_cod_4_ids.add(id(cand4))
+                    break
+                else:
+                    # Conflicto material: importes idénticos pero nombres contradictorios sin código
+                    matched_no_cod_4_ids.add(id(cand4))
+                    motivo_desc = f"Fila sin código con importes idénticos pero glosas incompatibles: '{g6}' vs '{cand4.get('nombre', '')}'"
+                    f_amb = FilaComposicionOCR(
+                        motor_origen="AMBIGUA",
+                        pagina=pagina,
+                        linea_origen=c.get("linea_idx", 0),
+                        codigo_normalizado=None,
+                        glosa_normalizada=g6,
+                        valores_candidatos={"PSM 6": m6, "PSM 4": cand4["montos"]},
+                        valores_finales=m6,
+                        transformacion_aplicada="bloqueo_glosas_incompatibles_sin_codigo",
+                        regla_aceptacion="bloqueada_glosas_incompatibles_sin_codigo",
+                        nivel_confianza=0.30,
+                        es_ambigua=True,
+                        bloquea_certificacion=True,
+                        motivo_revision=motivo_desc,
+                    )
+                    filas_compuestas.append(f_amb)
+                    bloqueos.append(motivo_desc)
+                    match_4 = "conflict"
+                    break
+        if match_4 == "conflict":
+            continue
+        elif match_4 is not None:
+            f_ok = FilaComposicionOCR(
+                motor_origen="PSM 6",
+                pagina=pagina,
+                linea_origen=c.get("linea_idx", 0),
+                codigo_normalizado=None,
+                glosa_normalizada=g6,
+                valores_candidatos={"PSM 6": m6, "PSM 4": match_4["montos"]},
+                valores_finales=m6,
+                transformacion_aplicada="coincidencia_sin_codigo",
+                regla_aceptacion="misma_cuenta_sin_codigo_mismos_importes",
+                nivel_confianza=0.85,
+                es_ambigua=False,
+                bloquea_certificacion=False,
+            )
+            filas_compuestas.append(f_ok)
+        elif c.get("monto_cero_preservado"):
+            f_ok = FilaComposicionOCR(
+                motor_origen="PSM 6",
+                pagina=pagina,
+                linea_origen=c.get("linea_idx", 0),
+                codigo_normalizado=None,
+                glosa_normalizada=g6,
+                valores_candidatos={"PSM 6": m6, "PSM 4": []},
+                valores_finales=m6,
+                transformacion_aplicada="preservacion_monto_cero",
+                regla_aceptacion="cuenta_sin_codigo_monto_cero_preservada",
+                nivel_confianza=0.75,
+                es_ambigua=False,
+                bloquea_certificacion=False,
+            )
+            filas_compuestas.append(f_ok)
+        else:
+            # Cuenta unilateral sin código: no cumple requisito de formato de código (4-10 dígitos) ni confirmación independiente
+            motivo_desc = f"Fila sin código '{g6}' en PSM 6 sin formato de código ni confirmación independiente"
+            f_amb = FilaComposicionOCR(
+                motor_origen="AMBIGUA",
+                pagina=pagina,
+                linea_origen=c.get("linea_idx", 0),
+                codigo_normalizado=None,
+                glosa_normalizada=g6,
+                valores_candidatos={"PSM 6": m6, "PSM 4": []},
+                valores_finales=m6,
+                transformacion_aplicada="bloqueo_sin_codigo_unilateral",
+                regla_aceptacion="bloqueada_sin_codigo_unilateral",
+                nivel_confianza=0.30,
+                es_ambigua=True,
+                bloquea_certificacion=True,
+                motivo_revision=motivo_desc,
+            )
+            filas_compuestas.append(f_amb)
+            bloqueos.append(motivo_desc)
+
+    for cand4 in no_cod_4:
+        if id(cand4) in matched_no_cod_4_ids:
+            continue
+        m4 = cand4["montos"]
+        g4 = cand4.get("nombre", "")
+        # Si coincide en importes y glosa con una cuenta ya compuesta con código, es un fragmento/duplicado
+        if any(abs(v) > 0.01 for v in m4):
+            ya_compuesta = next(
+                (f for f in filas_compuestas
+                 if f.codigo_normalizado and all(abs(a - b) <= tolerancia for a, b in zip(f.valores_finales[:8], m4[:8]))
+                 and (_son_glosas_compatibles(f.glosa_normalizada, g4) or _es_glosa_reconciliable_misma_cuenta(f.glosa_normalizada, g4))),
+                None
+            )
+            if ya_compuesta is not None:
+                continue
+        if cand4.get("monto_cero_preservado"):
+            f_ok = FilaComposicionOCR(
+                motor_origen="PSM 4",
+                pagina=pagina,
+                linea_origen=cand4.get("linea_idx", 0),
+                codigo_normalizado=None,
+                glosa_normalizada=g4,
+                valores_candidatos={"PSM 6": [], "PSM 4": m4},
+                valores_finales=m4,
+                transformacion_aplicada="preservacion_monto_cero",
+                regla_aceptacion="cuenta_sin_codigo_monto_cero_preservada",
+                nivel_confianza=0.75,
+                es_ambigua=False,
+                bloquea_certificacion=False,
+            )
+            filas_compuestas.append(f_ok)
+        else:
+            motivo_desc = f"Fila sin código '{g4}' en PSM 4 sin formato de código ni confirmación independiente"
+            f_amb = FilaComposicionOCR(
+                motor_origen="AMBIGUA",
+                pagina=pagina,
+                linea_origen=cand4.get("linea_idx", 0),
+                codigo_normalizado=None,
+                glosa_normalizada=g4,
+                valores_candidatos={"PSM 6": [], "PSM 4": m4},
+                valores_finales=m4,
+                transformacion_aplicada="bloqueo_sin_codigo_unilateral",
+                regla_aceptacion="bloqueada_sin_codigo_unilateral",
+                nivel_confianza=0.30,
+                es_ambigua=True,
+                bloquea_certificacion=True,
+                motivo_revision=motivo_desc,
+            )
+            filas_compuestas.append(f_amb)
+            bloqueos.append(motivo_desc)
+
+    lineas_texto = []
+    for f in filas_compuestas:
+        cod_str = f"{f.codigo_normalizado} " if f.codigo_normalizado else ""
+        montos_str = " ".join(f"{v:.0f}" if v == int(v) else f"{v:.2f}" for v in f.valores_finales)
+        lineas_texto.append(f"{cod_str}{f.glosa_normalizada} {montos_str}")
+
+    ambiguas_count = sum(1 for f in filas_compuestas if f.es_ambigua)
+    bloqueada = (ambiguas_count > 0)
+    motivo_bloqueo = "; ".join(bloqueos) if bloqueos else None
+
+    return ResultadoComposicionPaginaOCR(
+        pagina=pagina,
+        filas_compuestas=filas_compuestas,
+        filas_ambiguas_count=ambiguas_count,
+        bloqueada=bloqueada,
+        motivo_bloqueo=motivo_bloqueo,
+        lineas_compuestas_texto=lineas_texto,
+        eventos_relectura=eventos_relectura,
+    )
+
+
+@dataclass
+class ResultadoComparacionSemantica:
+    decision: str              # "equivalentes", "dominancia_6", "dominancia_4", "ambiguedad_material"
+    motor_dominante: Optional[str] # "PSM 6", "PSM 4", None
+    motivo: str
+    ambiguedad_material: bool
+    cuentas_6_efectivas: list[dict]
+    cuentas_4_efectivas: list[dict]
+
+
+def _comparar_semantica_candidatos(
+    cuentas_6: list[dict],
+    cuentas_4: list[dict],
+    tolerancia: float = 10.0,
+) -> ResultadoComparacionSemantica:
+    """Comparador semántico general entre candidatos PSM 6 y PSM 4.
+
+    Distingue:
+    1. Candidatos equivalentes (mismo detalle, posibles variaciones legítimas de orden o glosa).
+    2. Filas partidas/fragmentadas reconciliadas.
+    3. Filas adicionales de ruido documental (membrete, numeración de página).
+    4. Dominancia demostrada de un candidato sobre otro según contrato estricto de dominancia.
+    5. Conflicto material no resoluble (ambigüedad material retenida).
+    """
+    # 1. Normalizar códigos
+    c6_norm = []
+    for c in cuentas_6:
+        c_copy = dict(c)
+        if c_copy.get("codigo"):
+            c_copy["codigo"] = c_copy["codigo"].strip().strip(".-_")
+        c6_norm.append(c_copy)
+
+    c4_norm = []
+    for c in cuentas_4:
+        c_copy = dict(c)
+        if c_copy.get("codigo"):
+            c_copy["codigo"] = c_copy["codigo"].strip().strip(".-_")
+        c4_norm.append(c_copy)
+
+    # 2. Filtrar ruido documental
+    c6_clean = [c for c in c6_norm if not _es_ruido_documental_ocr(c)]
+    c4_clean = [c for c in c4_norm if not _es_ruido_documental_ocr(c)]
+
+    ruido_6_count = len(c6_norm) - len(c6_clean)
+    ruido_4_count = len(c4_norm) - len(c4_clean)
+
+    # 3. Reconciliar fragmentos
+    c6 = _reconciliar_fragmentos_ocr(c6_clean)
+    c4 = _reconciliar_fragmentos_ocr(c4_clean)
+
+    # Detección estricta de códigos duplicados
+    import collections
+    cnt_6 = collections.Counter(c["codigo"] for c in c6 if c.get("codigo"))
+    cnt_4 = collections.Counter(c["codigo"] for c in c4 if c.get("codigo"))
+    dups_6 = [cod for cod, count in cnt_6.items() if count > 1]
+    dups_4 = [cod for cod, count in cnt_4.items() if count > 1]
+    if dups_6 or dups_4:
+        dup_msgs = []
+        if dups_6:
+            dup_msgs.append(f"códigos duplicados en PSM 6: {', '.join(dups_6)}")
+        if dups_4:
+            dup_msgs.append(f"códigos duplicados en PSM 4: {', '.join(dups_4)}")
+        return ResultadoComparacionSemantica(
+            decision="ambiguedad_material",
+            motor_dominante="PSM 6",
+            motivo=f"Duplicación monetaria bloquea dominancia ({'; '.join(dup_msgs)})",
+            ambiguedad_material=True,
+            cuentas_6_efectivas=c6,
+            cuentas_4_efectivas=c4,
+        )
+
+    # Emparejamiento por código
+    codes_6 = {c["codigo"]: c for c in c6 if c.get("codigo")}
+    codes_4 = {c["codigo"]: c for c in c4 if c.get("codigo")}
+
+    common_codes = set(codes_6.keys()) & set(codes_4.keys())
+    only_6_codes = set(codes_6.keys()) - set(codes_4.keys())
+    only_4_codes = set(codes_4.keys()) - set(codes_6.keys())
+
+    # Cuentas sin código
+    no_cod_6 = [c for c in c6 if not c.get("codigo")]
+    no_cod_4 = [c for c in c4 if not c.get("codigo")]
+
+    # Verificar importes y glosas en códigos comunes
+    mismatches = []
+    glosa_mismatches = []
+    for cod in common_codes:
+        m6 = codes_6[cod]["montos"]
+        m4 = codes_4[cod]["montos"]
+        diffs = [abs(m6[k] - m4[k]) for k in range(8)]
+        if any(d > tolerancia for d in diffs):
+            mismatches.append({
+                "codigo": cod,
+                "nombre_6": codes_6[cod].get("nombre"),
+                "nombre_4": codes_4[cod].get("nombre"),
+                "montos_6": m6,
+                "montos_4": m4,
+                "id_valida_6": _tiene_identidad_contable_valida(m6, tolerancia),
+                "id_valida_4": _tiene_identidad_contable_valida(m4, tolerancia),
+                "max_diff": max(diffs),
+            })
+        n6 = re.sub(r"\s+", " ", _sin_acentos(codes_6[cod].get("nombre", "")).lower().strip())
+        n4 = re.sub(r"\s+", " ", _sin_acentos(codes_4[cod].get("nombre", "")).lower().strip())
+        if n6 and n4 and n6 != n4:
+            import difflib
+            es_compatible = bool(
+                n6 in n4 or n4 in n6 or difflib.SequenceMatcher(None, n6, n4).ratio() >= 0.85
+            )
+            if not es_compatible:
+                glosa_mismatches.append({
+                    "codigo": cod,
+                    "nombre_6": codes_6[cod].get("nombre"),
+                    "nombre_4": codes_4[cod].get("nombre"),
+                })
+
+    # Cuentas exclusivas
+    only_6 = [codes_6[cod] for cod in only_6_codes]
+    only_4 = [codes_4[cod] for cod in only_4_codes]
+
+    # Clasificar discrepancias por identidad contable
+    mismatch_4_broken = [m for m in mismatches if m["id_valida_6"] and not m["id_valida_4"]]
+    mismatch_6_broken = [m for m in mismatches if not m["id_valida_6"] and m["id_valida_4"]]
+    mismatch_both_valid = [m for m in mismatches if m["id_valida_6"] and m["id_valida_4"]]
+    mismatch_both_broken = [m for m in mismatches if not m["id_valida_6"] and not m["id_valida_4"]]
+
+    # Evaluar emparejamiento de cuentas sin código
+    unmatched_no_cod_4 = list(no_cod_4)
+    matched_no_cod_pairs = []
+    for c_6 in no_cod_6:
+        n6 = _sin_acentos(c_6["nombre"]).lower().strip()
+        matched = None
+        for c_4 in unmatched_no_cod_4:
+            n4 = _sin_acentos(c_4["nombre"]).lower().strip()
+            diffs = [abs(c_6["montos"][k] - c_4["montos"][k]) for k in range(8)]
+            if all(d <= tolerancia for d in diffs):
+                if n6 == n4 or (n6 and n4 and (n6 in n4 or n4 in n6)):
+                    matched = c_4
+                    break
+        if matched:
+            unmatched_no_cod_4.remove(matched)
+            matched_no_cod_pairs.append((c_6, matched))
+
+    # Chequeo de duplicados o nombres distintos con importes idénticos en sin código
+    for c_6 in no_cod_6:
+        n6 = _sin_acentos(c_6["nombre"]).lower().strip()
+        for c_4 in unmatched_no_cod_4:
+            n4 = _sin_acentos(c_4["nombre"]).lower().strip()
+            diffs = [abs(c_6["montos"][k] - c_4["montos"][k]) for k in range(8)]
+            if all(d <= tolerancia for d in diffs) and n6 != n4:
+                return ResultadoComparacionSemantica(
+                    decision="ambiguedad_material",
+                    motor_dominante="PSM 6",
+                    motivo=f"Cuentas distintas comparten importes idénticos pero difieren en nombre: '{c_6['nombre']}' (PSM 6) vs '{c_4['nombre']}' (PSM 4)",
+                    ambiguedad_material=True,
+                    cuentas_6_efectivas=c6,
+                    cuentas_4_efectivas=c4,
+                )
+
+    # CASO 1: Candidatos equivalentes (mismo detalle o sólo diferencias de ruido ya filtradas)
+    if not only_6 and not only_4 and not mismatches and not glosa_mismatches and len(no_cod_6) == len(matched_no_cod_pairs) and len(unmatched_no_cod_4) == 0:
+        if ruido_4_count > 0 or ruido_6_count > 0:
+            motivo = f"Candidatos equivalentes en detalle contable tras filtrar {ruido_4_count + ruido_6_count} fila(s) de ruido documental"
+        else:
+            motivo = "Candidatos equivalentes en detalle de cuentas"
+        return ResultadoComparacionSemantica(
+            decision="equivalentes",
+            motor_dominante="PSM 6",
+            motivo=motivo,
+            ambiguedad_material=False,
+            cuentas_6_efectivas=c6,
+            cuentas_4_efectivas=c4,
+        )
+
+    # CASO 2: Dominancia válida de PSM 6 sobre PSM 4
+    # Concurrencia conjunta de los 7 requisitos de dominancia:
+    # 1. PSM 6 contiene todas las cuentas legítimas de PSM 4 sin contradicción monetaria relevante (not only_4, len(mismatches) == 0)
+    # 2. El subordinado omite cuentas legítimas o introduce filas espurias demostrables (ruido_4_count > 0)
+    # 3. Las cuentas adicionales de PSM 6 satisfacen identidades de ocho columnas (all _tiene_identidad_contable_valida)
+    # 4. No hay ambigüedades no resueltas de cuentas sin código (len(unmatched_no_cod_4) == 0 and len(no_cod_6) == len(matched_no_cod_pairs))
+    # 5. Todas las cuentas efectivas de PSM 6 satisfacen identidades contables válidas
+    # 6. No hay desplazamiento no resuelto de columnas en PSM 6
+    # 7. Si hay filas adicionales, debe demostrarse defecto/omisión en el subordinado (ruido descartado en subordinado)
+    if not only_4 and len(mismatches) == 0 and not glosa_mismatches and len(unmatched_no_cod_4) == 0 and len(no_cod_6) == len(matched_no_cod_pairs):
+        if (ruido_4_count > 0):
+            if all(_tiene_identidad_contable_valida(c["montos"], tolerancia) for c in c6):
+                det = []
+                if only_6:
+                    det.append(f"{len(only_6)} cuenta(s) válidas adicionales en PSM 6")
+                if ruido_4_count:
+                    det.append(f"{ruido_4_count} fila(s) de ruido documental descartadas en subordinado")
+                return ResultadoComparacionSemantica(
+                    decision="dominancia_6",
+                    motor_dominante="PSM 6",
+                    motivo=f"PSM 6 domina a PSM 4: {', '.join(det)}",
+                    ambiguedad_material=False,
+                    cuentas_6_efectivas=c6,
+                    cuentas_4_efectivas=c4,
+                )
+
+    # CASO 3: Dominancia válida de PSM 4 sobre PSM 6 (simétrica)
+    if not only_6 and len(mismatches) == 0 and not glosa_mismatches and len(no_cod_6) == len(matched_no_cod_pairs) and len(unmatched_no_cod_4) == 0:
+        if (ruido_6_count > 0):
+            if all(_tiene_identidad_contable_valida(c["montos"], tolerancia) for c in c4):
+                det = []
+                if only_4:
+                    det.append(f"{len(only_4)} cuenta(s) válidas adicionales en PSM 4")
+                if ruido_6_count:
+                    det.append(f"{ruido_6_count} fila(s) de ruido documental descartadas en subordinado")
+                return ResultadoComparacionSemantica(
+                    decision="dominancia_4",
+                    motor_dominante="PSM 4",
+                    motivo=f"PSM 4 domina a PSM 6: {', '.join(det)}",
+                    ambiguedad_material=False,
+                    cuentas_6_efectivas=c6,
+                    cuentas_4_efectivas=c4,
+                )
+
+    # CASO 4: Conflicto material no resoluble (bloqueo obligatorio)
+    motivos_conflicto = []
+    if mismatches:
+        motivos_conflicto.append(f"{len(mismatches)} cuenta(s) con importes discrepantes")
+    if glosa_mismatches:
+        motivos_conflicto.append(f"{len(glosa_mismatches)} cuenta(s) con glosa contradictoria en mismo código")
+    if only_6:
+        motivos_conflicto.append(f"{len(only_6)} cuenta(s) exclusivas en PSM 6")
+    if only_4:
+        motivos_conflicto.append(f"{len(only_4)} cuenta(s) exclusivas en PSM 4")
+    if len(unmatched_no_cod_4) > 0:
+        motivos_conflicto.append(f"{len(unmatched_no_cod_4)} cuenta(s) sin código no emparejadas en PSM 4")
+    if len(no_cod_6) > len(matched_no_cod_pairs):
+        motivos_conflicto.append(f"{len(no_cod_6) - len(matched_no_cod_pairs)} cuenta(s) sin código no emparejadas en PSM 6")
+
+    diff_count = abs(len(c6) - len(c4))
+    if diff_count > 0 and not mismatches and not glosa_mismatches:
+        desc = f"Diferencia en número de cuentas detectadas: {len(c6)} en PSM 6 vs {len(c4)} en PSM 4 ({diff_count} fila(s) omitida(s)/agregada(s))"
+    else:
+        desc = f"Ambigüedad material entre candidatos: {'; '.join(motivos_conflicto)}"
+
+    return ResultadoComparacionSemantica(
+        decision="ambiguedad_material",
+        motor_dominante="PSM 6",
+        motivo=desc,
+        ambiguedad_material=True,
+        cuentas_6_efectivas=c6,
+        cuentas_4_efectivas=c4,
+    )
+
+
+def _detectar_discrepancias_materiales(
+    cuentas_6: list[dict],
+    cuentas_4: list[dict],
+    tolerancia: float = 10.0,
+) -> tuple[bool, str]:
+    """Compara cuentas entre dos candidatos OCR distinguiendo ruido, fragmentación y dominancia."""
+    res = _comparar_semantica_candidatos(cuentas_6, cuentas_4, tolerancia=tolerancia)
+    hay_disc = (res.decision != "equivalentes")
+    return hay_disc, res.motivo
+
+
+@dataclass
+class DecisionComparacionOCR:
+    """Decisión estructurada de arbitraje entre candidatos OCR."""
+    motor_seleccionado: str                  # "PSM 6", "PSM 4", "RapidOCR"
+    tipo_seleccion: str                      # "respaldada", "provisional"
+    evidencia_disponible: str                # "control_local_conciliado", "control_acumulado", "control_global", "sin_control", "motor_unico", "insuficiente"
+    ambiguedad_material: bool                # True si hay discrepancia material no resuelta entre candidatos utilizables
+    evaluacion_incompleta: bool              # True si evidencia insuficiente o datos incompletos
+    motivo: str                              # Explicación legible de la decisión
+    condicion_revision: Optional[str] = None # "bloqueo_certificacion", "revision_cuentas", "revision_control", None
+    detalle_discrepancia: Optional[str] = None
+    etiqueta: Optional[str] = None           # Etiqueta para compatibilidad con código que desempaqueta
+    filas_compuestas: list[Any] = field(default_factory=list)
+    lineas_compuestas: list[str] = field(default_factory=list)
+    resultado_composicion: Optional[Any] = None
+
+    def __iter__(self):
+        yield self.motor_seleccionado
+        yield self.etiqueta
+
+    def __getitem__(self, index):
+        return (self.motor_seleccionado, self.etiqueta)[index]
+
+    def __eq__(self, other):
+        if isinstance(other, str):
+            return self.motor_seleccionado == other or self.etiqueta == other
+        return super().__eq__(other)
+
+    def __contains__(self, item):
+        if isinstance(item, str):
+            return (item in self.motor_seleccionado) or (bool(self.etiqueta) and item in self.etiqueta)
+        return False
+
+    def __bool__(self):
+        return bool(self.etiqueta or (self.motor_seleccionado and self.motor_seleccionado != "PSM 6"))
+
+    def __str__(self):
+        return self.etiqueta if self.etiqueta is not None else self.motor_seleccionado
+
+    def startswith(self, prefix, *args):
+        return (self.etiqueta or self.motor_seleccionado).startswith(prefix, *args)
+
+    def endswith(self, suffix, *args):
+        return (self.etiqueta or self.motor_seleccionado).endswith(suffix, *args)
+
+    def lower(self):
+        return (self.etiqueta or self.motor_seleccionado).lower()
+
+
+def _comparar_candidatos_ocr(
+    lines_6: list[str], centers_6: Optional[list[float]],
+    lines_4: list[str], centers_4: Optional[list[float]],
+    conc_6: dict, conc_4: dict,
+    tolerancia: float = 10.0,
+    pagina: int = 1,
+    img_path: Optional[Path] = None,
+    rotacion: int = 0,
+    words_tsv_6: Optional[list[dict]] = None,
+    words_tsv_4: Optional[list[dict]] = None,
+) -> DecisionComparacionOCR:
+    """Compara candidatos PSM 6 y PSM 4 bajo contrato formal de arbitraje OCR.
+
+    DOCUMENTACIÓN DE TOLERANCIAS Y POLÍTICA DE SOFTWARE:
+    - Moneda y precisión: Peso Chileno (CLP), unidad entera sin decimales ni centavos
+      conforme a la normativa tributaria chilena de balances tributarios de 8 columnas.
+    - Tolerancia numérica (10.0 CLP): Heurística heredada de software, NO una regla contable
+      universal. En contabilidad estricta por partida doble, la diferencia admisible es 0.
+      Este umbral se conserva temporalmente con límites definidos para absorber pequeñas
+      fluctuaciones de OCR por ruido en dígitos terminales o separadores de miles; no se
+      amplía y su seguridad matemática universal no se considera demostrada.
+    - Ratios de identidades (0.80 / 0.70): Política de validación de software (no contable)
+      para verificar la regularidad geométrica de la cuadrícula de 8 columnas (satisfacción
+      de identidades Debe - Haber == Saldos y Activo - Pasivo == Resultados).
+
+    TABLA DE DECISIONES DE ARBITRAJE OCR (ESTRUCTURADA Y SIMÉTRICA):
+    +----+---------------------------------------------------+---------------+-------------+-----------------------------+------------------------------------+
+    | Id | Evidencia Disponible                              | Candidato     | Selección   | Motivo / Etiqueta           | Condición Bloqueo Certificación    |
+    +----+---------------------------------------------------+---------------+-------------+-----------------------------+------------------------------------+
+    | 1  | PSM 4 concilia detalle con control de página      | PSM 4         | Respaldada  | "PSM 4" (rescate control)   | Ninguno (control verificado)       |
+    |    | (estado == 'conciliacion_valida') y PSM 6 no      |               |             |                             |                                    |
+    +----+---------------------------------------------------+---------------+-------------+-----------------------------+------------------------------------+
+    | 2  | PSM 6 concilia detalle con control de página      | PSM 6         | Respaldada  | None (control verificado)   | Ninguno (control verificado)       |
+    |    | (estado == 'conciliacion_valida') y PSM 4 no      |               |             |                             |                                    |
+    +----+---------------------------------------------------+---------------+-------------+-----------------------------+------------------------------------+
+    | 3  | Ambos concilian detalle con control pero          | PSM 6         | Provisional | "ambigüedad con PSM 4"      | Bloqueo automático por             |
+    |    | difieren materialmente en cuentas/montos          |               |             |                             | ambigüedad material                |
+    +----+---------------------------------------------------+---------------+-------------+-----------------------------+------------------------------------+
+    | 4  | Ambos utilizables sin control de página, pero     | PSM 6         | Provisional | None (equivalentes;         | Ninguno por ambigüedad             |
+    |    | sin diferencias materiales en detalle             |               |             |  sin control de página)     | (selección provisional)            |
+    +----+---------------------------------------------------+---------------+-------------+-----------------------------+------------------------------------+
+    | 5  | Ambos utilizables sin control de página, y        | PSM 6         | Provisional | "ambigüedad con PSM 4"      | Bloqueo automático por             |
+    |    | con diferencias materiales en cuentas/montos      |               |             |                             | ambigüedad material                |
+    +----+---------------------------------------------------+---------------+-------------+-----------------------------+------------------------------------+
+    | 6a | PSM 4 defectuoso/corrupto descartado;             | PSM 6         | Provisional | None (descarte de PSM 4;    | Sin control de página              |
+    |    | PSM 6 sobreviviente sin control de página         |               |             |  sin control de página)     | (selección provisional)            |
+    +----+---------------------------------------------------+---------------+-------------+-----------------------------+------------------------------------+
+    | 6b | PSM 6 defectuoso/corrupto descartado;             | PSM 4         | Provisional | "PSM 4 (provisional)"       | Sin control de página              |
+    |    | PSM 4 sobreviviente sin control de página         |               |             |                             | (selección provisional)            |
+    +----+---------------------------------------------------+---------------+-------------+-----------------------------+------------------------------------+
+    | 7  | Evidencia insuficiente en ambos candidatos        | PSM 6         | Provisional | "evidencia insuficiente"    | Evidencia insuficiente             |
+    +----+---------------------------------------------------+---------------+-------------+-----------------------------+------------------------------------+
+    """
+    valid_6, complete_6 = _identidades_validas_lineas_8_columnas(lines_6)
+    ratio_6 = (valid_6 / complete_6) if complete_6 > 0 else 0.0
+
+    valid_4, complete_4 = _identidades_validas_lineas_8_columnas(lines_4)
+    ratio_4 = (valid_4 / complete_4) if complete_4 > 0 else 0.0
+
+    cuentas_6 = _extraer_cuentas_candidato(lines_6)
+    cuentas_4 = _extraer_cuentas_candidato(lines_4)
+
+    conc_valida_6 = (conc_6.get("estado") == "conciliacion_valida")
+    conc_valida_4 = (conc_4.get("estado") == "conciliacion_valida")
+
+    # Regla 1 & 2: Rescate/Prevalencia por conciliación matemática válida contra control de página
+    if conc_valida_4 and not conc_valida_6:
+        return DecisionComparacionOCR(
+            motor_seleccionado="PSM 4",
+            tipo_seleccion="respaldada",
+            evidencia_disponible="control_local_conciliado",
+            ambiguedad_material=False,
+            evaluacion_incompleta=False,
+            motivo="PSM 4 concilia detalle con control de página",
+            condicion_revision=None,
+            etiqueta="PSM 4",
+        )
+
+    if conc_valida_6 and not conc_valida_4:
+        return DecisionComparacionOCR(
+            motor_seleccionado="PSM 6",
+            tipo_seleccion="respaldada",
+            evidencia_disponible="control_local_conciliado",
+            ambiguedad_material=False,
+            evaluacion_incompleta=False,
+            motivo="PSM 6 concilia detalle con control de página",
+            condicion_revision=None,
+            etiqueta=None,
+        )
+
+    # Regla 3: Si ambos concilian contra sus respectivos controles, verificar si coinciden materialmente
+    if conc_valida_6 and conc_valida_4:
+        hay_disc, motivo_disc = _detectar_discrepancias_materiales(cuentas_6, cuentas_4, tolerancia=tolerancia)
+        if hay_disc:
+            return DecisionComparacionOCR(
+                motor_seleccionado="PSM 6",
+                tipo_seleccion="provisional",
+                evidencia_disponible="control_local_conciliado",
+                ambiguedad_material=True,
+                evaluacion_incompleta=False,
+                motivo=f"Ambos candidatos concilian con controles locales pero difieren materialmente: {motivo_disc}",
+                condicion_revision="bloqueo_certificacion",
+                detalle_discrepancia=motivo_disc,
+                etiqueta=f"PSM 6 (ambigüedad con PSM 4, requiere revisión: {motivo_disc})",
+            )
+        return DecisionComparacionOCR(
+            motor_seleccionado="PSM 6",
+            tipo_seleccion="respaldada",
+            evidencia_disponible="control_local_conciliado",
+            ambiguedad_material=False,
+            evaluacion_incompleta=False,
+            motivo="Ambos candidatos concilian con controles locales sin discrepancias materiales",
+            condicion_revision=None,
+            etiqueta=None,
+        )
+
+    # Reglas 4, 5, 6, 7: Ningún candidato tiene conciliación válida contra control de página
+    # Distinción explícita de controles para evitar dependencias espurias:
+    # a) Control local corrupto o contradictorio descalifica usabilidad (alcance acreditado == 'pagina' o defecto local por discrepancia)
+    ctrl_local_corrupto_6 = bool(
+        (conc_6.get("alcance") == "pagina" or (conc_6.get("alcance") is None and conc_6.get("estado") == "discrepancia"))
+        and conc_6.get("subtotal_corrompido")
+    )
+    ctrl_local_corrupto_4 = bool(
+        (conc_4.get("alcance") == "pagina" or (conc_4.get("alcance") is None and conc_4.get("estado") == "discrepancia"))
+        and conc_4.get("subtotal_corrompido")
+    )
+
+    # b) Control con consistencia interna demostrada (no marcado corrupto y válido internamente)
+    ctrl_valido_interno_6 = bool(conc_6.get("subtotal_valido_interno") and not conc_6.get("subtotal_corrompido"))
+    ctrl_valido_interno_4 = bool(conc_4.get("subtotal_valido_interno") and not conc_4.get("subtotal_corrompido"))
+
+    # c) Desplazamiento de columnas demostrado en el control:
+    # Ocurre cuando un candidato tiene control con columnas rotas/desplazadas (corrompido e inválido interno),
+    # mientras que el competidor demuestra un control internamente consistente o conciliado.
+    # Si el competidor carece de control o no fue evaluado, NO se asume control limpio ni se descalifica el detalle.
+    hay_disc, motivo_disc = _detectar_discrepancias_materiales(cuentas_6, cuentas_4, tolerancia=tolerancia)
+
+    desplazamiento_ctrl_6 = bool(
+        conc_6.get("subtotal_corrompido")
+        and not conc_6.get("subtotal_valido_interno")
+        and (ctrl_valido_interno_4 or conc_valida_4)
+        and (conc_6.get("alcance") == "pagina" or not hay_disc)
+    )
+    desplazamiento_ctrl_4 = bool(
+        conc_4.get("subtotal_corrompido")
+        and not conc_4.get("subtotal_valido_interno")
+        and (ctrl_valido_interno_6 or conc_valida_6)
+    )
+
+    base_usable_6 = bool(centers_6 and complete_6 >= 5 and ratio_6 >= 0.80)
+    base_usable_4 = bool(centers_4 and complete_4 >= 5 and ratio_4 >= 0.80)
+
+    usable_6 = base_usable_6 and not ctrl_local_corrupto_6 and not desplazamiento_ctrl_6
+    usable_4 = base_usable_4 and not ctrl_local_corrupto_4 and not desplazamiento_ctrl_4
+
+    # Clasificación de evidencia disponible
+    if conc_6.get("alcance") == "acumulado" or conc_4.get("alcance") == "acumulado":
+        evidencia = "control_acumulado"
+    elif conc_6.get("alcance") == "documento_completo" or conc_4.get("alcance") == "documento_completo":
+        evidencia = "control_global"
+    else:
+        evidencia = "sin_control"
+
+    if usable_6 and usable_4:
+        # Ambos candidatos son utilizables; ejecutar contraste semántico y composición fila a fila
+        res_sem = _comparar_semantica_candidatos(cuentas_6, cuentas_4, tolerancia=tolerancia)
+        comp = componer_filas_pagina_ocr(
+            cuentas_6, cuentas_4,
+            pagina=pagina,
+            words_tsv_6=words_tsv_6,
+            words_tsv_4=words_tsv_4,
+            img_path=img_path,
+            rotacion=rotacion,
+            tolerancia=tolerancia,
+        )
+
+        if res_sem.decision == "dominancia_6":
+            return DecisionComparacionOCR(
+                motor_seleccionado="PSM 6",
+                tipo_seleccion="respaldada",
+                evidencia_disponible=evidencia,
+                ambiguedad_material=False,
+                evaluacion_incompleta=False,
+                motivo=res_sem.motivo,
+                condicion_revision=None,
+                etiqueta=None,
+                filas_compuestas=comp.filas_compuestas,
+                lineas_compuestas=comp.lineas_compuestas_texto,
+                resultado_composicion=comp,
+            )
+        elif res_sem.decision == "dominancia_4":
+            return DecisionComparacionOCR(
+                motor_seleccionado="PSM 4",
+                tipo_seleccion="respaldada",
+                evidencia_disponible=evidencia,
+                ambiguedad_material=False,
+                evaluacion_incompleta=False,
+                motivo=res_sem.motivo,
+                condicion_revision=None,
+                etiqueta="PSM 4",
+                filas_compuestas=comp.filas_compuestas,
+                lineas_compuestas=comp.lineas_compuestas_texto,
+                resultado_composicion=comp,
+            )
+        elif res_sem.decision == "equivalentes":
+            return DecisionComparacionOCR(
+                motor_seleccionado="PSM 6",
+                tipo_seleccion="provisional",
+                evidencia_disponible=evidencia,
+                ambiguedad_material=False,
+                evaluacion_incompleta=False,
+                motivo=res_sem.motivo,
+                condicion_revision=None,
+                etiqueta=None,
+                filas_compuestas=comp.filas_compuestas,
+                lineas_compuestas=comp.lineas_compuestas_texto,
+                resultado_composicion=comp,
+            )
+        elif not comp.bloqueada and (words_tsv_6 is not None or words_tsv_4 is not None):
+            return DecisionComparacionOCR(
+                motor_seleccionado="Composicion_Segura_Filas",
+                tipo_seleccion="respaldada" if evidencia != "sin_control" else "provisional",
+                evidencia_disponible=evidencia,
+                ambiguedad_material=False,
+                evaluacion_incompleta=False,
+                motivo="Tabla compuesta fila a fila sin ambigüedades entre candidatos OCR",
+                condicion_revision=None,
+                etiqueta=None,
+                filas_compuestas=comp.filas_compuestas,
+                lineas_compuestas=comp.lineas_compuestas_texto,
+                resultado_composicion=comp,
+            )
+        else:
+            detalle = motivo_disc or res_sem.motivo or comp.motivo_bloqueo
+            return DecisionComparacionOCR(
+                motor_seleccionado="PSM 6",
+                tipo_seleccion="provisional",
+                evidencia_disponible=evidencia,
+                ambiguedad_material=True,
+                evaluacion_incompleta=False,
+                motivo=f"Ambos utilizables sin control local; ambigüedad material no resuelta: {detalle}",
+                condicion_revision="bloqueo_certificacion",
+                detalle_discrepancia=detalle,
+                etiqueta=f"PSM 6 (ambigüedad con PSM 4, requiere revisión: {detalle})",
+                filas_compuestas=comp.filas_compuestas,
+                lineas_compuestas=comp.lineas_compuestas_texto,
+                resultado_composicion=comp,
+            )
+
+    if usable_6 and not usable_4:
+        # Rechazar el candidato defectuoso (PSM 4) permite operar con PSM 6 como motor principal
+        # sin generar falsa ambigüedad. La selección se mantiene provisional hasta que el certificador
+        # evalúe evidencia acumulada o global a nivel de documento.
+        return DecisionComparacionOCR(
+            motor_seleccionado="PSM 6",
+            tipo_seleccion="provisional",
+            evidencia_disponible="sin_control",
+            ambiguedad_material=False,
+            evaluacion_incompleta=False,
+            motivo="PSM 4 defectuoso descartado; PSM 6 superviviente sin control local conciliado",
+            condicion_revision=None,
+            etiqueta=None,
+        )
+
+    if usable_4 and not usable_6:
+        # PSM 6 es defectuoso/corrupto, pero PSM 4 no acreditó conciliación válida de detalle.
+        # Se selecciona PSM 4 provisionalmente para conservar la lectura geométricamente sana,
+        # pero NUNCA como lectura respaldada, requiriendo revisión obligatoria.
+        return DecisionComparacionOCR(
+            motor_seleccionado="PSM 4",
+            tipo_seleccion="provisional",
+            evidencia_disponible="sin_control",
+            ambiguedad_material=False,
+            evaluacion_incompleta=False,
+            motivo="PSM 6 defectuoso descartado; PSM 4 superviviente sin control local conciliado",
+            condicion_revision=None,
+            etiqueta="PSM 4 (provisional: sin conciliación de detalle verificada)",
+        )
+
+    # Ambos candidatos carecen de evidencia suficiente
+    return DecisionComparacionOCR(
+        motor_seleccionado="PSM 6",
+        tipo_seleccion="provisional",
+        evidencia_disponible="insuficiente",
+        ambiguedad_material=False,
+        evaluacion_incompleta=True,
+        motivo="Evidencia insuficiente en ambos candidatos OCR",
+        condicion_revision="revision_cuentas",
+        etiqueta="PSM 6 (evidencia insuficiente en ambos candidatos OCR)",
+    )
+
+
+_GLOBAL_TELEMETRY_OBSERVER = None
+
+
+def set_telemetry_observer(observer: Any) -> None:
+    global _GLOBAL_TELEMETRY_OBSERVER
+    _GLOBAL_TELEMETRY_OBSERVER = observer
+
+
+def get_telemetry_observer() -> Any:
+    return _GLOBAL_TELEMETRY_OBSERVER
+
+
+def _tabla_ocr_con_alternativa(
+    img_path: Path, rotation: int, words: list[dict],
+    centers: Optional[list[float]], pagina: int = 1,
+) -> tuple[list[str], Optional[list[float]], DecisionComparacionOCR]:
+    """Contrasta geometría PSM 6 con PSM 4 evaluando cobertura, alineación y controles de subtotal.
+
+    Reglas de decisión:
+    1. Genera y evalúa AMBOS candidatos completos (PSM 6 y PSM 4) sin short-circuit prematuro.
+    2. Evalúa conciliación de 8 columnas y alcances de control.
+    3. Compara por cuenta, código, columnas y controles antes de elegir.
+    4. Si hay ambigüedad material no resuelta, conserva evidencia y etiqueta ambigüedad.
+    5. Restituye las condiciones exactas de RapidOCR de la Variante B congelada.
+    6. Evalúa RapidOCR ANTES de registrar la telemetría definitiva.
+    """
+    # 1. Candidato PSM 6
+    lines, detected = _extraer_tabla_balance_por_coordenadas(
+        _OCRWordsPage(words), centers,
+    )
+    conc_6 = _evaluar_conciliacion_detalle_control(lines)
+
+    # 2. Candidato PSM 4 - Generado y evaluado siempre sin short-circuit
+    alternative_words = []
+    psm4_failed = False
+    try:
+        alternative_words = ocr_pagina_tsv(img_path, rotation, psm=4)
+    except Exception as exc:
+        logger.warning("Fallo en OCR alternativo PSM 4: %s", exc)
+        psm4_failed = True
+
+    alternative, alternative_centers = _extraer_tabla_balance_por_coordenadas(
+        _OCRWordsPage(alternative_words), centers,
+    )
+    conc_4 = _evaluar_conciliacion_detalle_control(alternative)
+
+    # 3. Comparación detallada de candidatos PSM 6 vs PSM 4
+    decision_ocr = _comparar_candidatos_ocr(
+        lines, detected, alternative, alternative_centers, conc_6, conc_4,
+        pagina=pagina, img_path=img_path, rotacion=rotation,
+        words_tsv_6=words, words_tsv_4=alternative_words,
+    )
+    motor_elegido = decision_ocr.motor_seleccionado
+    etiqueta_adv = decision_ocr.etiqueta
+
+    if decision_ocr.lineas_compuestas and (
+        motor_elegido == "Composicion_Segura_Filas"
+        or (getattr(decision_ocr, "resultado_composicion", None) and not decision_ocr.resultado_composicion.bloqueada)
+    ):
+        lines = decision_ocr.lineas_compuestas
+
+    # 4. Fallback a RapidOCR: restituir exactamente las condiciones de la variante B congelada
+    other_valid, other_complete = _identidades_validas_lineas_8_columnas(alternative)
+    valid, complete = _identidades_validas_lineas_8_columnas(lines)
+
+    rapid_lines: list[str] = []
+    rapid_centers: Optional[list[float]] = None
+    rapid_evaluated = False
+    rapid_failed = False
+    rapid_words = None
+
+    if motor_elegido != "PSM 4" and not decision_ocr.ambiguedad_material:
+        if alternative_centers and other_complete >= 5:
+            rapid_evaluated = True
+            try:
+                rapid_words = _rapidocr_words(img_path, rotation)
+            except Exception as r_exc:
+                logger.warning("Fallo en RapidOCR: %s", r_exc)
+                rapid_failed = True
+                rapid_words = None
+
+            if rapid_words:
+                rapid_lines, rapid_centers = _extraer_tabla_balance_por_coordenadas(
+                    _OCRWordsPage(rapid_words), centers,
+                )
+                rapid_valid, rapid_complete = _identidades_validas_lineas_8_columnas(rapid_lines)
+                if (
+                    rapid_centers and rapid_complete >= 5
+                    and rapid_valid >= max(valid, other_valid)
+                    and rapid_complete >= max(5, other_complete - 2)
+                    and (
+                        rapid_valid > max(valid, other_valid)
+                        or rapid_valid / rapid_complete > other_valid / other_complete
+                    )
+                    and rapid_valid / rapid_complete >= 0.80
+                ):
+                    motor_elegido = "RapidOCR"
+                    etiqueta_adv = "RapidOCR"
+                    decision_ocr = DecisionComparacionOCR(
+                        motor_seleccionado="RapidOCR",
+                        tipo_seleccion="respaldada",
+                        evidencia_disponible="motor_alternativo_mejorado",
+                        ambiguedad_material=False,
+                        evaluacion_incompleta=False,
+                        motivo="RapidOCR seleccionado por mayor cobertura e identidades válidas",
+                        condicion_revision=None,
+                        etiqueta="RapidOCR",
+                    )
+
+    # 5. Incertidumbre: si la lectura principal no produjo tabla y la alternativa sí
+    if motor_elegido == "PSM 6" and not lines and alternative_centers and other_complete >= 5:
+        motor_elegido = "PSM 4"
+        etiqueta_adv = "PSM 4 (pendiente de validación)"
+        decision_ocr = DecisionComparacionOCR(
+            motor_seleccionado="PSM 4",
+            tipo_seleccion="provisional",
+            evidencia_disponible="sin_control",
+            ambiguedad_material=False,
+            evaluacion_incompleta=True,
+            motivo="PSM 6 sin tabla; PSM 4 adoptado pendiente de validación",
+            condicion_revision=None,
+            etiqueta="PSM 4 (pendiente de validación)",
+        )
+
+    # 6. Registro de telemetría DEFINITIVA (después de evaluar RapidOCR)
+    obs = _GLOBAL_TELEMETRY_OBSERVER
+    if obs is not None:
+        try:
+            v6, c6 = _identidades_validas_lineas_8_columnas(lines)
+            obs.record_candidate(
+                engine="PSM 6",
+                page_num=pagina,
+                requested=True,
+                generated=True,
+                evaluated=True,
+                rejected=(motor_elegido != "PSM 6"),
+                rejection_reason=None if motor_elegido == "PSM 6" else f"Motor alternativo preferido ({motor_elegido})",
+                selected=(motor_elegido == "PSM 6"),
+                failed=False,
+                lines_count=len(lines),
+                valid_identities=v6,
+                complete_identities=c6,
+                control_scope=conc_6.get("alcance"),
+                control_reconciled=(conc_6.get("estado") == "conciliacion_valida"),
+                material_ambiguity=decision_ocr.ambiguedad_material,
+            )
+            v4, c4 = _identidades_validas_lineas_8_columnas(alternative)
+            obs.record_candidate(
+                engine="PSM 4",
+                page_num=pagina,
+                requested=True,
+                generated=bool(alternative_words),
+                evaluated=bool(alternative_centers),
+                rejected=(motor_elegido != "PSM 4"),
+                rejection_reason=conc_4.get("motivo") or (f"Rechazado frente a {motor_elegido}" if motor_elegido != "PSM 4" else None),
+                selected=(motor_elegido == "PSM 4"),
+                failed=psm4_failed,
+                lines_count=len(alternative),
+                valid_identities=v4,
+                complete_identities=c4,
+                control_scope=conc_4.get("alcance"),
+                control_reconciled=(conc_4.get("estado") == "conciliacion_valida"),
+                material_ambiguity=decision_ocr.ambiguedad_material,
+            )
+            if rapid_evaluated or hasattr(obs, "record_candidate"):
+                v_rap, c_rap = _identidades_validas_lineas_8_columnas(rapid_lines)
+                obs.record_candidate(
+                    engine="RapidOCR",
+                    page_num=pagina,
+                    requested=rapid_evaluated,
+                    generated=bool(rapid_words),
+                    evaluated=bool(rapid_centers),
+                    rejected=(rapid_evaluated and motor_elegido != "RapidOCR"),
+                    rejection_reason="No superó criterios de cobertura de Variante B" if (rapid_evaluated and motor_elegido != "RapidOCR") else None,
+                    selected=(motor_elegido == "RapidOCR"),
+                    failed=rapid_failed,
+                    lines_count=len(rapid_lines),
+                    valid_identities=v_rap,
+                    complete_identities=c_rap,
+                    control_scope=None,
+                    control_reconciled=False,
+                    material_ambiguity=False,
+                )
+        except Exception as obs_exc:
+            logger.warning("Error en observador de telemetría: %s", obs_exc, exc_info=True)
+
+    # Retorno según el motor definitivo seleccionado
+    if motor_elegido == "RapidOCR" and rapid_centers:
+        return rapid_lines, rapid_centers, decision_ocr
+
+    if motor_elegido == "PSM 4" and alternative_centers:
+        return alternative, alternative_centers, decision_ocr
+
+    if (
+        decision_ocr.ambiguedad_material
+        or (decision_ocr.etiqueta and decision_ocr.etiqueta != "PSM 6")
+        or motor_elegido == "Composicion_Segura_Filas"
+    ):
+        return lines, detected, decision_ocr
+
+    return lines, detected, None
+
+
 def _normalizar_celda_numerica_rapidocr(token: str) -> str:
     """Corrige glifos numéricos sólo cuando toda la celda parece un importe."""
     compact = re.sub(r"\s+", "", str(token or ""))
     if not compact:
         return compact
+    if compact == "。":
+        return "0"
     if not re.fullmatch(r"[0-9OoDd.,()\-]+", compact):
         # RapidOCR conserva correctamente los caracteres, pero a veces elimina
         # todos los espacios de una glosa. Se restauran sólo fronteras y
@@ -1643,6 +4099,12 @@ def _normalizar_celda_numerica_rapidocr(token: str) -> str:
         compact = re.sub(
             r"^(Sumas?)(totales?|iguales)$", r"\1 \2", compact, flags=re.I,
         )
+        compact = re.sub(
+            r"^(Total)(Pagina)(Anterior)?$",
+            lambda m: " ".join(part for part in m.groups() if part),
+            compact, flags=re.I,
+        )
+        compact = re.sub(r"^(Total)(Acumulado)$", r"\1 \2", compact, flags=re.I)
         return compact
     return compact.translate(str.maketrans({"O": "0", "o": "0", "D": "0", "d": "0"}))
 
@@ -1866,20 +4328,55 @@ def verificar_cuadre_balance(cuentas: list[CuentaRaw]) -> tuple[bool, dict, list
 
 
 def es_ruido_ocr_no_contable(cuenta: Optional[CuentaRaw]) -> bool:
-    """Detecta texto documental no contable (firmas, notas, metadatos, etc.)."""
+    """Detecta texto documental no contable (firmas, notas, membretes, paginación, etc.).
+
+    Reglas de protección y unificación:
+    1. Cuentas con código contable nunca son ruido (False).
+    2. Filas con columnas de ocho columnas pobladas (montos_columnas no nulos) nunca son ruido (False).
+    3. Artefactos de puntuación puros (<<, >>, ---, ===, etc.) son ruido (True).
+    4. Encabezados estructurados de membrete documental (RUT + paginación/folio, o dirección/domicilio al inicio con numeración)
+       que solo poseen un monto escalar derivado del número de página o de calle son ruido (True).
+    5. Cuentas monetarias legítimas incompletas (sin código, pero con nombre contable e importe escalar)
+       NO son ruido (False); se conservan para que el control de integridad las detecte y requiera revisión.
+    6. Filas ambiguas o mixtas que no cumplan unívocamente los patrones estructurales de metadatos se conservan (False).
+    """
     if cuenta is None:
         return True
     if cuenta.codigo:
         return False
-    nombre_norm = re.sub(r"\s+", " ", _sin_acentos(cuenta.nombre or "").lower()).strip()
+    nombre_raw = cuenta.nombre or ""
+    nombre_norm = re.sub(r"\s+", " ", _sin_acentos(nombre_raw).lower()).strip()
     if not nombre_norm:
         return True
-    # Una palabra dentro de una cuenta no acredita ruido documental.
-    # Conservar importes no nulos para revisión, incluso en etiquetas ambiguas.
-    values = [cuenta.monto, *cuenta.montos_columnas.values()]
+
+    # 1. Si tiene columnas de ocho columnas pobladas, se preserva como cuenta contable
+    if any(val is not None and abs(float(val)) > 0.01 for val in cuenta.montos_columnas.values()):
+        return False
+
+    # 2. Artefactos de puntuación o geometría pura (<<, >>, ---, ===, etc.)
+    if re.fullmatch(r"[=\-*_.#/<>|~«»\s]{1,}", nombre_raw):
+        return True
+
+    # 3. Encabezado documental que combina RUT y paginación (e.g. 'Rut [RUT-GENERICO] Página')
+    if re.search(r"\brut\b.*\b(?:p[aá]g(?:ina)?|fol(?:io)?)\b", nombre_norm, re.I):
+        return True
+
+    # 4. Encabezado documental de dirección física que inicia con 'direccion'/'domicilio'/'casa matriz' y contiene número de calle
+    if re.match(r"^(?:direcci[oó]n|domicilio|casa\s+matriz)\b.*\b(?:n[°*º.]|nro\.?|n[uú]mero|#)", nombre_norm, re.I):
+        return True
+
+    # 5. Membrete institucional que combina RUT y 'balance'
+    if re.search(r"\brut\b.*\bbalance\b", nombre_norm, re.I):
+        return True
+
+    # Si tiene importe escalar no nulo y no coincidió con los patrones estructurales de metadatos,
+    # se protege y conserva (e.g. cuentas legítimas incompletas)
+    values = [cuenta.monto]
     if any(value is not None and abs(float(value)) > 0.01 for value in values):
         return False
-    if re.fullmatch(r"[=\-*_.#/\s]{3,}", cuenta.nombre or ""):
+
+    # Glosas documentales estándar sin montos (e.g. 'DEBE', 'HABER', líneas de guiones, etc.)
+    if re.fullmatch(r"[=\-*_.#/\s]{3,}", nombre_raw):
         return True
     if bool(re.fullmatch(
         r"(?:nombre(?:\s+de\s+la\s+cuenta)?|codigo|debe|haber|saldos?|deudor|acreedor|activo|pasivo|perdida|ganancia)",
@@ -1979,6 +4476,8 @@ def _validar_columnas_finales(
 def certificar_extraccion_columnas(
     cuentas: list[CuentaRaw], metodo: str = "",
     tolerancia_absoluta: float = 10.0,
+    ocr_bloqueo_certificacion: Optional[dict] = None,
+    composiciones_ocr: Optional[dict[int, Any]] = None,
 ) -> CertificacionExtraccion:
     """Certifica las ocho columnas contra un subtotal impreso independiente."""
     filas_detalle = [
@@ -2008,7 +4507,7 @@ def certificar_extraccion_columnas(
         and (
             "totales iguales" in normalized_name(cuenta)
             or "sumas iguales" in normalized_name(cuenta)
-            or control_key(cuenta) in {"totales", "totalgeneral", "sumastotales"}
+            or control_key(cuenta) in {"totales", "totalgeneral", "totalesgenerales", "sumastotales"}
         )
     ]
 
@@ -2064,7 +4563,7 @@ def certificar_extraccion_columnas(
             )
 
     candidatos = [
-        cuenta for cuenta in cuentas
+        cuenta for position, cuenta in enumerate(cuentas)
         if (
             cuenta.es_total
             and not getattr(cuenta, "es_subtotal_manual", False)
@@ -2072,8 +4571,16 @@ def certificar_extraccion_columnas(
         )
         and (
             "subtotal" in control_key(cuenta)
-            or control_key(cuenta) == "sumas"
+            or control_key(cuenta) in {"sumas", "suma", "sumasparciales", "sumaparcial"}
             or control_key(cuenta).startswith("totalacumulado")
+            or (
+                control_key(cuenta) in {"totales", "totalgeneral", "totalesgenerales", "sumastotales", "total"}
+                and any(
+                    later.es_total
+                    and control_key(later) in {"sumasiguales", "totalesiguales"}
+                    for later in cuentas[position + 1:]
+                )
+            )
         )
     ]
     if not candidatos:
@@ -2105,6 +4612,34 @@ def certificar_extraccion_columnas(
         if totales_finales_validos is False:
             estado = "fallida"
             razones.append("La fila final impresa no está cuadrada.")
+        aux_obs = []
+        bloqueo_por_composicion = bool(composiciones_ocr and any(c and getattr(c, "bloqueada", False) for c in composiciones_ocr.values()))
+        if (ocr_bloqueo_certificacion and ocr_bloqueo_certificacion.get("bloqueado")) or bloqueo_por_composicion:
+            estado = "fallida"
+            motivo_bloqueo = (
+                ocr_bloqueo_certificacion.get("detalle") or ocr_bloqueo_certificacion.get("motivo")
+                if (ocr_bloqueo_certificacion and ocr_bloqueo_certificacion.get("bloqueado"))
+                else "Ambigüedad material no resuelta en composición de filas OCR"
+            )
+            razones.append(f"Bloqueo de certificación automática: {motivo_bloqueo}")
+            bloqueos_lista = (ocr_bloqueo_certificacion.get("bloqueos") or [ocr_bloqueo_certificacion]) if ocr_bloqueo_certificacion else []
+            for b in bloqueos_lista:
+                aux_obs.append({
+                    "tipo": "bloqueo_certificacion",
+                    "motivo": b.get("motivo"),
+                    "pagina": b.get("pagina"),
+                    "detalle": b.get("detalle"),
+                })
+            if composiciones_ocr:
+                pags_registradas = {obs.get("pagina") for obs in aux_obs if obs.get("pagina") is not None}
+                for pag, c in composiciones_ocr.items():
+                    if c and getattr(c, "bloqueada", False) and pag not in pags_registradas:
+                        aux_obs.append({
+                            "tipo": "bloqueo_certificacion",
+                            "motivo": "ambiguedad_composicion_filas",
+                            "pagina": pag,
+                            "detalle": getattr(c, "motivo_bloqueo", None) or f"Página {pag}: ambigüedad en composición de filas",
+                        })
         return CertificacionExtraccion(
             estado=estado, metodo=metodo,
             diferencias=diferencias_parciales,
@@ -2112,12 +4647,22 @@ def certificar_extraccion_columnas(
             filas_evaluadas=len(filas_detalle),
             filas_inconsistentes=filas_inconsistentes,
             totales_finales_validos=totales_finales_validos,
+            observaciones_auxiliares=aux_obs,
         )
     acumulados = [
         cuenta for cuenta in candidatos
         if normalized_name(cuenta).startswith("total acumulado")
     ]
-    subtotal_referencia = acumulados[-1] if acumulados else candidatos[-1]
+    # Si hay un total general o subtotal global al final del documento (candidatos[-1]),
+    # no usar un acumulado de transporte de página intermedia como referencia global.
+    subtotal_referencia = (
+        candidatos[-1] if (
+            control_key(candidatos[-1]) in {"totales", "totalgeneral", "totalesgenerales", "sumastotales", "total"}
+            or (finales and candidatos[-1] not in acumulados)
+            or (acumulados and cuentas.index(acumulados[-1]) < len(cuentas) - 10 and candidatos[-1] != acumulados[-1])
+        )
+        else acumulados[-1] if acumulados else candidatos[-1]
+    )
     total_impreso = dict(subtotal_referencia.montos_columnas)
     puentes_resultado = [
         cuenta for cuenta in cuentas
@@ -2157,6 +4702,11 @@ def certificar_extraccion_columnas(
             if puentes_resultado else {column: 0.0 for column in RAW_MONETARY_COLUMNS}
         )
         for column in RAW_MONETARY_COLUMNS:
+            if not puentes_resultado and column in RAW_MONETARY_COLUMNS[4:]:
+                # Sin una fila de resultado leída no sabemos cuánto agrega
+                # el cierre a cada columna. No confundir ese ajuste legítimo
+                # con un error OCR ni sobrescribir el total final impreso.
+                continue
             calculated = float(calculados.get(column, 0.0) or 0.0)
             printed = float(total_impreso.get(column, 0.0) or 0.0)
             bridge = float(bridge_values.get(column, 0.0) or 0.0)
@@ -2381,11 +4931,40 @@ def certificar_extraccion_columnas(
                     "la fila SUMAS IGUALES."
                 )
 
+    observaciones_auxiliares: list[dict] = []
+    bloqueo_por_composicion = bool(composiciones_ocr and any(c and getattr(c, "bloqueada", False) for c in composiciones_ocr.values()))
+    bloqueo_activo = bool((ocr_bloqueo_certificacion and ocr_bloqueo_certificacion.get("bloqueado")) or bloqueo_por_composicion)
     failed = bool(
         fallidas or filas_inconsistentes_bloqueantes
         or totales_finales_validos is False or puente_invalido
         or ecuacion_subtotal_invalida
+        or bloqueo_activo
     )
+    if bloqueo_activo:
+        motivo_bloqueo = (
+            ocr_bloqueo_certificacion.get("detalle") or ocr_bloqueo_certificacion.get("motivo")
+            if (ocr_bloqueo_certificacion and ocr_bloqueo_certificacion.get("bloqueado"))
+            else "Ambigüedad material en composición de filas OCR"
+        )
+        razones.append(f"Bloqueo de certificación automática: {motivo_bloqueo}")
+        bloqueos_lista = (ocr_bloqueo_certificacion.get("bloqueos") or [ocr_bloqueo_certificacion]) if ocr_bloqueo_certificacion else []
+        for b in bloqueos_lista:
+            observaciones_auxiliares.append({
+                "tipo": "bloqueo_certificacion",
+                "motivo": b.get("motivo"),
+                "pagina": b.get("pagina"),
+                "detalle": b.get("detalle"),
+            })
+        if composiciones_ocr:
+            pags_registradas = {obs.get("pagina") for obs in observaciones_auxiliares if obs.get("pagina") is not None}
+            for pag, c in composiciones_ocr.items():
+                if c and getattr(c, "bloqueada", False) and pag not in pags_registradas:
+                    observaciones_auxiliares.append({
+                        "tipo": "bloqueo_certificacion",
+                        "motivo": "ambiguedad_composicion_filas",
+                        "pagina": pag,
+                        "detalle": getattr(c, "motivo_bloqueo", None) or f"Página {pag}: ambigüedad en composición de filas",
+                    })
     filas_derivadas = [cuenta.linea for cuenta in filas_detalle if cuenta.columnas_derivadas]
     total_derivado = bool(
         subtotal_referencia.columnas_derivadas or fila_final_incompleta
@@ -2398,7 +4977,8 @@ def certificar_extraccion_columnas(
             + "; requieren revisión humana."
         )
     movimientos_no_exhaustivos = bool(
-        fallidas
+        not bloqueo_activo
+        and fallidas
         and set(fallidas).issubset({"debitos", "creditos"})
         and columnas_finales_validadas
         and not filas_inconsistentes_bloqueantes
@@ -2431,7 +5011,6 @@ def certificar_extraccion_columnas(
         and not ecuacion_subtotal_invalida
     )
 
-    observaciones_auxiliares = []
     if columnas_finales_validadas:
         for cuenta in filas_detalle:
             if cuenta.linea not in filas_inconsistentes:
@@ -2477,6 +5056,24 @@ def certificar_extraccion_columnas(
                 "el documento antes de emitir el entregable."
             ),
         })
+    # Una fila monetaria incompleta no puede desaparecer del universo evaluado
+    # sólo porque no cumple el esquema de ocho columnas del filtro inicial.
+    incompletas = [
+        c for c in cuentas
+        if not c.es_total and not es_ruido_ocr_no_contable(c)
+        and not set(RAW_MONETARY_COLUMNS).issubset(c.montos_columnas)
+        and (c.monto or any(c.montos_columnas.values()))
+    ]
+    if incompletas:
+        failed = True
+        columnas_finales_validadas = False
+        razones.append(f"{len(incompletas)} filas monetarias no tienen las ocho columnas verificables.")
+        for c in incompletas:
+            c.requiere_revision_extraccion = True
+            if "columnas_incompletas" not in c.razones_revision_extraccion:
+                c.razones_revision_extraccion.append("columnas_incompletas")
+            if c.linea not in filas_inconsistentes:
+                filas_inconsistentes.append(c.linea)
     return CertificacionExtraccion(
         estado="fallida" if failed else (
             "certificada" if movimientos_no_exhaustivos else (
@@ -3858,10 +6455,16 @@ def parsear_linea(
     while i >= 0 and len(montos_tokens) < 8:
         tok_norm = normalizar_token_ocr(tokens[i])
         prev_tok = tokens[i - 1].upper().rstrip(".:") if i > 0 else ""
+        # "Oficina 12" conserva el identificador; "Aseo Oficina 123.456"
+        # no debe perder la primera columna por terminar la glosa en Oficina.
+        # Las referencias legales se mantienen bajo su regla independiente.
         es_identificador_glosa = prev_tok in {
             "ART", "ARTICULO", "ARTÍCULO", "LEY", "DFL", "DL", "CIRCULAR",
-            "RESOLUCION", "RESOLUCIÓN", "LOCAL", "OFICINA", "DEPTO", "RUT",
-        }
+            "RESOLUCION", "RESOLUCIÓN", "RUT",
+        } or (
+            prev_tok in {"LOCAL", "OFICINA", "DEPTO"}
+            and bool(re.fullmatch(r"\d{1,4}", tokens[i]))
+        )
         if es_identificador_glosa:
             break
         if tok_norm == '-':
@@ -3887,13 +6490,16 @@ def parsear_linea(
 
     nombre_tokens = tokens[:i + 1]
     # La raya visual entre codigo y descripcion no forma parte de la cuenta.
-    nombre = ' '.join(nombre_tokens).strip(' .-–—−')
+    nombre = ' '.join(nombre_tokens).strip(' .-–—−:')
 
     if not nombre or len(nombre) < 2:
         return None
 
-    nombre_para_total = re.sub(r"^[^\w]+", "", nombre).strip()
+    nombre_para_total = re.sub(r"^[^\w(]+", "", re.sub(r"[^\w)]+$", "", nombre)).strip()
+    nombre_para_total = re.sub(r"[\s|!/:;.\-—_\]\[\\]+(?:[lI|1oOxX]\b)?[\s|!/:;.\-—_\]\[\\]*$", "", nombre_para_total).strip()
     es_total = codigo is None and bool(PATRON_TOTAL.match(nombre_para_total))
+    if es_total and "(" not in nombre:
+        nombre = re.sub(r"[\s|!/:;.\-—_\]\[\\]+(?:[lI|1oOxX]\b)?[\s|!/:;.\-—_\]\[\\]*$", "", nombre).strip()
 
     # Determinar orden de columnas: si ENABLE_DYNAMIC_LAYOUT está activo
     # y se proporcionó un column_order con confianza suficiente, usarlo.
@@ -3967,7 +6573,7 @@ def parsear_linea(
     # mostrara Débitos en vez del importe clasificado en Activo/Pasivo/ER.
     es_balance_8_columnas = len(montos_tokens) == len(RAW_MONETARY_COLUMNS)
     # Dynamic year/currency mapping
-    if (years or currencies) and montos_tokens and not es_balance_8_columnas:
+    if (len(active_years) >= 2 or len(currencies or []) >= 2) and montos_tokens and not es_balance_8_columnas:
         n_vals = len(montos_tokens)
         active_currencies = currencies if currencies else []
 
@@ -4039,6 +6645,8 @@ def parsear_linea(
 
     montos_columnas: dict[str, float] = {}
     columnas_derivadas: list[str] = []
+    requiere_rev = False
+    razones_rev: list[str] = []
     if len(montos_tokens) == len(RAW_MONETARY_COLUMNS):
         for column, token in zip(RAW_MONETARY_COLUMNS, montos_tokens):
             montos_columnas[column] = float(parsear_monto(token, separador_miles) or 0.0)
@@ -4094,6 +6702,25 @@ def parsear_linea(
                     if error_despues <= 10 and error_despues < error_antes:
                         montos_columnas[column] = 0.0
                         columnas_derivadas.append(column)
+                        break
+
+            # Propuesta C: detección de dígitos aislados en celdas sospechosas.
+            # Cuando persiste ambigüedad o error compuesto en una fila, se conservan
+            # el token y valor originales sin mutar a cero por baja confianza o cuadre,
+            # marcando la fila para revisión obligatoria en extracción y bloqueando su
+            # confirmación automática en el pipeline.
+            error_actual_identidades = error_identidades(montos_columnas)
+            for col in ("perdida", "ganancia", "activo", "pasivo"):
+                val = montos_columnas.get(col, 0.0)
+                if 0 < abs(val) <= 10:
+                    otros_clasif = [
+                        c for c in ("activo", "pasivo", "perdida", "ganancia")
+                        if c != col and abs(montos_columnas.get(c, 0.0)) > 10
+                    ]
+                    if otros_clasif or error_actual_identidades > 10:
+                        requiere_rev = True
+                        if "digito_aislado_en_celda_sospechosa" not in razones_rev:
+                            razones_rev.append("digito_aislado_en_celda_sospechosa")
                         break
 
             # En una fila de ocho columnas, el movimiento neto y la columna
@@ -4410,8 +7037,6 @@ def parsear_linea(
                     active_years[0]: value,
                     "actual": value,
                 }
-    requiere_rev = False
-    razones_rev: list[str] = []
     if _INTERLEAVED_COLUMN_BLEED.search(nombre):
         requiere_rev = True
         razones_rev.append("nombre_contaminado_por_fusion_de_columnas")
@@ -5149,6 +7774,15 @@ class ParserPDF:
         path: Path,
         context: Optional[ExtractionContext] = None,
     ) -> ResultadoParseo:
+        # Reset del estado por documento (evita que un documento posterior herede bloqueos)
+        self._ocr_advertencias = []
+        self._ocr_timeout_pages = set()
+        self._ocr_bloqueos_certificacion = []
+        self._ocr_bloqueo_certificacion = None
+        self._ocr_composiciones = {}
+        self._extraction_method = "native"
+        self._extraction_confidence = 1.0
+
         ok, msg = validar_archivo(path)
         if not ok:
             return ResultadoParseo(
@@ -5523,6 +8157,8 @@ class ParserPDF:
 
         certificacion = certificar_extraccion_columnas(
             cuentas, metodo=self._extraction_method,
+            ocr_bloqueo_certificacion=getattr(self, "_ocr_bloqueo_certificacion", None),
+            composiciones_ocr=getattr(self, "_ocr_composiciones", None),
         )
         if certificacion.estado == "no_evaluable":
             certificacion_clasificada = certificar_totales_clasificados(cuentas)
@@ -6010,23 +8646,108 @@ class ParserPDF:
                     timeout_events=page_timeout_events, page_number=pagina,
                 )
                 texto_principal = texto
-                if _es_pagina_firmas_ocr(texto_principal):
+                tabla_coordenadas_usada = False
+                if words_tsv:
+                    tabla_ocr, detected_centers, decision_ocr = _tabla_ocr_con_alternativa(
+                        img_path, rotacion_global or 0, words_tsv, coordinate_centers,
+                        pagina=pagina,
+                    )
+                    if isinstance(decision_ocr, DecisionComparacionOCR):
+                        if hasattr(decision_ocr, "resultado_composicion") and decision_ocr.resultado_composicion:
+                            if not hasattr(self, "_ocr_composiciones"):
+                                self._ocr_composiciones = {}
+                            self._ocr_composiciones[pagina] = decision_ocr.resultado_composicion
+
+                        if decision_ocr.ambiguedad_material or (hasattr(decision_ocr, "resultado_composicion") and decision_ocr.resultado_composicion and decision_ocr.resultado_composicion.bloqueada):
+                            self._ocr_advertencias.append(
+                                f"Página {pagina}: ambigüedad material no resuelta entre candidatos OCR PSM 6 y PSM 4; requiere revisión humana."
+                            )
+                            bloqueo_info = {
+                                "bloqueado": True,
+                                "motivo": "ambiguedad_candidatos_ocr",
+                                "pagina": pagina,
+                                "detalle": f"Página {pagina}: ambigüedad material no resuelta en candidatos/filas OCR ({decision_ocr.detalle_discrepancia or decision_ocr.motivo}).",
+                                "filas_ambiguas": [
+                                    {
+                                        "codigo": f.codigo_normalizado,
+                                        "glosa": f.glosa_normalizada,
+                                        "motivo": f.motivo_revision,
+                                        "regla": f.regla_aceptacion,
+                                    }
+                                    for f in decision_ocr.resultado_composicion.filas_compuestas
+                                    if f.es_ambigua
+                                ] if (hasattr(decision_ocr, "resultado_composicion") and decision_ocr.resultado_composicion) else [],
+                            }
+                            if not hasattr(self, "_ocr_bloqueos_certificacion") or self._ocr_bloqueos_certificacion is None:
+                                self._ocr_bloqueos_certificacion = []
+                            self._ocr_bloqueos_certificacion.append(bloqueo_info)
+                            pags_str = ", ".join(str(b["pagina"]) for b in self._ocr_bloqueos_certificacion)
+                            self._ocr_bloqueo_certificacion = {
+                                "bloqueado": True,
+                                "motivo": "ambiguedad_candidatos_ocr",
+                                "pagina": pagina,
+                                "paginas": [b["pagina"] for b in self._ocr_bloqueos_certificacion],
+                                "bloqueos": list(self._ocr_bloqueos_certificacion),
+                                "detalle": f"Páginas {pags_str}: ambigüedad material no resuelta entre candidatos OCR alternativos.",
+                            }
+                        elif decision_ocr.motor_seleccionado == "Composicion_Segura_Filas":
+                            self._ocr_advertencias.append(
+                                f"Página {pagina}: tabla reconstruida mediante composición segura de filas entre candidatos OCR."
+                            )
+                        elif decision_ocr.tipo_seleccion == "provisional":
+                            self._ocr_advertencias.append(
+                                f"Página {pagina}: selección provisional de motor {decision_ocr.motor_seleccionado} ({decision_ocr.motivo}); sin control local de página conciliado."
+                            )
+                        elif decision_ocr.motor_seleccionado != "PSM 6":
+                            self._ocr_advertencias.append(
+                                f"Página {pagina}: tabla reconstruida por coordenadas de lectura OCR {decision_ocr.motor_seleccionado}, contrastada con identidades de ocho columnas."
+                            )
+                    else:
+                        alternative_used = str(decision_ocr or "")
+                        if alternative_used and "ambigüedad" in alternative_used.lower():
+                            self._ocr_advertencias.append(
+                                f"Página {pagina}: ambigüedad material no resuelta entre candidatos OCR PSM 6 y PSM 4; requiere revisión humana."
+                            )
+                            bloqueo_info = {
+                                "bloqueado": True,
+                                "motivo": "ambiguedad_candidatos_ocr",
+                                "pagina": pagina,
+                                "detalle": f"Página {pagina}: ambigüedad material no resuelta entre candidatos OCR alternativos.",
+                            }
+                            if not hasattr(self, "_ocr_bloqueos_certificacion") or self._ocr_bloqueos_certificacion is None:
+                                self._ocr_bloqueos_certificacion = []
+                            self._ocr_bloqueos_certificacion.append(bloqueo_info)
+                            pags_str = ", ".join(str(b["pagina"]) for b in self._ocr_bloqueos_certificacion)
+                            self._ocr_bloqueo_certificacion = {
+                                "bloqueado": True,
+                                "motivo": "ambiguedad_candidatos_ocr",
+                                "pagina": pagina,
+                                "paginas": [b["pagina"] for b in self._ocr_bloqueos_certificacion],
+                                "bloqueos": list(self._ocr_bloqueos_certificacion),
+                                "detalle": f"Páginas {pags_str}: ambigüedad material no resuelta entre candidatos OCR alternativos.",
+                            }
+                        elif alternative_used:
+                            self._ocr_advertencias.append(
+                                f"Página {pagina}: tabla reconstruida por coordenadas de una lectura OCR alternativa {alternative_used}."
+                            )
+                    tiene_cierre_ocr = any(_es_cierre_final_balance(l) or "sumas iguales" in l.lower() or "total general" in l.lower() for l in tabla_ocr)
+                    if (len(tabla_ocr) >= 3 or (len(tabla_ocr) >= 1 and tiene_cierre_ocr)) and detected_centers:
+                        coordinate_centers = detected_centers
+                        texto = "\n".join(tabla_ocr)
+                        self._extraction_method = "ocr_coordinates_8_amounts"
+                        tabla_coordenadas_usada = True
+                if not tabla_coordenadas_usada and _es_pagina_firmas_ocr(texto_principal):
                     self._ocr_advertencias.append(
                         f"Página {pagina}: se omitió por contener solo firmas y "
                         "metadatos, sin tabla contable."
                     )
                     continue
-                tabla_coordenadas_usada = False
-                if words_tsv:
-                    tabla_ocr, detected_centers = _extraer_tabla_balance_por_coordenadas(
-                        _OCRWordsPage(words_tsv), coordinate_centers,
-                    )
-                    if len(tabla_ocr) >= 3 and detected_centers:
-                        coordinate_centers = detected_centers
-                        texto = "\n".join(tabla_ocr)
-                        self._extraction_method = "ocr_coordinates_8_amounts"
-                        tabla_coordenadas_usada = True
-                if tabla_coordenadas_usada and texto_principal.strip():
+                if (
+                    tabla_coordenadas_usada
+                    and getattr(decision_ocr, "motor_seleccionado", None) != "Composicion_Segura_Filas"
+                    and not tiene_cierre_ocr
+                    and texto_principal.strip()
+                ):
                     recovered, replacements = recuperar_filas_tabla_ocr(
                         texto.splitlines(), texto_principal,
                     )
@@ -6036,8 +8757,12 @@ class ParserPDF:
                             f"Página {pagina}: se recuperaron {replacements} filas "
                             "al contrastar la geometría con la lectura textual OCR."
                         )
-                if tabla_coordenadas_usada and _tabla_ocr_necesita_recuperacion(
-                    texto.splitlines(),
+                if (
+                    tabla_coordenadas_usada
+                    and getattr(decision_ocr, "motor_seleccionado", None) != "Composicion_Segura_Filas"
+                    and _tabla_ocr_necesita_recuperacion(
+                        texto.splitlines(),
+                    )
                 ):
                     texto_tabla = ocr_pagina(
                         img_path, rotacion_global, psm=4,

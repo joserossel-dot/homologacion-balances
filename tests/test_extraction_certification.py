@@ -24,6 +24,33 @@ class FakePage:
         return words
 
 
+@pytest.mark.parametrize("glosa", ["ASEO OFICINA", "ARRIENDO LOCAL", "GASTOS DEPTO"])
+def test_importe_agrupado_tras_glosa_de_ubicacion_conserva_ocho_columnas(glosa):
+    """Regresión sintética del corte de la primera cifra tras OFICINA/LOCAL."""
+    cuenta = parser.parsear_linea(
+        f"{glosa} 123.456 0 123.456 0 0 0 123.456 0",
+        1, parser.FormatoCodigo.SIN_CODIGO, ".",
+    )
+    assert cuenta is not None
+    assert cuenta.nombre == glosa
+    assert set(parser.RAW_MONETARY_COLUMNS).issubset(cuenta.montos_columnas)
+    assert cuenta.montos_columnas["debitos"] == 123456
+    assert cuenta.montos_columnas["perdida"] == 123456
+
+
+@pytest.mark.parametrize("glosa", [
+    "ARRIENDO OFICINA 12", "ARRIENDO LOCAL 1234", "GASTOS DEPTO 2",
+    "IMPUESTOS LEY 19880", "IMPUESTOS LEY 19.880", "RETENCION ART. 42",
+])
+def test_referencia_numerica_de_glosa_no_se_convierte_en_importe(glosa):
+    cuenta = parser.parsear_linea(
+        f"{glosa} 123.456", 1, parser.FormatoCodigo.SIN_CODIGO, ".",
+    )
+    assert cuenta is not None
+    assert cuenta.nombre == glosa
+    assert cuenta.monto == 123456
+
+
 def _header(top=10):
     return top, [
         (133, 146, "CODIGO"), (173, 190, "CUENTA"),
@@ -113,6 +140,179 @@ def test_extractor_coordenadas_preserva_codigo_nombre_y_ocho_columnas():
         "activo": 100.0, "pasivo": 0.0,
         "perdida": 0.0, "ganancia": 0.0,
     }
+
+
+def _synthetic_ocr_table(*, broken=False):
+    return FakePage([
+        _header(),
+        *[_row(30 + i * 10, str(110101 + i), "CUENTA SINTETICA", [
+            "900", "800", "999" if broken else "100", "o", "100", "O", "o", "0",
+        ]) for i in range(6)],
+    ]).extract_words()
+
+
+def test_ocr_alternativo_recupera_tabla_sin_cabecera_principal(monkeypatch, tmp_path):
+    calls = []
+    def alternative(path, rotation, psm):
+        calls.append((rotation, psm))
+        return _synthetic_ocr_table()
+    monkeypatch.setattr(parser, "ocr_pagina_tsv", alternative)
+    lines, centers, used = parser._tabla_ocr_con_alternativa(
+        tmp_path / "synthetic.png", 90, [], None,
+    )
+    assert calls == [(90, 4)]
+    assert used and centers
+    assert len(lines) == 6
+    for i, line in enumerate(lines):
+        account = parser.parsear_linea(line, i, parser.FormatoCodigo.COMPACTO, ".")
+        assert account.monto == 100
+        assert account.origen_columna == parser.OrigenColumna.ACTIVO
+        assert account.montos_columnas["debitos"] == 900
+        assert account.montos_columnas["creditos"] == 800
+
+
+def test_ocr_tabla_inconsistente_se_conserva_para_revision_si_principal_vacia(monkeypatch, tmp_path):
+    monkeypatch.setattr(parser, "ocr_pagina_tsv", lambda *a, **kw: _synthetic_ocr_table(broken=True))
+    monkeypatch.setattr(parser, "_rapidocr_words", lambda *a, **kw: [])
+    lines, centers, used = parser._tabla_ocr_con_alternativa(tmp_path / "synthetic.png", 0, [], None)
+    assert len(lines) == 6 and centers
+    assert "pendiente de validación" in used
+    rows = [parser.parsear_linea(line, i, parser.FormatoCodigo.COMPACTO, ".") for i, line in enumerate(lines)]
+    cert = parser.certificar_extraccion_columnas(rows, metodo="ocr")
+    assert cert.estado != "certificada"
+
+
+def test_ocr_tabla_valida_no_repite_lectura(monkeypatch, tmp_path):
+    """Contrato de evaluación dual en Variante C (cambio de contrato respecto de Variante B).
+
+    En Variante B, una lectura PSM 6 con ratio >= 0.95 retornaba tempranamente sin consultar
+    PSM 4 ('retorno temprano'). En Variante C, el contrato formal de arbitraje OCR exige
+    consultar y comparar ambas lecturas para no seleccionar ciegamente PSM 6 ante posibles
+    discrepancias materiales o rescates válidos.
+
+    Verifica:
+    1. PSM 4 se solicita exactamente una vez.
+    2. Se conservan las filas e importes correctos.
+    3. Candidatos equivalentes no producen falsa ambigüedad.
+    4. Si PSM 6 parece válido pero PSM 4 difiere materialmente, se levanta ambigüedad.
+    5. Fallos por timeout o ausencia de resultados en PSM 4 se manejan sin degradar la extracción.
+    """
+    calls = []
+
+    def mock_ocr_psm4(path, rotation, psm=4):
+        calls.append((rotation, psm))
+        return _synthetic_ocr_table()
+
+    # 1. Caso base: Candidatos equivalentes (PSM 4 solicitado exactamente una vez, sin falsa ambigüedad)
+    monkeypatch.setattr(parser, "ocr_pagina_tsv", mock_ocr_psm4)
+    lines, centers, decision = parser._tabla_ocr_con_alternativa(
+        tmp_path / "synthetic.png", 0, _synthetic_ocr_table(), None,
+    )
+    assert calls == [(0, 4)], "Debe solicitarse PSM 4 exactamente una vez para contrastar candidatos"
+    assert centers and len(lines) == 6, "Se deben conservar las 6 filas de la tabla"
+    assert not getattr(decision, "ambiguedad_material", False), "Candidatos equivalentes no deben generar falsa ambigüedad"
+
+    # Verificar filas e importes correctos
+    for i, line in enumerate(lines):
+        cuenta = parser.parsear_linea(line, i, parser.FormatoCodigo.COMPACTO, ".")
+        assert cuenta is not None
+        assert cuenta.monto == 100
+        assert cuenta.montos_columnas["debitos"] == 900
+        assert cuenta.montos_columnas["creditos"] == 800
+
+    # 2. Caso adversarial: PSM 6 válido pero PSM 4 revela diferencia material
+    def mock_ocr_psm4_divergente(path, rotation, psm=4):
+        # Difiere en importe (debitos=2000 en vez de 900)
+        return FakePage([
+            _header(),
+            *[_row(30 + i * 10, str(110101 + i), "CUENTA SINTETICA", [
+                "2000", "800", "1200", "0", "1200", "0", "0", "0",
+            ]) for i in range(6)],
+        ]).extract_words()
+
+    monkeypatch.setattr(parser, "ocr_pagina_tsv", mock_ocr_psm4_divergente)
+    lines_div, centers_div, decision_div = parser._tabla_ocr_con_alternativa(
+        tmp_path / "synthetic.png", 0, _synthetic_ocr_table(), None,
+    )
+    assert getattr(decision_div, "ambiguedad_material", False) is True, (
+        "Diferencia material entre lecturas utilizables debe levantar ambigüedad material"
+    )
+
+    # 3. Caso: Timeout en PSM 4
+    import subprocess
+    def mock_timeout(*a, **kw):
+        raise subprocess.TimeoutExpired(cmd="tesseract", timeout=30)
+
+    monkeypatch.setattr(parser, "ocr_pagina_tsv", mock_timeout)
+    lines_to, centers_to, decision_to = parser._tabla_ocr_con_alternativa(
+        tmp_path / "synthetic.png", 0, _synthetic_ocr_table(), None,
+    )
+    assert centers_to and len(lines_to) == 6, "Ante timeout de PSM 4, PSM 6 debe mantenerse disponible"
+    assert not getattr(decision_to, "ambiguedad_material", False)
+
+    # 4. Caso: Ausencia de resultados en PSM 4 (lista vacía)
+    monkeypatch.setattr(parser, "ocr_pagina_tsv", lambda *a, **kw: [])
+    lines_empty, centers_empty, decision_empty = parser._tabla_ocr_con_alternativa(
+        tmp_path / "synthetic.png", 0, _synthetic_ocr_table(), None,
+    )
+    assert centers_empty and len(lines_empty) == 6, "Ante resultado vacío en PSM 4, PSM 6 debe conservarse"
+    assert not getattr(decision_empty, "ambiguedad_material", False)
+
+
+def test_ocr_segundo_motor_se_activa_aunque_principal_no_tenga_filas(monkeypatch, tmp_path):
+    monkeypatch.setattr(parser, "ocr_pagina_tsv", lambda *a, **kw: _synthetic_ocr_table(broken=True))
+    monkeypatch.setattr(parser, "_rapidocr_words", lambda *a, **kw: _synthetic_ocr_table())
+    lines, centers, method = parser._tabla_ocr_con_alternativa(tmp_path / "synthetic.png", 0, [], None)
+    assert centers and len(lines) == 6
+    assert method == "RapidOCR"
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("TOTALPAGINA", "TOTAL PAGINA"),
+    ("TOTALPAGINAANTERIOR", "TOTAL PAGINA ANTERIOR"),
+    ("TOTALACUMULADO", "TOTAL ACUMULADO"),
+    ("TOTALMENTE", "TOTALMENTE"),
+    ("。", "0"),
+])
+def test_rapidocr_restaura_controles_sin_convertir_glosas_en_totales(text, expected):
+    assert parser._normalizar_celda_numerica_rapidocr(text) == expected
+
+
+def test_tsv_despega_borde_solo_de_importe(monkeypatch, tmp_path):
+    header = "level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext\n"
+    tokens = ["12,345|", "|678", "NOMBRE|", "12|345", "O|", "123]"]
+    tsv = header + "".join(
+        f"5\t1\t1\t1\t1\t{i}\t100\t20\t30\t10\t90\t{token}\n"
+        for i, token in enumerate(tokens, 1)
+    )
+    monkeypatch.setattr(parser.subprocess, "run", lambda *a, **kw: SimpleNamespace(returncode=0, stdout=tsv))
+    words = parser.ocr_pagina_tsv(tmp_path / "synthetic.png", 0)
+    assert [w["text"] for w in words] == ["12,345", "678", "NOMBRE|", "12|345", "O", "123"]
+
+
+def test_pagina_con_firmas_conserva_tabla_recuperada_por_ocr_alternativo(monkeypatch, tmp_path):
+    from pathlib import Path
+    from PIL import Image
+    instance = parser.ParserPDF()
+    instance._ocr_advertencias = []
+    instance._ocr_timeout_pages = set()
+    instance._extraction_method = "text"
+    def rasterize(command, **kw):
+        prefix = Path(command[-1])
+        Image.new("RGB", (20, 20), "white").save(prefix.with_name(prefix.name + "-1.png"))
+        return SimpleNamespace(returncode=0)
+    monkeypatch.setattr(parser.subprocess, "run", rasterize)
+    monkeypatch.setattr(parser, "detectar_rotacion_osd", lambda p: 0)
+    monkeypatch.setattr(parser, "ocr_pagina", lambda *a, **kw: "CONTADOR FIRMA REPRESENTANTE LEGAL")
+    monkeypatch.setattr(parser, "_extraer_paneles_paralelos_ocr", lambda *a, **kw: [])
+    monkeypatch.setattr(parser, "ocr_pagina_tsv", lambda *a, **kw: (
+        _synthetic_ocr_table() if kw.get("psm") == 4
+        else [{"text": "FIRMA", "x0": 10, "x1": 30, "top": 10}]
+    ))
+    lines, _, _ = instance._ocr_documento(tmp_path / "synthetic.pdf", 1)
+    assert len(lines) == 6
+    assert not any("se omitió" in warning for warning in instance._ocr_advertencias)
+    assert any("PSM 4" in warning for warning in instance._ocr_advertencias)
 
 
 def test_ocho_columnas_prevalece_sobre_anio_detectado_en_cabecera():
@@ -1143,6 +1343,39 @@ def test_extractor_descarta_pie_posterior_al_control_final():
     assert lines[-1].startswith("TOTALES ")
 
 
+def test_extractor_conserva_resultado_y_sumas_iguales_despues_de_totales():
+    page = FakePage([
+        _header(),
+        _row(20, "110101", "Caja", ["100", "0", "100", "0", "100", "0", "0", "0"]),
+        _row(30, "", "TOTALES", ["200", "200", "100", "100", "100", "80", "0", "20"]),
+        _row(40, "", "UTILIDAD DEL EJERCICIO", ["0", "0", "0", "0", "0", "20", "20", "0"]),
+        _row(50, "", "SUMAS IGUALES", ["200", "200", "100", "100", "100", "100", "20", "20"]),
+        (60, [(120, 250, "REPRESENTANTE LEGAL")]),
+    ])
+    lines, _ = parser._extraer_tabla_balance_por_coordenadas(page)
+    assert len(lines) == 4
+    assert lines[-2].startswith("UTILIDAD DEL EJERCICIO ")
+    assert lines[-1].startswith("SUMAS IGUALES ")
+
+
+def test_certificacion_usa_totales_del_documento_no_acumulado_pagina_anterior():
+    lines = [
+        "Caja 100 0 100 0 100 0 0 0",
+        "TOTAL ACUMULADO 100 0 100 0 100 0 0 0",
+        "Proveedores 0 80 0 80 0 80 0 0",
+        "Ventas 0 20 0 20 0 0 0 20",
+        "TOTALES 100 100 100 100 100 80 0 20",
+        "UTILIDAD DEL EJERCICIO 0 0 0 0 0 20 20 0",
+        "SUMAS IGUALES 100 100 100 100 100 100 20 20",
+    ]
+    accounts = [parser.parsear_linea(line, i, parser.FormatoCodigo.SIN_CODIGO, ".") for i, line in enumerate(lines)]
+    certification = parser.certificar_extraccion_columnas(accounts)
+    assert certification.estado == "certificada"
+    assert certification.totales_finales_validos is True
+    assert all(value == 0 for value in certification.diferencias.values())
+    assert certification.totales_impresos["creditos"] == 100
+
+
 def test_extractor_detecta_encabezado_distribuido_en_dos_lineas():
     page = FakePage([
         (10, [
@@ -1233,7 +1466,8 @@ def test_no_reconstruye_movimiento_si_clasificacion_no_confirma_saldo():
     assert account.columnas_derivadas == []
 
 
-def test_certificacion_compara_con_subtotal_independiente():
+@pytest.mark.parametrize("subtotal_name", ["SUBTOTALES", "SUMA", "Sumas Parciales", "Suma Parcial"])
+def test_certificacion_compara_con_subtotal_independiente(subtotal_name):
     rows = [
         parser.parsear_linea(
             "110101 CAJA 100 0 100 0 100 0 0 0",
@@ -1244,7 +1478,7 @@ def test_certificacion_compara_con_subtotal_independiente():
             2, parser.FormatoCodigo.COMPACTO, ".",
         ),
         parser.parsear_linea(
-            "SUBTOTALES 100 100 100 100 100 100 0 0",
+            f"{subtotal_name} 100 100 100 100 100 100 0 0",
             3, parser.FormatoCodigo.COMPACTO, ".",
         ),
     ]
@@ -2549,3 +2783,55 @@ def test_lectura_alternativa_no_gana_por_filas_artificialmente_en_cero():
 
     assert parser._identidades_validas_lineas_8_columnas(alternative) == (0, 0)
     assert not parser._preferir_lectura_rapidocr(base, alternative)
+
+
+@pytest.mark.parametrize("years,currencies", [(["2021"], None), (["2021"], ["CLP"])])
+def test_ano_unico_no_convierte_columnas_contables_en_periodos(years, currencies):
+    row = parser.parsear_linea(
+        "CAJA 100 0 0 0", 1, parser.FormatoCodigo.SIN_CODIGO, ".",
+        years=years, currencies=currencies,
+    )
+    assert row.origen_columna == parser.OrigenColumna.ACTIVO
+    assert row.monto == 100
+    assert not row.montos_periodos
+
+
+def test_certificacion_no_oculta_fila_monetaria_sin_columnas():
+    rows = [parser.parsear_linea(line, i, parser.FormatoCodigo.COMPACTO, ".") for i, line in enumerate([
+        "110101 CAJA 100 0 100 0 100 0 0 0",
+        "210101 PROVEEDORES 0 100 0 100 0 100 0 0",
+        "SUBTOTALES 100 100 100 100 100 100 0 0",
+    ])]
+    partial = parser.CuentaRaw(linea=10, codigo="", nombre="CUENTA INCOMPLETA", monto=50)
+    result = parser.certificar_extraccion_columnas([*rows, partial], metodo="ocr")
+    assert result.estado == "fallida"
+    assert 10 in result.filas_inconsistentes
+    assert partial.requiere_revision_extraccion
+    assert "columnas_incompletas" in partial.razones_revision_extraccion
+
+
+def test_segundo_motor_puede_mejorar_con_igual_numero_de_filas_validas(monkeypatch, tmp_path):
+    valid = [f"CUENTA {i} 100 0 100 0 100 0 0 0" for i in range(5)]
+    invalid = "OTRA 100 0 200 0 200 0 0 0"
+    candidates = iter([([], None), ([*valid, invalid, invalid], [1]), ([*valid, invalid], [1])])
+    monkeypatch.setattr(parser, "_extraer_tabla_balance_por_coordenadas", lambda *a: next(candidates))
+    monkeypatch.setattr(parser, "ocr_pagina_tsv", lambda *a, **kw: [])
+    monkeypatch.setattr(parser, "_rapidocr_words", lambda *a, **kw: [{"text": "stub"}])
+    lines, _, method = parser._tabla_ocr_con_alternativa(tmp_path / "synthetic.png", 0, [], None)
+    assert method == "RapidOCR"
+    assert lines == [*valid, invalid]
+
+
+def test_ocr_sin_puente_no_sobrescribe_cierre_impreso_cuadrado():
+    rows = [parser.parsear_linea(line, i, parser.FormatoCodigo.COMPACTO, ".") for i, line in enumerate([
+        "110101 CAJA 150 0 150 0 150 0 0 0",
+        "210101 CAPITAL 0 100 0 100 0 100 0 0",
+        "310101 VENTAS 0 50 0 50 0 0 0 50",
+        "TOTALES 150 150 150 150 150 100 0 50",
+        "SUMAS IGUALES 150 150 150 150 150 150 50 50",
+    ])]
+    expected = dict(rows[-1].montos_columnas)
+    result = parser.certificar_extraccion_columnas(rows, metodo="ocr_coordinates_8_amounts")
+    assert rows[-1].montos_columnas == expected
+    assert rows[-1].columnas_derivadas == []
+    assert result.totales_finales_validos is True
