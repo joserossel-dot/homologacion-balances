@@ -1,0 +1,2 @@
+# Credencial sintetica usada solo para probar el rechazo de una clave incorrecta.
+71c1420a0564d6205203a92973bf2893b2e25e4b:tests/onprem/test_backup_authentication.py:generic-api-key:652

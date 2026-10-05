@@ -649,7 +649,7 @@ def test_backup_auth_cli_rejects_tampering_and_malformed_envelopes(
         content["rpo_hours"] = 12
         metadata.write_text(json.dumps(content), encoding="utf-8")
     elif mutation == "wrong-key":
-        verification_key = _key(tmp_path / "wrong.key", "clave-distinta-2026")
+        verification_key = _key(tmp_path / "wrong.key", "w" * 24)
     elif mutation == "tag":
         content = json.loads(auth_file.read_text(encoding="utf-8"))
         content["tag"] = "0" * 64
