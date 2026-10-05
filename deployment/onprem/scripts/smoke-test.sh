@@ -17,6 +17,8 @@ case "$mode" in
         export AUTH_ENFORCEMENT=forward_auth
         PERSISTENCE_MODE=local LOCAL_PERSISTENCE_ROOT=/var/lib/homologacion/runtime \
         ONPREM_DEPLOYMENT_MODE=production BACKUP_ENCRYPTION_REQUIRED=true \
+        BACKUP_AUTHENTICATION_REQUIRED=true \
+        BACKUP_ALLOW_LEGACY_UNAUTHENTICATED_RESTORE=false \
         PYTHONPATH="$project_root" python3 -c \
             'from deployment.onprem.preflight import validate; validate()'
         ;;
@@ -36,6 +38,8 @@ backup_dir="${run_dir}/backups"
 export COMPOSE_PROJECT_NAME="${project_name}"
 export ONPREM_DEPLOYMENT_MODE="$mode"
 export BACKUP_ENCRYPTION_REQUIRED=true
+export BACKUP_AUTHENTICATION_REQUIRED=true
+export BACKUP_ALLOW_LEGACY_UNAUTHENTICATED_RESTORE=false
 export ONPREM_COMPOSE_ENV_FILE="${env_file}"
 if [ "$mode" = evaluation ]; then
     export ONPREM_COMPOSE_OVERRIDE="${compose_dir}/docker-compose.evaluation.yml"
@@ -70,6 +74,9 @@ trap cleanup EXIT HUP INT TERM
     echo "MAX_UPLOAD_MB=10"
     echo "QUALITY_CONTROL_ENFORCE_EXPORT=true"
     echo "CADDYFILE_PATH=${CADDYFILE_PATH}"
+    echo "BACKUP_ENCRYPTION_REQUIRED=true"
+    echo "BACKUP_AUTHENTICATION_REQUIRED=true"
+    echo "BACKUP_ALLOW_LEGACY_UNAUTHENTICATED_RESTORE=false"
 } > "${env_file}"
 
 export BACKUP_ENCRYPTION_KEY_FILE="${run_dir}/backup.key"
@@ -87,6 +94,21 @@ else
 fi
 
 echo "3/8 Verificando salud HTTPS"
+# Caddy puede crear la CA interna de forma diferida durante el primer handshake.
+# Esta solicitud ocurre solo contra el proyecto Docker aislado y únicamente
+# inicializa la PKI. La comprobación que acredita salud se repite abajo usando
+# explícitamente la CA recién obtenida, sin omitir validación TLS.
+attempt=0
+until curl --fail --silent --show-error --insecure \
+    --resolve "localhost:${https_port}:127.0.0.1" \
+    "https://localhost:${https_port}/_stcore/health" | grep -q '^ok$'; do
+    attempt=$((attempt + 1))
+    if [ "${attempt}" -ge 15 ]; then
+        echo "FALLO: el proxy no inicializo HTTPS en el entorno aislado." >&2
+        exit 1
+    fi
+    sleep 1
+done
 # Trust only the CA obtained from this isolated project's Caddy volume.
 ca_file="${run_dir}/smoke-root.crt"
 compose cp reverse-proxy:/data/caddy/pki/authorities/local/root.crt "$ca_file"
@@ -112,6 +134,25 @@ compose exec -T app sh -eu -c \
 sh "${script_dir}/backup-runtime.sh" >/dev/null
 backup_file="$(find "$backup_dir" -type f -name '*.tar.gz.enc' -print | head -n 1)"
 test -n "$backup_file" && test -s "$backup_file" && test -s "$backup_file.sha256"
+test -s "$backup_file.meta.json" && test -s "$backup_file.meta.json.sha256"
+test -s "$backup_file.auth.json"
+
+# Una suma SHA-256 recalculada no debe permitir restaurar un payload alterado.
+# El intento ocurre antes de modificar el marcador y debe fallar sin detener
+# los servicios ni tocar el volumen activo.
+tampered_file="${backup_file%.enc}.tampered.enc"
+cp "$backup_file" "$tampered_file"
+printf 'x' >> "$tampered_file"
+openssl dgst -sha256 -r "$tampered_file" > "$tampered_file.sha256"
+cp "$backup_file.meta.json" "$tampered_file.meta.json"
+cp "$backup_file.meta.json.sha256" "$tampered_file.meta.json.sha256"
+cp "$backup_file.auth.json" "$tampered_file.auth.json"
+if sh "${script_dir}/restore-runtime.sh" "$tampered_file" --confirm >/dev/null 2>&1; then
+    echo "FALLO: restore aceptó un respaldo con payload alterado y SHA recalculado." >&2
+    exit 1
+fi
+unchanged="$(compose exec -T app cat /var/lib/homologacion/runtime/smoke-restore-marker)"
+test "$unchanged" = original
 
 echo "7/8 Verificando restore de app_runtime"
 compose exec -T app sh -eu -c \
@@ -133,4 +174,4 @@ until curl --fail --silent --cacert "$ca_file" \
     sleep 2
 done
 
-echo "SMOKE ON-PREMISE ($mode): APROBADO; CA local explícita y backup cifrado. Identidad corporativa pendiente de aceptación separada."
+echo "SMOKE ON-PREMISE ($mode): APROBADO; CA local explícita y backup cifrado y autenticado. Identidad corporativa pendiente de aceptación separada."

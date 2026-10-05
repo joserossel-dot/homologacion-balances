@@ -136,8 +136,9 @@ def test_runtime_scripts_require_encryption_and_restore_direct_directory(tmp_pat
         **os.environ,
         "RUNTIME_SOURCE_DIR": str(source),
         "BACKUP_DIR": str(backup_dir),
-        "ONPREM_DEPLOYMENT_MODE": "production",
+        "ONPREM_DEPLOYMENT_MODE": "evaluation",
         "BACKUP_ENCRYPTION_REQUIRED": "true",
+        "BACKUP_AUTHENTICATION_REQUIRED": "true",
         "BACKUP_ENCRYPTION_KEY_FILE": str(key),
     }
     backup = subprocess.run(
@@ -149,9 +150,18 @@ def test_runtime_scripts_require_encryption_and_restore_direct_directory(tmp_pat
     assert len(archives) == 1
     archive = archives[0]
     assert Path(str(archive) + ".sha256").is_file()
-    assert json.loads(Path(str(archive) + ".meta.json").read_text())["format"] == (
-        "homologacion-app-runtime-v1"
-    )
+    metadata = json.loads(Path(str(archive) + ".meta.json").read_text())
+    assert metadata == {
+        "created_at": metadata["created_at"],
+        "encrypted": True,
+        "format": "homologacion-app-runtime-v1",
+        "retention_days": 30,
+        "rpo_hours": 24,
+        "rto_hours": 8,
+        "envelope_version": 2,
+        "authentication": "hmac-sha256",
+    }
+    assert Path(str(archive) + ".auth.json").is_file()
 
     target = _runtime(tmp_path / "target", marker="before")
     restore = subprocess.run(
@@ -186,7 +196,7 @@ def test_runtime_backup_production_rejects_missing_external_key(tmp_path) -> Non
         ["sh", str(ONPREM / "scripts" / "backup-runtime.sh")],
         env={
             **os.environ,
-            "RUNTIME_SOURCE_DIR": str(source),
+            "RUNTIME_SOURCE_DIR": "",
             "BACKUP_DIR": str(tmp_path / "backups"),
             "ONPREM_DEPLOYMENT_MODE": "production",
             "BACKUP_ENCRYPTION_REQUIRED": "true",
@@ -199,7 +209,10 @@ def test_runtime_backup_production_rejects_missing_external_key(tmp_path) -> Non
 
 
 def test_failed_backup_does_not_delete_unrelated_hidden_files(tmp_path):
-    sentinels = [tmp_path / name for name in (".sha256", ".meta.json", ".meta.json.sha256")]
+    sentinels = [
+        tmp_path / name
+        for name in (".sha256", ".meta.json", ".meta.json.sha256", ".auth.json")
+    ]
     for path in sentinels:
         path.write_text("preservar")
     source = tmp_path / "invalid-runtime"
@@ -244,11 +257,15 @@ def test_restore_failure_attempts_rollback_and_remains_failed(tmp_path, failure,
         **os.environ, "DOCKER_BIN": str(docker), "CALL_LOG": str(log),
         "SNAPSHOT_SOURCE": str(source), "FAILURE": failure,
         "ONPREM_DEPLOYMENT_MODE": "evaluation", "BACKUP_ENCRYPTION_REQUIRED": "false",
+        "BACKUP_ALLOW_LEGACY_UNAUTHENTICATED_RESTORE": "true",
         "BACKUP_ENCRYPTION_KEY_FILE": "", "BACKUP_DIR": str(tmp_path / "backups"),
         "RUNTIME_SOURCE_DIR": "", "RUNTIME_TARGET_DIR": "", "TMPDIR": str(tmp_path),
     }
     result = subprocess.run(
-        ["sh", str(ONPREM / "scripts" / "restore-runtime.sh"), str(archive), "--confirm"],
+        [
+            "sh", str(ONPREM / "scripts" / "restore-runtime.sh"), str(archive),
+            "--confirm", "--allow-legacy-unauthenticated",
+        ],
         env=environment, capture_output=True, text=True,
     )
     assert result.returncode == expected_code, result.stderr

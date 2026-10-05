@@ -20,6 +20,7 @@ sh -n \
 echo "Validando utilidades Python on-premise"
 PYTHONDONTWRITEBYTECODE=1 python3 -m py_compile \
     "${compose_dir}/bootstrap.py" \
+    "${compose_dir}/backup_auth.py" \
     "${compose_dir}/preflight.py" \
     "${compose_dir}/persistence_probe.py" \
     "${compose_dir}/runtime_archive.py" \

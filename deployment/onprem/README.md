@@ -68,21 +68,59 @@ de salud y apagado con eliminación de los volúmenes de prueba. Use
 
 `backup-runtime.sh` detiene temporalmente la UI, copia `app_runtime`, genera una
 instantánea consistente de SQLite, incorpora un manifiesto con hash y tamaño por
-archivo y cifra el artefacto cuando corresponde. `restore-runtime.sh` verifica
-checksum, metadatos, manifiesto, JSON y `PRAGMA integrity_check` antes de
-reemplazar el volumen. Conserva un respaldo previo y revierte el contenido si la
-verificación posterior falla.
+archivo y cifra el artefacto cuando corresponde. Todo respaldo cifrado genera
+además `<artefacto>.auth.json`: un sobre HMAC-SHA256 que autentica conjuntamente
+los bytes exactos del payload y de sus metadatos. La subclave HMAC se deriva de
+la primera línea de `BACKUP_ENCRYPTION_KEY_FILE` con PBKDF2-HMAC-SHA256, salt
+aleatorio y separación de dominio; no se reutiliza directamente la clave como
+subclave MAC.
+
+`restore-runtime.sh` comprueba primero ese sobre autenticado, antes de interpretar
+metadatos, descifrar o detener servicios. Después valida los checksum de
+diagnóstico, el manifiesto, JSON y `PRAGMA integrity_check` antes de reemplazar
+el volumen. Conserva un respaldo previo y revierte el contenido si la
+verificación posterior falla. Los archivos `.sha256` sirven para diagnóstico de
+integridad accidental, pero no sustituyen la autenticación criptográfica.
 
 ```bash
-ONPREM_DEPLOYMENT_MODE=evaluation BACKUP_ENCRYPTION_REQUIRED=false \
+export BACKUP_ENCRYPTION_KEY_FILE=/ruta/segura/backup.key
+export BACKUP_ENCRYPTION_REQUIRED=true
+export BACKUP_AUTHENTICATION_REQUIRED=true
+ONPREM_DEPLOYMENT_MODE=evaluation \
   ./scripts/backup-runtime.sh
-ONPREM_DEPLOYMENT_MODE=evaluation BACKUP_ENCRYPTION_REQUIRED=false \
-  ./scripts/restore-runtime.sh backups/homologacion-app-runtime-FECHA.tar.gz --confirm
+ONPREM_DEPLOYMENT_MODE=evaluation \
+  ./scripts/restore-runtime.sh backups/homologacion-app-runtime-FECHA.tar.gz.enc --confirm
 ```
 
+El nombre real del artefacto cifrado termina en `.tar.gz.enc`; sustituya la
+ruta del ejemplo por la devuelta por el comando de respaldo.
+
 En producción, suministre `BACKUP_ENCRYPTION_KEY_FILE` desde una ruta externa y
-mantenga `BACKUP_ENCRYPTION_REQUIRED=true`. Sigue pendiente ejecutar y aceptar
-el ciclo completo con un daemon Docker y el almacenamiento objetivo del cliente.
+mantenga `BACKUP_ENCRYPTION_REQUIRED=true`,
+`BACKUP_AUTHENTICATION_REQUIRED=true` y
+`BACKUP_ALLOW_LEGACY_UNAUTHENTICATED_RESTORE=false`. `BACKUP_KEY_ID` puede
+identificar la versión de clave dentro del sobre, pero no contiene la clave.
+Sigue pendiente ejecutar y aceptar el ciclo completo sobre el almacenamiento
+objetivo del cliente.
+
+El archivo de clave debe ser un archivo regular, no un enlace simbólico,
+pertenecer al mismo usuario efectivo que ejecuta el comando y no conceder
+permisos a grupo ni a otros (por ejemplo, modo `0600`). `BACKUP_DIR` debe ser un
+directorio real del mismo propietario y no permitir escritura a grupo u otros.
+Los scripts crean sus directorios y archivos de trabajo con permisos privados.
+
+La clave se captura una sola vez, antes de cifrar y autenticar el artefacto, y
+esa misma captura se usa para ambas operaciones. La copia temporal vive bajo
+`TMPDIR`, no dentro de `BACKUP_DIR`. En producción, `TMPDIR` debe apuntar a un
+filesystem local, privado, no compartido ni versionado y, cuando corresponda,
+cifrado por el cliente. El borrado de la copia temporal no equivale a borrado
+forense garantizado por todos los filesystems.
+
+La forma `backup-runtime.sh --source-dir RUTA --confirm-quiesced` es una interfaz
+administrativa interna para respaldar una copia que ya está quiescente, como el
+rollback creado por `restore-runtime.sh`. No debe usarse sobre una fuente activa.
+El uso normal en producción no debe definir `RUNTIME_SOURCE_DIR` ni
+`RUNTIME_TARGET_DIR`; ambos overrides están limitados a evaluación.
 
 ## Conciliación de artefactos locales
 
@@ -130,19 +168,47 @@ Los siguientes comandos cubren sólo el PostgreSQL opcional del perfil
 `legacy-postgres`; no representan el respaldo de la UI local:
 
 ```bash
-ONPREM_DEPLOYMENT_MODE=evaluation BACKUP_ENCRYPTION_REQUIRED=false \
+export BACKUP_ENCRYPTION_KEY_FILE=/ruta/segura/backup.key
+export BACKUP_ENCRYPTION_REQUIRED=true
+export BACKUP_AUTHENTICATION_REQUIRED=true
+ONPREM_DEPLOYMENT_MODE=evaluation \
   ./scripts/backup.sh
-ONPREM_DEPLOYMENT_MODE=evaluation BACKUP_ENCRYPTION_REQUIRED=false \
-  ./scripts/restore.sh backups/homologacion-FECHA.dump --confirm
+ONPREM_DEPLOYMENT_MODE=evaluation \
+  ./scripts/restore.sh backups/homologacion-FECHA.dump.enc --confirm
 ```
 
+El nombre real del artefacto cifrado termina en `.dump.enc`; sustituya la ruta
+del ejemplo por la devuelta por el comando de respaldo.
+
 En producción, suministre `BACKUP_ENCRYPTION_KEY_FILE` desde una ruta externa y
-mantenga `BACKUP_ENCRYPTION_REQUIRED=true`. El artefacto será `.dump.enc`.
+mantenga también `BACKUP_AUTHENTICATION_REQUIRED=true` y
+`BACKUP_ALLOW_LEGACY_UNAUTHENTICATED_RESTORE=false`. El artefacto será
+`.dump.enc` y tendrá un sidecar `.auth.json` autenticado.
 
 Restore exige el archivo `.sha256`, detiene `app` y `reverse-proxy`, crea un
 respaldo previo, restaura en una base de staging y luego intercambia los nombres.
 La base anterior se conserva con un nombre fechado para rollback manual. Debe
 ensayarse en un ambiente de prueba antes de usarla sobre un cliente.
+
+La migración excepcional de un respaldo antiguo sin `.auth.json` sólo se admite
+en evaluación y requiere ambos consentimientos explícitos. No está habilitada en
+producción. El mismo contrato de doble consentimiento se aplica a los respaldos
+heredados PostgreSQL:
+
+```bash
+ONPREM_DEPLOYMENT_MODE=evaluation \
+BACKUP_ENCRYPTION_REQUIRED=false \
+BACKUP_AUTHENTICATION_REQUIRED=false \
+BACKUP_ALLOW_LEGACY_UNAUTHENTICATED_RESTORE=true \
+  ./scripts/restore-runtime.sh RUTA_LEGACY --confirm \
+  --allow-legacy-unauthenticated
+```
+
+El perfil opcional `legacy-postgres` todavía no valida semánticamente el dump
+con `pg_restore --list` antes de publicarlo. Un retorno exitoso y un archivo no
+vacío son necesarios, pero no bastan para certificar su restaurabilidad. Esta
+limitación no afecta el respaldo primario de `app_runtime`, pero debe cerrarse
+antes de certificar ese perfil heredado para producción.
 
 ## Límites conocidos del prototipo
 
@@ -163,12 +229,23 @@ ensayarse en un ambiente de prueba antes de usarla sobre un cliente.
    maestros son diseños pendientes, no funciones incluidas en este Compose.
 5. El preflight rechaza tags mutables en producción. Los digests aprobados,
    firma, SBOM y escaneo de vulnerabilidades deben definirse externamente.
-6. Backup y restore de `app_runtime` tienen pruebas locales sin daemon, pero el
-   recorrido sobre un volumen Docker real y el storage definitivo del cliente
-   aún no fue ejecutado ni aceptado.
+6. Backup y restore de `app_runtime` tienen pruebas locales sin daemon y un
+   smoke Docker de evaluación que cubre cifrado, autenticación, rechazo de un
+   payload alterado con SHA-256 recalculado y restauración válida. Esto no
+   certifica producción: el storage definitivo del cliente aún no fue ensayado
+   ni aceptado.
 7. Antes de producción se deben resolver proveedor de identidad y roles,
    allow-list de egress, custodia de claves, retención, RPO/RTO, distribución de
    CA y digests de imagen aprobados.
+8. El sobre HMAC detecta alteraciones del payload y los metadatos, pero no evita
+   por sí solo eliminación ni repetición de un respaldo antiguo válido. Un actor
+   que comprometa la clave puede crear artefactos autenticados. La protección
+   contra esos riesgos depende del almacenamiento inmutable, la custodia y la
+   rotación aprobadas por el cliente.
+9. Si una restauración y su rollback fallan, el directorio temporal privado se
+   conserva como evidencia diagnóstica y puede contener material descifrado y la
+   clave capturada. Debe tratarse como evidencia sensible y eliminarse mediante
+   el procedimiento aprobado después del análisis.
 
 Los controles y variables de producción están detallados en
 `docs/architecture/on_premise_security_controls.md`.

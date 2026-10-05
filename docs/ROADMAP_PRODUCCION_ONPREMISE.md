@@ -358,7 +358,8 @@ globales permanecen abiertas. Detalle en `AVANCE_PRODUCCION_20260907.md`.
 - Codex ejecutó sobre la copia B1 las suites `tests/antigravity`,
   `tests/persistence/test_block_c_persistence.py` y
   `tests/onprem/test_block_d_backup.py`: 62 aprobadas en 7,07 s, Python 3.14.5.
-  Evidencia: `/Users/josealfonsorossel/Desktop/Trabajo Antigravity Homologacion/ronda-b1-20260907/entrega/20260907T212611769407Z-pruebas.log`.
+  Evidencia local privada: `20260907T212611769407Z-pruebas.log`; la ruta del
+  equipo no se publica en el repositorio.
 - Bloqueadores revisados: el controlador vuelve a vincular el certificado sin
   preservar el registro documental enriquecido; el formulario de ingreso manual
   sigue certificando directamente sin construir el respaldo estructurado exigido.
@@ -392,6 +393,213 @@ globales permanecen abiertas. Detalle en `AVANCE_PRODUCCION_20260907.md`.
   ejecutó nuevamente Docker, suite, Neon ni despliegues.
 
 ### Campos de seguimiento diario
+
+### Control del 2026-09-23, 21:30 UTC
+
+- Inspección local: HEAD `f986b313bc2ded75ab487cd604c2abb286487c21`,
+  rama `codex/mejoras-pendientes-20260826`, staging vacío. Continúan modificados
+  `parser_universal.py` y `tests/test_extraction_certification.py`; el informe
+  `docs/P01_VERIFICACION_20260923.md` sigue sin versionar. No se consultó el
+  remoto por red; la referencia local de seguimiento no acredita su estado actual.
+- Los SHA-256 del parser y tests coinciden con el candidato documentado:
+  `fe819b7bd7ec6b9015ea799fc797ca7192f37819e6e944640c57e84854a0c9a1` y
+  `7d13b6739242eaa1febdb772a76e7f2e7879e2f123b5f7abf9115ff2a74e2955`, respectivamente.
+- Comprobación ejecutada en este control: `git diff --check`, sin errores.
+  No se ejecutaron nuevamente suite, OCR, Docker, Gold ni pruebas del piloto.
+  Los resultados anteriores conservan su alcance y entorno originales.
+- Ninguna fase cambia de estado. P0.1 permanece abierto. Continúan pendientes
+  la suite completa del candidato en Python 3.12, cobertura de controles en
+  selección OCR, interacción de metadatos con integridad y validación de la
+  propuesta de revisión de celdas ambiguas. El último reporte de Antigravity
+  requiere correcciones y evidencia reproducible; no acredita incorporación.
+- Siguiente paso: revisar la entrega corregida con parche y pruebas reales,
+  conciliar la reproducción sintética del caso focal y verificar las regresiones antes de
+  proponer integración. No se aprueba promoción ni cierre por cuadre solamente.
+- Este control solo actualiza documentación. Sin commit, push ni despliegue.
+
+### Control del 2026-09-24, 21:31 UTC
+
+- Estado Git verificado: rama `codex/mejoras-pendientes-20260826`, HEAD
+  `f986b313bc2ded75ab487cd604c2abb286487c21`, seguimiento local de
+  `origin/codex/mejoras-pendientes-20260826` y staging vacío. Permanecen cambios
+  locales en `parser_universal.py`, `tests/test_extraction_certification.py` y
+  esta hoja de ruta; `docs/P01_VERIFICACION_20260923.md` continúa sin versionar.
+- La combinación experimental de P0.1 Ronda 13 se reprodujo en un clon temporal:
+  los parches aplicaron sin conflictos, `git diff --check` pasó y la suite
+  focalizada obtuvo 278 pruebas aprobadas. La prueba anti-filtración declarada
+  por el paquete no encontró coincidencias, pero su verificador de contaminación
+  de fixtures conserva dos vacíos: calcula huellas `glosa+monto` sin compararlas
+  y aprueba si el corpus privado no está disponible. Por ello no se considera un
+  control cerrado ni se incorpora el parche al candidato compartido.
+- La Ronda 13 no conecta `componer_filas_pagina_ocr` ni la relectura focalizada
+  con la ruta productiva. Sus pruebas ejercitan las funciones directamente, pero
+  no demuestran que el procesamiento real las invoque. Además, la admisión de
+  filas unilaterales y el recorte horizontal de la relectura requieren
+  endurecimiento antes de integración.
+- La evidencia privada de la ronda mantiene dos casos focales bloqueados; la
+  matriz privada congelada no se ejecutó. El artefacto de suite completa informa
+  1.961 aprobadas, 25 omitidas y
+  0 fallidas en Python 3.12, pero esa corrida no se repitió en este control diario.
+- Prueba ejecutada sobre el worktree candidato durante este control:
+  `git diff --check`, sin errores. No se ejecutaron Docker, Gold, OCR privado ni
+  despliegues. No se verificó el estado remoto por red.
+- Ninguna fase cambia de estado. Fase 1 y Fase 7 continúan `BLOQUEADO`; P0.1
+  permanece abierto. Riesgos residuales: cambios compartidos sin versionar,
+  motor de composición fuera del runtime, control de privacidad que puede aprobar
+  sin corpus y dos documentos focales aún bloqueados.
+- Siguiente paso recomendado: completar la Ronda 14 conectando el motor al flujo
+  real, endurecer composición, relectura y control de privacidad, demostrar la
+  invocación con pruebas de integración y repetir los dos casos focales. Ejecutar la
+  matriz de 30 únicamente si ambos documentos superan primero el gate focal.
+- Este control solo actualiza documentación. Sin commit, push ni despliegue.
+
+### Control del 2026-09-26, 21:50 UTC
+
+- Estado Git verificado: rama `codex/mejoras-pendientes-20260826`, HEAD
+  `f986b313bc2ded75ab487cd604c2abb286487c21`, staging vacío y seguimiento
+  local de `origin/codex/mejoras-pendientes-20260826`. Continúan modificados
+  `parser_universal.py`, `tests/test_extraction_certification.py` y esta hoja de
+  ruta; `docs/P01_VERIFICACION_20260923.md` permanece sin versionar.
+- La entrega experimental Ronda 16 conserva checksums internos válidos y sus
+  logs declaran 1.995 pruebas aprobadas, 25 omitidas y 0 fallidas sobre 2.020
+  recolectadas en Python 3.12.13. Esa suite completa no se reejecutó en este
+  control. Sí se ejecutó independientemente la suite focal del worktree aislado:
+  312 pruebas aprobadas en 9,90 s con Python 3.12.13.
+- `git diff --check` del candidato aislado no pasó: detectó una línea en blanco
+  adicional al final de `tests/test_audit_p01_candidate_validation.py`. El parche
+  no está listo para integración mientras ese control falle.
+- La matriz experimental contiene documentos certificados, parciales, fallidos
+  y no evaluables. Dos casos focales mejoran a `parcial`, pero un tercer caso
+  cambia de `parcial` a `fallida` frente a la Variante B por un bloqueo de
+  ambigüedad. Ese cambio puede ser una protección correcta, pero requiere
+  revisión explícita y no se contabiliza automáticamente como ausencia de
+  regresión.
+- La declaración de cierre de P0.1 no es consistente con los artefactos: el
+  informe público congelado y la evidencia de verificación mantienen P0.1
+  abierto para decisión. La promoción tampoco está acreditada porque el parche
+  sigue únicamente en un worktree temporal y no ha sido integrado al candidato.
+- Se repitieron los controles de privacidad sobre el paquete público ya
+  congelado. El control anti-filtración general pasó con 0 hallazgos, pero el
+  control de contaminación falló con 5 menciones de nombres de archivo privados
+  en el manifiesto y en el log de la matriz. La entrega pública no está saneada.
+- Ninguna fase cambia de estado. Fase 1 y Fase 7 continúan `BLOQUEADO`; P0.1
+  permanece abierto. Riesgos residuales: paquete público con contaminación,
+  `diff --check` fallido, una degradación de estado pendiente de aceptación y
+  cambios experimentales aún no integrados ni recertificados en el candidato.
+- Siguiente paso recomendado: corregir la entrega pública y el parche, repetir
+  ambos escáneres después del congelamiento, revisar el tercer caso focal fila por fila y luego
+  someter una selección explícita a integración. Tras integrar, repetir suite
+  completa, gate focal y matriz desde el worktree candidato antes de decidir el
+  cierre de P0.1.
+- Este control solo actualiza documentación. Sin commit, push ni despliegue.
+
+### Control del 2026-09-27, integración local de P0.1 Ronda 16
+
+- Estado Git verificado antes y después de la integración: rama
+  `codex/mejoras-pendientes-20260826`, base
+  `f986b313bc2ded75ab487cd604c2abb286487c21`, staging vacío. No se realizó
+  commit, push ni despliegue.
+- Se integraron localmente únicamente el motor de arbitraje y composición OCR,
+  su propagación al certificador y sus pruebas. No se copiaron los informes ni
+  los paquetes públicos/privados de Ronda 16. Se preservaron esta hoja de ruta
+  y `docs/P01_VERIFICACION_20260923.md`.
+- La revisión fila por fila del tercer caso focal demostró que el cambio de `parcial` a
+  `fallida` era un falso positivo: la continuidad se comparaba contra la última
+  fila del orden lógico de composición, no contra las filas vecinas del mismo
+  candidato OCR. Se corrigió el criterio y se añadieron pruebas para aceptar la
+  fila confirmada y mantener el bloqueo ante discontinuidad física real.
+- Verificación focal en Python 3.12.13: 314 pruebas aprobadas, 0 fallidas. Los
+  tres documentos focales reales quedaron `parcial`, con cero
+  filas ambiguas, cero bloqueos de certificación y diferencias cero en las ocho
+  columnas.
+- Suite completa en Python 3.12.13: 2.022 pruebas recolectadas mediante
+  `scripts/pytest_collection_gate.py`; 2.003 aprobadas, 19 omitidas, 0 fallidas
+  y 3 advertencias en 193,48 segundos. `git diff --check` pasó.
+- La matriz privada congelada se ejecutó completa: registró mejoras en los dos
+  casos objetivo, mantuvo el tercer caso en `parcial` sin descuadre y no detectó
+  regresiones. Los documentos fallidos o no evaluables permanecen fuera del
+  conjunto aprobado. Las métricas por documento se mantienen fuera de Git.
+- El paquete de evidencia Ronda 16 continúa en NO-GO de privacidad: contiene
+  referencias a artefactos privados, prefijos derivados de hashes de PDFs y un
+  parche con una fila privada; además, el ZIP incluye `private_evidence`. Ese
+  paquete queda excluido de cualquier selección para Git o distribución.
+- La selección de código, pruebas y hoja de ruta se saneó por separado. El
+  escaneo estricto final no encontró RUT, entidades, PDF privados, rutas
+  personales, filas reales ni alias asociados a métricas del corpus; el control
+  de privacidad versionado aprobó 1/1. El informe histórico no versionado sigue
+  expresamente excluido.
+- El verificador estático on-premise encontró una prueba intermitente ajena al
+  cambio OCR: OpenSSL AES-CBC puede devolver código cero al descifrar con una
+  clave incorrecta si el relleno resulta válido por azar. Se corrigió el
+  contrato para exigir que una clave incorrecta no recupere el texto original.
+  La prueba pasó cinco repeticiones y el gate estático completo pasó 50 pruebas.
+- El smoke Docker de evaluación se ejecutó en puertos alternativos para no
+  interferir con el piloto. La primera ejecución detectó que Caddy crea su CA
+  interna de forma diferida; se agregó una inicialización TLS aislada y luego la
+  validación real con la CA copiada desde el volumen. La repetición aprobó sus
+  ocho etapas: HTTPS, persistencia, reinicio, backup cifrado, restore y salud.
+- El smoke anterior no acredita autenticidad criptográfica del respaldo. Los
+  scripts actuales usan AES-CBC y checksums SHA-256 sin clave. Se verificó que
+  una clave incorrecta y un ciphertext alterado no modifican el destino, pero
+  metadata alterada con checksum recalculado puede ser aceptada. Implementar
+  MAC autenticado sigue siendo un bloque de seguridad separado.
+- Fase 1 y Fase 7 permanecen `BLOQUEADO`. El candidato técnico de P0.1 ya no
+  presenta regresiones en la matriz ni en la suite, pero el cierre formal y la
+  promoción siguen bloqueados por la evidencia pública no saneada, Gold 0/3 y
+  los documentos preexistentes aún fallidos o no evaluables.
+- Siguiente paso: diseñar el control autenticado de backup, regenerar una
+  evidencia pública físicamente separada y saneada después del congelamiento,
+  y presentar una selección explícita de archivos para aprobación de commit.
+
+### Control del 2026-09-27, autenticidad de backup y restore
+
+- Estado Git verificado: rama `codex/mejoras-pendientes-20260826`, HEAD
+  `f986b313bc2ded75ab487cd604c2abb286487c21`, referencia upstream sincronizada
+  (0 adelante, 0 atrás) y staging vacío. Los cambios permanecen locales; no se
+  realizó commit, push ni despliegue.
+- Se implementó cifrar-luego-autenticar para `app_runtime` y el perfil opcional
+  PostgreSQL: HMAC-SHA256 cubre el payload y sus metadatos exactos, con subclave
+  PBKDF2-HMAC-SHA256, salt aleatorio y separación de dominio. Producción exige
+  cifrado y autenticación; la restauración heredada sin sobre sólo existe en
+  evaluación con doble consentimiento explícito.
+- Restore verifica el HMAC y crea copias privadas estables antes de interpretar
+  metadatos, descifrar o detener servicios. La clave se captura una sola vez;
+  se rechazan symlinks, permisos inseguros, colisiones, envelopes inválidos,
+  overrides de runtime en producción y destinos de backup sin propietario o
+  permisos seguros. La publicación no sobrescribe artefactos y hace visible el
+  payload al final.
+- Validación estática en Python 3.12.13: `git diff --check`, sintaxis de los seis
+  scripts y compilación de utilidades Python, sin errores. Ruff no estaba
+  instalado en ese entorno y no se presenta como ejecutado.
+- Suite on-premise completa: 130 aprobadas, 0 fallidas en 70,82 segundos. El
+  verificador reproducible del paquete aprobó 140 pruebas, 0 fallidas en 63,49
+  segundos.
+- Smoke Docker aislado de evaluación, en puertos alternativos: 8/8 etapas
+  aprobadas. Verificó HTTPS con CA explícita, persistencia, reinicio, respaldo
+  cifrado y autenticado, rechazo de payload alterado con SHA-256 recalculado,
+  restauración válida y recuperación de salud. Las advertencias de locale de
+  Perl no cambiaron la salida aprobada.
+- Gate de colección: 2.112 pruebas recolectadas. Regresión integral en Python
+  3.12.13: 2.093 aprobadas, 19 omitidas, 0 fallidas y 3 advertencias en 290,85
+  segundos. Las advertencias son deprecaciones de pandas; las omisiones no se
+  reinterpretan como aprobaciones de sus recursos externos.
+- El escaneo acotado de la selección de backup no encontró rutas personales,
+  RUT con formato chileno, entidades/casos privados conocidos ni nombres de PDF.
+  `docs/P01_VERIFICACION_20260923.md` continúa excluido de cualquier selección.
+- Ninguna fase global cambia de estado. Fases 4 y 6 permanecen `EN_REVISION` y
+  fases 1 y 7 permanecen `BLOQUEADO`. El control autenticado queda verificado
+  localmente y en Docker de evaluación, pero no acredita el almacenamiento del
+  cliente, custodia de claves, RPO/RTO, identidad ni recuperación supervisada.
+- Riesgo residual: el perfil opcional `legacy-postgres` aún no ejecuta
+  `pg_restore --list` antes de publicar el dump. Si restore y rollback fallan,
+  el temporal privado puede conservar datos descifrados y la clave capturada;
+  requiere filesystem protegido y disposición aprobada. El HMAC tampoco evita
+  borrado, replay de un respaldo válido ni falsificación tras comprometer la
+  clave.
+- Siguiente paso: revisar una selección explícita del bloque autenticado y
+  solicitar aprobación antes de staging o commit. En paralelo quedan pendientes
+  la validación semántica del dump PostgreSQL heredado y los gates externos ya
+  registrados. Mantener `NO-GO` para producción.
 
 1. Cambios realizados, con archivos concretos.
 2. Pruebas ejecutadas y resultado exacto.

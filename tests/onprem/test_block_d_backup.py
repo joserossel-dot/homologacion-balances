@@ -65,14 +65,17 @@ def test_real_openssl_direct_crypto_synthetic(tmp_path):
     assert res_dec.returncode == 0, res_dec.stderr
     assert dec_file.read_bytes() == data
 
-    # 3. Descifrar con llave incorrecta debe fallar
+    # 3. Una llave incorrecta nunca debe recuperar el texto original. AES-CBC
+    # sin autenticación puede devolver código 0 por azar si el último bloque
+    # presenta un padding válido, por lo que el código de salida no basta como
+    # prueba de rechazo criptográfico.
     dec_bad = tmp_path / "decrypted_bad.bin"
     cmd_dec_bad = [
         "openssl", "enc", "-d", "-aes-256-cbc", "-pbkdf2", "-iter", "200000",
         "-pass", f"file:{key_file_bad}", "-in", str(enc_file), "-out", str(dec_bad)
     ]
     res_bad = subprocess.run(cmd_dec_bad, capture_output=True, text=True)
-    assert res_bad.returncode != 0
+    assert res_bad.returncode != 0 or dec_bad.read_bytes() != data
 
     # 4. Descifrar archivo alterado debe fallar
     tampered_file = tmp_path / "tampered.enc"
@@ -105,8 +108,9 @@ def test_backup_restore_with_spaces_in_paths(tmp_path):
         **os.environ,
         "RUNTIME_SOURCE_DIR": str(source_dir),
         "BACKUP_DIR": str(backup_dir),
-        "ONPREM_DEPLOYMENT_MODE": "production",
+        "ONPREM_DEPLOYMENT_MODE": "evaluation",
         "BACKUP_ENCRYPTION_REQUIRED": "true",
+        "BACKUP_AUTHENTICATION_REQUIRED": "true",
         "BACKUP_ENCRYPTION_KEY_FILE": str(key_file),
     }
 
@@ -120,6 +124,7 @@ def test_backup_restore_with_spaces_in_paths(tmp_path):
     archives = list(backup_dir.glob("*.tar.gz.enc"))
     assert len(archives) == 1
     archive = archives[0]
+    assert Path(str(archive) + ".auth.json").is_file()
 
     # Ejecutar restore sobre target_dir
     res_restore = subprocess.run(
@@ -160,9 +165,13 @@ def test_restore_exit_codes_and_validation(tmp_path):
         **os.environ,
         "ONPREM_DEPLOYMENT_MODE": "evaluation",
         "BACKUP_ENCRYPTION_REQUIRED": "false",
+        "BACKUP_ALLOW_LEGACY_UNAUTHENTICATED_RESTORE": "true",
     }
     res = subprocess.run(
-        ["sh", str(restore_script), str(fake_tar), "--confirm"],
+        [
+            "sh", str(restore_script), str(fake_tar), "--confirm",
+            "--allow-legacy-unauthenticated",
+        ],
         env=eval_env, capture_output=True, text=True,
     )
     assert res.returncode == 65

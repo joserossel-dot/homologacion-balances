@@ -211,15 +211,22 @@ def test_restore_rejects_missing_or_invalid_checksum_before_docker(tmp_path) -> 
         **os.environ, "PATH": "/usr/bin:/bin",
         "ONPREM_DEPLOYMENT_MODE": "evaluation",
         "BACKUP_ENCRYPTION_REQUIRED": "false",
+        "BACKUP_ALLOW_LEGACY_UNAUTHENTICATED_RESTORE": "true",
     }
     missing = subprocess.run(
-        ["sh", str(ONPREM / "scripts" / "restore.sh"), str(fake_backup), "--confirm"],
+        [
+            "sh", str(ONPREM / "scripts" / "restore.sh"), str(fake_backup),
+            "--confirm", "--allow-legacy-unauthenticated",
+        ],
         env=env, capture_output=True, text=True,
     )
     assert missing.returncode == 66
     fake_backup.with_suffix(".dump.sha256").write_text("0" * 64, encoding="utf-8")
     invalid = subprocess.run(
-        ["sh", str(ONPREM / "scripts" / "restore.sh"), str(fake_backup), "--confirm"],
+        [
+            "sh", str(ONPREM / "scripts" / "restore.sh"), str(fake_backup),
+            "--confirm", "--allow-legacy-unauthenticated",
+        ],
         env=env, capture_output=True, text=True,
     )
     assert invalid.returncode == 65
@@ -307,8 +314,29 @@ def test_production_preflight_rejects_mutable_images_and_accepts_digests() -> No
         "ONPREM_DEPLOYMENT_MODE": "production",
         "AUTH_ENFORCEMENT": "forward_auth",
         "BACKUP_ENCRYPTION_REQUIRED": "true",
+        "BACKUP_AUTHENTICATION_REQUIRED": "true",
+        "BACKUP_ALLOW_LEGACY_UNAUTHENTICATED_RESTORE": "false",
         **{name: immutable for name in module.IMAGE_VARIABLES},
     })
+    with pytest.raises(ValueError, match="BACKUP_AUTHENTICATION_REQUIRED"):
+        module.validate({
+            **local,
+            "ONPREM_DEPLOYMENT_MODE": "production",
+            "AUTH_ENFORCEMENT": "forward_auth",
+            "BACKUP_ENCRYPTION_REQUIRED": "true",
+            "BACKUP_AUTHENTICATION_REQUIRED": "false",
+            **{name: immutable for name in module.IMAGE_VARIABLES},
+        })
+    with pytest.raises(ValueError, match="LEGACY_UNAUTHENTICATED"):
+        module.validate({
+            **local,
+            "ONPREM_DEPLOYMENT_MODE": "production",
+            "AUTH_ENFORCEMENT": "forward_auth",
+            "BACKUP_ENCRYPTION_REQUIRED": "true",
+            "BACKUP_AUTHENTICATION_REQUIRED": "true",
+            "BACKUP_ALLOW_LEGACY_UNAUTHENTICATED_RESTORE": "true",
+            **{name: immutable for name in module.IMAGE_VARIABLES},
+        })
     with pytest.raises(ValueError, match="CADDYFILE_PATH"):
         module.validate({
             **local,
@@ -408,9 +436,13 @@ def test_restore_simulation_runs_maintenance_prebackup_and_atomic_swap(tmp_path)
         "BACKUP_DIR": str(tmp_path / "backups"),
         "ONPREM_DEPLOYMENT_MODE": "evaluation",
         "BACKUP_ENCRYPTION_REQUIRED": "false",
+        "BACKUP_ALLOW_LEGACY_UNAUTHENTICATED_RESTORE": "true",
     }
     result = subprocess.run(
-        ["sh", str(ONPREM / "scripts" / "restore.sh"), str(backup), "--confirm"],
+        [
+            "sh", str(ONPREM / "scripts" / "restore.sh"), str(backup),
+            "--confirm", "--allow-legacy-unauthenticated",
+        ],
         env=env, capture_output=True, text=True,
     )
     assert result.returncode == 0, result.stderr
@@ -437,9 +469,13 @@ def test_restore_simulation_rolls_back_and_restarts_after_failure(tmp_path) -> N
         "BACKUP_DIR": str(tmp_path / "backups"),
         "ONPREM_DEPLOYMENT_MODE": "evaluation",
         "BACKUP_ENCRYPTION_REQUIRED": "false",
+        "BACKUP_ALLOW_LEGACY_UNAUTHENTICATED_RESTORE": "true",
     }
     result = subprocess.run(
-        ["sh", str(ONPREM / "scripts" / "restore.sh"), str(backup), "--confirm"],
+        [
+            "sh", str(ONPREM / "scripts" / "restore.sh"), str(backup),
+            "--confirm", "--allow-legacy-unauthenticated",
+        ],
         env=env, capture_output=True, text=True,
     )
     assert result.returncode == 42
@@ -496,7 +532,10 @@ def test_production_backup_requires_external_key_and_writes_encrypted_metadata(
         "rto_hours": 8,
         "retention_days": 30,
         "format": "postgres-custom",
+        "envelope_version": 2,
+        "authentication": "hmac-sha256",
     }
+    assert encrypted[0].with_name(encrypted[0].name + ".auth.json").is_file()
     restored = subprocess.run(
         [
             "sh", str(ONPREM / "scripts" / "restore.sh"),

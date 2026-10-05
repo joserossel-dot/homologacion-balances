@@ -62,23 +62,63 @@ selección de registry, digest aprobado, SBOM, firma y escáner permanece pendie
 En producción, `backup-runtime.sh` exige una clave externa no vacía y cifra el
 snapshot de `app_runtime`
 con AES-256-CBC, PBKDF2 y salt. La clave no entra a la imagen ni al repositorio.
-El respaldo incluye checksum del archivo cifrado y metadatos de RPO, RTO,
-retención, formato y fecha. La retención elimina artefactos más antiguos dentro
-del directorio de backup explícito.
+Además genera un sobre HMAC-SHA256 que cubre los bytes exactos del artefacto y
+de sus metadatos de RPO, RTO, retención, formato y fecha. La subclave HMAC se
+deriva mediante PBKDF2-HMAC-SHA256 con salt aleatorio y separación de dominio.
+Los checksum SHA-256 sin clave se conservan como diagnóstico, no como prueba de
+autenticidad. La retención elimina artefactos más antiguos dentro del directorio
+de backup explícito.
 
-`restore-runtime.sh` verifica checksum, metadatos, manifiesto cerrado, hashes por
-archivo, JSON e integridad SQLite antes de detener servicios. Extrae en staging,
-crea un respaldo previo cifrado y, si falla la sonda posterior al reemplazo,
-recupera el snapshot anterior. Las pruebas sin daemon cubren round-trip,
-traversal, alteración de manifiesto, cifrado y conservación ante archivo inválido.
-Falta ejecutar el mismo ciclo contra un volumen Docker y storage reales.
+La clave se valida como archivo regular, no simbólico, perteneciente al usuario
+efectivo y sin permisos para grupo u otros. Se captura una sola vez antes del
+cifrado y la firma para impedir que una rotación concurrente produzca un bundle
+autenticado con una clave distinta de la usada para cifrar. `BACKUP_DIR` también
+debe ser un directorio real, del operador y sin escritura de grupo u otros. La
+publicación usa staging privado, no sobrescribe nombres existentes y hace visible
+el payload principal al final, después de sus sidecars.
+
+`restore-runtime.sh` verifica el HMAC antes de leer metadatos, descifrar o detener
+servicios. Sólo después comprueba checksum, manifiesto cerrado, hashes por
+archivo, JSON e integridad SQLite. Extrae en staging, crea un respaldo previo
+cifrado y autenticado y, si falla la sonda posterior al reemplazo, recupera el
+snapshot anterior. Las pruebas sin daemon cubren round-trip, traversal,
+alteración de manifiesto, payload o metadatos, clave incorrecta y conservación
+del destino ante un archivo inválido. Un smoke Docker de evaluación verificó el
+rechazo de un payload alterado aun después de recalcular su SHA-256, seguido por
+la restauración válida y la recuperación de salud. Esta prueba no acredita el
+storage real del cliente, que sigue pendiente.
+
+Para reducir cambios entre verificación y uso, restore trabaja sobre copias
+privadas y estables del payload, metadatos y sidecars, y conserva una captura
+estable de la clave. Estas copias viven bajo `TMPDIR`; el cliente debe configurar
+un filesystem local, privado, no compartido ni versionado y, si su política lo
+exige, cifrado. El borrado lógico de la captura de clave no garantiza borrado
+forense en todos los filesystems.
+
+La opción administrativa `backup-runtime.sh --source-dir RUTA
+--confirm-quiesced` sólo respalda una fuente cuya quiescencia ya fue confirmada.
+Se usa internamente para el snapshot previo de restore; no sustituye la detención
+de una fuente activa. Los overrides `RUNTIME_SOURCE_DIR` y `RUNTIME_TARGET_DIR`
+no están permitidos en producción.
 
 `backup.sh` y `restore.sh` permanecen únicamente para el perfil explícito
-`legacy-postgres`; no protegen la persistencia operativa de la UI local.
+`legacy-postgres`; no protegen la persistencia operativa de la UI local. Ese
+backup heredado aún no ejecuta `pg_restore --list` antes de publicar, por lo que
+su restaurabilidad semántica permanece pendiente de certificación.
 
 El algoritmo y gestión de claves deben ser aprobados por seguridad del cliente.
 Para despliegues regulados puede requerirse envelope encryption, HSM/KMS,
 rotación, custodia dual o un formato distinto.
+
+El HMAC no protege contra borrado ni replay de un respaldo antiguo válido. El
+compromiso de la clave también permite falsificar artefactos. El control se
+debe complementar con retención inmutable, versionado, monitoreo, rotación y
+custodia externa aprobados por el cliente.
+
+Si la restauración y el rollback fallan, el directorio temporal privado se
+conserva como evidencia. Puede incluir el material descifrado y la clave
+capturada, por lo que debe permanecer en almacenamiento protegido y someterse a
+un procedimiento aprobado de análisis y eliminación.
 
 Límite actual: los scripts de backup y restore requieren `openssl` en el host.
 Antes de distribuir el instalador corporativo, esta utilidad debe incorporarse

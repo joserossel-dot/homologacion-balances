@@ -45,6 +45,8 @@ jobs:
           ONPREM_SMOKE_MODE: evaluation
           AUTH_ENFORCEMENT: staging
           BACKUP_ENCRYPTION_REQUIRED: "true"
+          BACKUP_AUTHENTICATION_REQUIRED: "true"
+          BACKUP_ALLOW_LEGACY_UNAUTHENTICATED_RESTORE: "false"
         run: poetry run deployment/onprem/scripts/smoke-test.sh
 
   certify:

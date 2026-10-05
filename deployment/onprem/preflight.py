@@ -52,6 +52,17 @@ def validate(environment: Mapping[str, str] | None = None) -> None:
         raise ValueError("Producción exige CADDYFILE_PATH=./Caddyfile.production")
     if values.get("BACKUP_ENCRYPTION_REQUIRED", "true").strip().lower() != "true":
         raise ValueError("Producción exige BACKUP_ENCRYPTION_REQUIRED=true")
+    if values.get("BACKUP_AUTHENTICATION_REQUIRED", "true").strip().lower() != "true":
+        raise ValueError("Producción exige BACKUP_AUTHENTICATION_REQUIRED=true")
+    if (
+        values.get(
+            "BACKUP_ALLOW_LEGACY_UNAUTHENTICATED_RESTORE", "false"
+        ).strip().lower()
+        != "false"
+    ):
+        raise ValueError(
+            "Producción no permite BACKUP_ALLOW_LEGACY_UNAUTHENTICATED_RESTORE"
+        )
 
 
 def validate_runtime_persistence(
