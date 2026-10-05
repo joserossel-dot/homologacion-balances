@@ -776,6 +776,50 @@ def test_extraer_lineas_inicializa_layout_antes_del_fallback(monkeypatch, tmp_pa
     assert rotation == 0
 
 
+def test_parsear_no_renormaliza_tabla_nativa_reconstruida_por_coordenadas(
+    monkeypatch, tmp_path,
+):
+    pdf = tmp_path / "balance.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n")
+    monkeypatch.setattr(parser, "validar_archivo", lambda _path: (True, "OK"))
+    monkeypatch.setattr(
+        parser, "verificar_runtime_ocr",
+        lambda: {"available": True, "spa_available": True},
+    )
+    monkeypatch.setattr(
+        parser, "extraer_encabezados_documento_pdf", lambda _path: [],
+    )
+    monkeypatch.setattr(
+        parser.ParserPDF, "_analizar_documento", lambda self, _path: None,
+    )
+
+    def coordinate_lines(self, _path, _context):
+        self._extraction_method = "native_corrupt_coordinates"
+        self._extraction_confidence = 0.75
+        return [
+            "110101 CUENTA A 59.187.415 39.931.081 19.256.334 0 "
+            "19.256.334 0 0 0",
+            "210101 CUENTA B 0 19.256.334 0 19.256.334 0 "
+            "19.256.334 0 0",
+            "SUMAS 59.187.415 59.187.415 19.256.334 19.256.334 "
+            "19.256.334 19.256.334 0 0",
+        ], False, 0
+
+    monkeypatch.setattr(parser.ParserPDF, "_extraer_lineas", coordinate_lines)
+
+    result = parser.ParserPDF().parsear(pdf)
+
+    assert len(result.cuentas) == 3
+    assert all(
+        len(cuenta.montos_columnas) == len(parser.RAW_MONETARY_COLUMNS)
+        for cuenta in result.cuentas
+    )
+    assert all(
+        "columnas_incompletas" not in cuenta.razones_revision_extraccion
+        for cuenta in result.cuentas
+    )
+
+
 def test_parsear_linea_elimina_raya_ocr_antes_del_nombre():
     for dash in ("-", "–", "—", "−"):
         cuenta = parser.parsear_linea(

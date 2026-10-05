@@ -2,6 +2,7 @@ import json
 
 import pandas as pd
 import pytest
+from openpyxl import load_workbook
 
 from scripts.certify_local_corpus import (
     _account_snapshot,
@@ -698,6 +699,44 @@ def test_review_package_groups_differences_without_approving(tmp_path):
     assert hierarchy["expected_line"] == 10
     assert (tmp_path / "review" / "CHECKLIST.md").exists()
     assert (tmp_path / "review" / "revision_gold_schema2.xlsx").exists()
+
+
+def test_review_package_blocks_release_when_only_gold_differences_remain(tmp_path):
+    report = tmp_path / "gold-report.json"
+    report.write_text(json.dumps([{
+        "file": "auditado.pdf",
+        "selected_pages": [1],
+        "certification": {"state": "certificada"},
+        "expectations_passed": True,
+        "gold_candidate": "/private/auditado.gold-candidate.xlsx",
+        "expectation_checks": [{
+            "name": "gold_mismatched_rows",
+            "passed": False,
+            "actual": [{
+                "key": ["", "caja", 1],
+                "actual_line": 2,
+                "expected_line": 2,
+                "differences": {"classification_method": ["rules", "dictionary"]},
+            }],
+            "expected": [],
+        }],
+    }]), encoding="utf-8")
+
+    package = build_gold_review_package(report, tmp_path / "review")
+
+    assert package["summary"]["documents_approved"] == 1
+    assert package["summary"]["differences"] == 1
+    assert package["summary"]["release_blocked"] is True
+
+    workbook = load_workbook(
+        tmp_path / "review" / "revision_gold_schema2.xlsx",
+    )
+    for worksheet in workbook.worksheets:
+        assert worksheet.freeze_panes == "A2"
+        assert worksheet.auto_filter.ref == worksheet.dimensions
+        assert worksheet["A1"].font.bold is True
+        assert worksheet.column_dimensions["A"].width >= 12
+    assert workbook["Resumen"].column_dimensions["I"].width >= 17
 
 
 def test_manifest_rejects_gold_path_outside_matrix(tmp_path):

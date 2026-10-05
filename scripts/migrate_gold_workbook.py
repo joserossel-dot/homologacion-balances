@@ -17,6 +17,8 @@ from collections import Counter
 from pathlib import Path
 
 import pandas as pd
+from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
 
 PROTECTED_COLUMNS = (
     "Jerarquia_contable", "Metodo_clasificacion", "Confianza_extraccion",
@@ -37,6 +39,37 @@ FIELD_LABELS = {
     "is_total": "Es_control_total",
 }
 INTERNAL_BY_COLUMN = {value: key for key, value in FIELD_LABELS.items()}
+
+
+def _format_review_workbook(workbook) -> None:
+    """Deja el libro de revisión legible sin alterar su contenido."""
+    header_fill = PatternFill("solid", fgColor="1F4E78")
+    header_font = Font(color="FFFFFF", bold=True)
+    for worksheet in workbook.worksheets:
+        worksheet.freeze_panes = "A2"
+        worksheet.auto_filter.ref = worksheet.dimensions
+        worksheet.sheet_view.showGridLines = False
+        worksheet.page_setup.orientation = "landscape"
+        worksheet.page_setup.fitToWidth = 1
+        worksheet.page_setup.fitToHeight = 0
+        worksheet.sheet_properties.pageSetUpPr.fitToPage = True
+        worksheet.print_title_rows = "1:1"
+        for cell in worksheet[1]:
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(
+                horizontal="center", vertical="center", wrap_text=True,
+            )
+        worksheet.row_dimensions[1].height = 30
+        for column_index, cells in enumerate(
+            worksheet.iter_cols(1, worksheet.max_column), start=1,
+        ):
+            values = [str(cell.value or "") for cell in cells]
+            longest = max((len(value) for value in values), default=0)
+            width = min(max(longest + 2, 12), 42)
+            worksheet.column_dimensions[get_column_letter(column_index)].width = width
+            for cell in cells[1:]:
+                cell.alignment = Alignment(vertical="top", wrap_text=True)
 
 
 def _normalized(value) -> str:
@@ -301,7 +334,9 @@ def build_gold_review_package(
         ),
         "by_severity": dict(sorted(severity_counts.items())),
         "by_field": dict(sorted(field_counts.items())),
-        "release_blocked": any(not row["expectations_passed"] for row in documents),
+        "release_blocked": bool(differences) or any(
+            not row["expectations_passed"] for row in documents
+        ),
     }
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "summary.json").write_text(
@@ -381,6 +416,7 @@ def build_gold_review_package(
         pd.DataFrame(documents).to_excel(writer, sheet_name="Documentos", index=False)
         pd.DataFrame(grouped_rows).to_excel(writer, sheet_name="Agrupacion", index=False)
         pd.DataFrame(flat_rows).to_excel(writer, sheet_name="Diferencias", index=False)
+        _format_review_workbook(writer.book)
     return {"summary": summary, "documents": documents, "differences": differences}
 
 

@@ -7857,6 +7857,7 @@ class ParserPDF:
             lineas = [normalizar_linea_ocr_tabla(linea) for linea in lineas]
         elif self._extraction_method not in {
             "coordinates_8_amounts",
+            "native_corrupt_coordinates",
             "native_table_8_columns",
         }:
             lineas = [
