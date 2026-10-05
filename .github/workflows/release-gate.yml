@@ -73,6 +73,11 @@ jobs:
           poetry check
           poetry run python -m py_compile app_validacion.py persistence/neon_store.py pipeline/homologation_pipeline.py
           git diff --check
+      - name: Install OCR rendering dependency
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends poppler-utils
+          command -v pdftoppm
       - name: Run complete test suite
         run: |
           poetry run python scripts/pytest_collection_gate.py
