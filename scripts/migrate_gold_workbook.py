@@ -11,8 +11,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
+import os
 import re
 import shutil
+import uuid
 from collections import Counter
 from pathlib import Path
 
@@ -24,6 +27,40 @@ PROTECTED_COLUMNS = (
     "Jerarquia_contable", "Metodo_clasificacion", "Confianza_extraccion",
     "Columnas_derivadas_JSON",
 )
+
+
+try:
+    from scripts.gold_confidence_contract import (
+        GOLD_CONFIDENCE_CONTRACT_VERSION,
+        SUPPORTED_CONFIDENCE_CONTRACT_VERSIONS,
+        is_valid_confidence,
+        _is_valid_confidence,
+        is_valid_sha256,
+        validate_sha256_binding,
+        parse_contract_version,
+        validate_confidence_floor,
+        validate_candidate_confidence,
+        validate_workbook_resumen_and_cuentas,
+        extract_and_validate_sha256,
+        has_approved_sub_one_floor,
+        validate_migration_hashes,
+    )
+except ImportError:
+    from gold_confidence_contract import (
+        GOLD_CONFIDENCE_CONTRACT_VERSION,
+        SUPPORTED_CONFIDENCE_CONTRACT_VERSIONS,
+        is_valid_confidence,
+        _is_valid_confidence,
+        is_valid_sha256,
+        validate_sha256_binding,
+        parse_contract_version,
+        validate_confidence_floor,
+        validate_candidate_confidence,
+        validate_workbook_resumen_and_cuentas,
+        extract_and_validate_sha256,
+        has_approved_sub_one_floor,
+        validate_migration_hashes,
+    )
 
 FIELD_LABELS = {
     "accounting_hierarchy": "Jerarquia_contable",
@@ -98,27 +135,84 @@ def _indexed(frame: pd.DataFrame) -> dict[tuple[str, str, int], pd.Series]:
 
 
 def migrate_gold_workbook(legacy: Path, candidate: Path, output: Path) -> Path:
-    legacy_rows = pd.read_excel(legacy, sheet_name="Cuentas")
-    candidate_rows = pd.read_excel(candidate, sheet_name="Cuentas")
+    # 1. Validar estrictamente el libro legado (Resumen, Cuentas, marcador y coherencia)
+    legacy_contract_version, legacy_summary, legacy_rows = validate_workbook_resumen_and_cuentas(
+        legacy, label="libro legado"
+    )
+
+    # 2. Validar estrictamente el candidato (Resumen, Cuentas, marcador y coherencia)
+    cand_contract_version, candidate_summary, candidate_rows = validate_workbook_resumen_and_cuentas(
+        candidate, label="candidato"
+    )
+
+    # 3. Detectar si cualquier fila APROBADO del legado o candidato tiene piso < 1.0
+    has_sub_one_floor = (
+        has_approved_sub_one_floor(legacy_rows)
+        or has_approved_sub_one_floor(candidate_rows)
+    )
+    validated_sha = validate_migration_hashes(
+        legacy_summary=legacy_summary,
+        candidate_summary=candidate_summary,
+        has_sub_one_floor=has_sub_one_floor,
+        context_label=f"{legacy.name} -> {candidate.name}",
+    )
+
+    if "Estado_revision" not in candidate_rows.columns:
+        candidate_rows["Estado_revision"] = "PENDIENTE"
     candidate_rows["Estado_revision"] = candidate_rows[
         "Estado_revision"
     ].astype(object)
+    if "Observacion_analista" not in candidate_rows.columns:
+        candidate_rows["Observacion_analista"] = ""
     candidate_rows["Observacion_analista"] = candidate_rows[
         "Observacion_analista"
     ].astype(object)
+    if "Confianza_minima" not in candidate_rows.columns:
+        candidate_rows["Confianza_minima"] = candidate_rows["Confianza_extraccion"]
+
     legacy_index = _indexed(legacy_rows)
     candidate_index = _indexed(candidate_rows)
     for key, row in candidate_index.items():
         legacy_row = legacy_index.get(key)
         row_index = row.name
+        candidate_conf = row.get("Confianza_extraccion")
+        if not _is_valid_confidence(candidate_conf):
+            raise ValueError(
+                f"Fila {row_index} candidata tiene Confianza_extraccion inválida: {candidate_conf!r}."
+            )
+        current_conf = float(candidate_conf)
+
         if legacy_row is None:
             candidate_rows.at[row_index, "Estado_revision"] = "CORREGIR"
             candidate_rows.at[row_index, "Observacion_analista"] = (
                 "Fila nueva en schema 2; requiere revisión humana."
             )
+            candidate_rows.at[row_index, "Confianza_minima"] = current_conf
             continue
+
         previous_state = str(legacy_row.get("Estado_revision") or "").upper()
         changed = []
+
+        # Determinar el piso de regresión por fila
+        has_legacy_floor_col = (
+            "Confianza_minima" in legacy_rows.columns
+            or "Confianza_minima_exigida" in legacy_rows.columns
+            or "Confianza_extraccion" in legacy_rows.columns
+        )
+        if not has_legacy_floor_col:
+            legacy_floor = 1.0
+        else:
+            legacy_min = legacy_row.get("Confianza_minima")
+            if legacy_min is None or pd.isna(legacy_min):
+                legacy_min = legacy_row.get("Confianza_minima_exigida")
+            if legacy_min is None or pd.isna(legacy_min):
+                legacy_min = legacy_row.get("Confianza_extraccion")
+            if not _is_valid_confidence(legacy_min):
+                raise ValueError(
+                    f"Fila {row_index} en libro legado tiene piso de confianza inválido: {legacy_min!r}."
+                )
+            legacy_floor = float(legacy_min)
+
         for column in PROTECTED_COLUMNS:
             previous = legacy_row.get(column) if column in legacy_rows.columns else None
             current = row.get(column)
@@ -126,6 +220,16 @@ def migrate_gold_workbook(legacy: Path, candidate: Path, output: Path) -> Path:
                 previous = None
             if pd.isna(current):
                 current = None
+            if column == "Confianza_extraccion":
+                # No rebajar automáticamente una fila desde 1.0 a 0.75
+                # La migración solo adopta piso inferior cuando el analista ya lo aprobó con trazabilidad en legacy
+                if current_conf < legacy_floor:
+                    changed.append(f"Confianza_extraccion ({current_conf} bajo piso previo {legacy_floor})")
+                    candidate_rows.at[row_index, "Confianza_minima"] = legacy_floor
+                    continue
+                else:
+                    candidate_rows.at[row_index, "Confianza_minima"] = legacy_floor
+                    continue
             if previous != current:
                 changed.append(column)
         if changed:
@@ -135,15 +239,25 @@ def migrate_gold_workbook(legacy: Path, candidate: Path, output: Path) -> Path:
             )
         else:
             candidate_rows.at[row_index, "Estado_revision"] = previous_state
+
     output.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(candidate, output)
-    summary = pd.read_excel(output, sheet_name="Resumen")
-    summary["Gold_schema_version"] = 2
-    with pd.ExcelWriter(
-        output, engine="openpyxl", mode="a", if_sheet_exists="replace",
-    ) as writer:
-        summary.to_excel(writer, sheet_name="Resumen", index=False)
-        candidate_rows.to_excel(writer, sheet_name="Cuentas", index=False)
+    temp_output = output.parent / f".{output.stem}.tmp_{uuid.uuid4().hex}.xlsx"
+    try:
+        shutil.copy2(candidate, temp_output)
+        summary = pd.read_excel(temp_output, sheet_name="Resumen")
+        summary["Gold_schema_version"] = 2
+        summary["Gold_confidence_contract_version"] = GOLD_CONFIDENCE_CONTRACT_VERSION
+        if validated_sha is not None:
+            summary["SHA256"] = validated_sha
+        with pd.ExcelWriter(temp_output, engine="openpyxl", mode="a", if_sheet_exists="replace") as writer:
+            summary.to_excel(writer, sheet_name="Resumen", index=False)
+            candidate_rows.to_excel(writer, sheet_name="Cuentas", index=False)
+        validate_workbook_resumen_and_cuentas(temp_output, label="temporal", enforce_confidence_coherence=False)
+        os.replace(temp_output, output)
+    except Exception:
+        if temp_output.exists():
+            temp_output.unlink(missing_ok=True)
+        raise
     return output
 
 
@@ -255,9 +369,15 @@ def build_gold_review_package(
     # modificar ni aprobar el Gold original.
     if manifest and legacy_gold_root:
         manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
+        manifest_cases = {
+            str(case["file"]): case
+            for case in manifest_data.get("cases", [])
+            if isinstance(case, dict) and case.get("file")
+        }
         gold_by_document = {
             str(case["file"]): str(case.get("gold_file") or "")
             for case in manifest_data.get("cases", [])
+            if isinstance(case, dict) and case.get("file")
         }
         existing = {
             (
@@ -270,12 +390,39 @@ def build_gold_review_package(
             filename = str(result.get("file") or "")
             legacy_name = gold_by_document.get(filename)
             candidate_path = result.get("gold_candidate")
-            if not legacy_name or not candidate_path:
+            if not legacy_name:
                 continue
-            legacy_rows = pd.read_excel(
-                legacy_gold_root / legacy_name, sheet_name="Cuentas",
+            legacy_file = legacy_gold_root / legacy_name
+            if not legacy_file.exists():
+                raise ValueError(
+                    f"El libro Gold de referencia para el documento '{filename}' "
+                    f"no existe en {legacy_gold_root} ({legacy_name})."
+                )
+            if not candidate_path or not Path(candidate_path).exists():
+                raise ValueError(
+                    f"El candidato Gold para el documento '{filename}' no existe ({candidate_path})."
+                )
+            legacy_contract_version, leg_sum, legacy_rows = validate_workbook_resumen_and_cuentas(
+                legacy_file, label=f"libro Gold ({legacy_name})"
             )
-            candidate_rows = pd.read_excel(candidate_path, sheet_name="Cuentas")
+            cand_contract_version, cand_sum, candidate_rows = validate_workbook_resumen_and_cuentas(
+                candidate_path, label=f"candidato Gold ({filename})"
+            )
+
+            has_sub_one_floor = has_approved_sub_one_floor(legacy_rows)
+            if has_sub_one_floor:
+                case = manifest_cases.get(filename, {})
+                manifest_sha = (case.get("expect") or {}).get("sha256")
+                doc_sha = result.get("sha256")
+                gold_sha = extract_and_validate_sha256(
+                    leg_sum, required=True, context_label=f"libro Gold ({legacy_name})"
+                )
+                validate_sha256_binding(
+                    gold_sha256=gold_sha,
+                    manifest_sha256=manifest_sha,
+                    document_sha256=doc_sha,
+                    context_label=f"{filename} ({legacy_name})",
+                )
             legacy_index = _indexed(legacy_rows)
             candidate_index = _indexed(candidate_rows)
             for key in sorted(legacy_index.keys() & candidate_index.keys()):
@@ -291,6 +438,47 @@ def build_gold_review_package(
                         previous = None
                     if pd.isna(current):
                         current = None
+                    if column == "Confianza_extraccion" and legacy_contract_version == 1:
+                        legacy_min = legacy_row.get("Confianza_minima")
+                        if legacy_min is None or pd.isna(legacy_min):
+                            legacy_min = legacy_row.get("Confianza_minima_exigida")
+                        if legacy_min is not None and not pd.isna(legacy_min):
+                            if not _is_valid_confidence(legacy_min):
+                                raise ValueError(
+                                    f"Piso de confianza inválido en fila {legacy_row.get('Fila')} de {legacy_name}: {legacy_min!r}."
+                                )
+                            if not _is_valid_confidence(current):
+                                raise ValueError(
+                                    f"Confianza de extracción inválida en fila {candidate_row.get('Fila')} de candidato {filename}: {current!r}."
+                                )
+                            min_threshold = float(legacy_min)
+                            actual_conf = float(current)
+                            if actual_conf >= min_threshold:
+                                continue
+                            else:
+                                field = INTERNAL_BY_COLUMN[column]
+                                identity = (filename, key[0], key[1], int(key[2]), field)
+                                if identity not in existing:
+                                    differences.append({
+                                        "document": filename,
+                                        "account_code": key[0],
+                                        "account_identity": key[1],
+                                        "occurrence": key[2],
+                                        "field": field,
+                                        "field_label": column,
+                                        "severity": _review_severity(field),
+                                        "original_gold_value": min_threshold,
+                                        "actual_extracted_value": actual_conf,
+                                        "expected_value": min_threshold,
+                                        "proposed_value": None,
+                                        "autofillable_without_ambiguity": False,
+                                        "review_state": "CORREGIR",
+                                        "selected_pages": list(result.get("selected_pages") or []),
+                                        "actual_line": candidate_row.get("Fila"),
+                                        "expected_line": legacy_row.get("Fila"),
+                                    })
+                                    existing.add(identity)
+                                continue
                     if previous == current:
                         continue
                     field = INTERNAL_BY_COLUMN[column]

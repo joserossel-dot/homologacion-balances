@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import multiprocessing
 import os
 import re
@@ -45,6 +46,32 @@ from document_scope import select_pdf
 
 ALLOWED_REQUIRED_CERTIFICATION_STATES = frozenset({"certificada"})
 GOLD_SCHEMA_VERSION = 2
+try:
+    from scripts.gold_confidence_contract import (
+        GOLD_CONFIDENCE_CONTRACT_VERSION,
+        SUPPORTED_CONFIDENCE_CONTRACT_VERSIONS,
+        is_valid_confidence,
+        _is_valid_confidence,
+        parse_contract_version,
+        is_valid_sha256,
+        validate_sha256_binding,
+        extract_and_validate_sha256,
+        has_approved_sub_one_floor,
+        extract_unique_authorized_sha256,
+    )
+except ImportError:
+    from gold_confidence_contract import (
+        GOLD_CONFIDENCE_CONTRACT_VERSION,
+        SUPPORTED_CONFIDENCE_CONTRACT_VERSIONS,
+        is_valid_confidence,
+        _is_valid_confidence,
+        parse_contract_version,
+        is_valid_sha256,
+        validate_sha256_binding,
+        extract_and_validate_sha256,
+        has_approved_sub_one_floor,
+        extract_unique_authorized_sha256,
+    )
 DEFAULT_DOCUMENT_TIMEOUT_SECONDS = int(
     os.environ.get("CORPUS_DOCUMENT_TIMEOUT_SECONDS", "300")
 )
@@ -184,21 +211,149 @@ def _cell_bool(value) -> bool:
     return bool(value)
 
 
-def load_gold_rows(path: Path, *, schema_version: Optional[int] = None) -> list[dict]:
-    """Lee un candidato revisado y omite sólo exclusiones explícitas.
+def load_gold_rows(
+    path: Path,
+    *,
+    schema_version: Optional[int] = None,
+    document_sha256: Optional[str] = None,
+    manifest_sha256: Optional[str] = None,
+) -> list[dict]:
+    """Carga filas esperadas desde un libro Gold (.xlsx o .json) sin rebajar controles.
 
     ``APROBADO`` describe una fila que debe existir exactamente en la salida.
     ``EXCLUIR`` describe ruido o una fila espuria que el parser ya no debería
     emitir. Cualquier otro estado mantiene el libro en revisión y evita que se
     use accidentalmente como referencia Gold.
+
+    Si cualquier fila APROBADO declara Confianza_minima inferior a 1.0, el libro Gold
+    debe declarar un SHA256 documental autorizado y debe coincidir exactamente con
+    la expectativa del manifiesto y el SHA-256 real del documento procesado.
     """
     if path.suffix.lower() == ".json":
         data = json.loads(path.read_text(encoding="utf-8"))
-        rows = data.get("accounts") if isinstance(data, dict) else data
-        if not isinstance(rows, list):
+        contract_version = None
+        gold_sha256 = extract_and_validate_sha256(data, required=False, context_label=path.name)
+        if isinstance(data, dict):
+            if "Gold_confidence_contract_version" in data:
+                raw_cv = data.get("Gold_confidence_contract_version")
+                contract_version = parse_contract_version(raw_cv, allow_none=False)
+            elif "gold_confidence_contract_version" in data:
+                raw_cv = data.get("gold_confidence_contract_version")
+                contract_version = parse_contract_version(raw_cv, allow_none=False)
+            accounts = data.get("accounts")
+        elif isinstance(data, list):
+            accounts = data
+        else:
+            raise ValueError("El Gold JSON debe contener un objeto con 'accounts' o una lista de cuentas.")
+        if not isinstance(accounts, list):
             raise ValueError("El Gold JSON debe contener una lista de cuentas.")
+
+        has_conf_min = any(
+            isinstance(acc, dict) and ("Confianza_minima" in acc or "confidence_min" in acc or "Confianza_minima_exigida" in acc)
+            for acc in accounts
+        )
+        if has_conf_min and contract_version is None:
+            raise ValueError(
+                "El Gold JSON contiene confianza mínima pero falta el marcador "
+                "Gold_confidence_contract_version."
+            )
+        if contract_version is not None and not has_conf_min and accounts:
+            raise ValueError(
+                f"El Gold JSON declara Gold_confidence_contract_version={contract_version} "
+                "pero ninguna cuenta declara confianza mínima."
+            )
+
+        rows = []
+        for idx, item in enumerate(accounts, start=1):
+            if not isinstance(item, dict):
+                raise ValueError(f"La cuenta {idx} en el Gold JSON debe ser un objeto/dict.")
+            raw_state = item.get("Estado_revision") if "Estado_revision" in item else item.get("review_state")
+            state_str = str(raw_state or "").strip().upper()
+            if contract_version is not None:
+                if state_str not in {"APROBADO", "EXCLUIR"}:
+                    raise ValueError(
+                        f"Cuenta {idx} en Gold JSON bajo contrato v{contract_version} requiere "
+                        f"Estado_revision=APROBADO o EXCLUIR (recibido: '{state_str}')."
+                    )
+            elif state_str and state_str not in {"APROBADO", "EXCLUIR"}:
+                raise ValueError(
+                    f"Cuenta {idx} en Gold JSON tiene Estado_revision no resuelto: '{state_str}'."
+                )
+            if state_str == "EXCLUIR":
+                continue
+
+            raw_conf = item.get("Confianza_extraccion") if "Confianza_extraccion" in item else item.get("confidence")
+            if raw_conf is None or pd.isna(raw_conf):
+                if contract_version is not None:
+                    raise ValueError(f"Cuenta {idx} en Gold JSON no tiene confianza definida.")
+                confidence = 0.0
+            else:
+                if not _is_valid_confidence(raw_conf):
+                    raise ValueError(f"Cuenta {idx} en Gold JSON tiene confianza inválida: {raw_conf!r}.")
+                confidence = float(raw_conf)
+
+            if contract_version is not None:
+                raw_min = item.get("Confianza_minima")
+                if raw_min is None:
+                    raw_min = item.get("confidence_min")
+                if raw_min is None:
+                    raw_min = item.get("Confianza_minima_exigida")
+                if raw_min is None or pd.isna(raw_min):
+                    raise ValueError(f"Cuenta {idx} en Gold JSON no declara confianza mínima bajo contrato v{contract_version}.")
+                if not _is_valid_confidence(raw_min):
+                    raise ValueError(f"Cuenta {idx} en Gold JSON tiene confianza mínima inválida: {raw_min!r}.")
+                confidence_min = float(raw_min)
+            else:
+                confidence_min = None
+
+            derived_columns = item.get("derived_columns") or _json_value(item.get("Columnas_derivadas_JSON")) or []
+            if not isinstance(derived_columns, list):
+                derived_columns = []
+
+            rows.append({
+                "_gold_schema_version": schema_version or 2,
+                "line": int(item.get("line") or item.get("Fila") or idx),
+                "account_code": _cell_text(item.get("account_code") if "account_code" in item else item.get("Codigo_original")),
+                "name": _cell_text(item.get("name") if "name" in item else item.get("Cuenta_original")),
+                "accounting_hierarchy": _cell_text(item.get("accounting_hierarchy") if "accounting_hierarchy" in item else item.get("Jerarquia_contable")),
+                "origin": _cell_text(item.get("origin") if "origin" in item else item.get("Origen")),
+                "amount": item.get("amount") if "amount" in item else item.get("Monto"),
+                "period_amounts": _json_value(item.get("period_amounts") if "period_amounts" in item else item.get("Montos_periodos_JSON")),
+                "column_amounts": _json_value(item.get("column_amounts") if "column_amounts" in item else item.get("Montos_columnas_JSON")),
+                "standard_code": _cell_text(item.get("standard_code") if "standard_code" in item else item.get("Codigo_homologado")),
+                "classification_method": _cell_text(item.get("classification_method") if "classification_method" in item else item.get("Metodo_clasificacion")),
+                "requires_review": _cell_bool(item.get("requires_review") if "requires_review" in item else item.get("Requiere_revision")),
+                "is_total": _cell_bool(item.get("is_total") if "is_total" in item else item.get("Es_control_total")),
+                "confidence": confidence,
+                "confidence_min": confidence_min,
+                "derived_columns": derived_columns,
+            })
+
+        if has_approved_sub_one_floor(rows):
+            authorized_hash = validate_sha256_binding(
+                gold_sha256=gold_sha256,
+                manifest_sha256=manifest_sha256,
+                document_sha256=document_sha256,
+                context_label=path.name,
+            )
+            for r in rows:
+                r["_authorized_sha256"] = authorized_hash
+        else:
+            if gold_sha256:
+                clean_gold = str(gold_sha256).strip().lower()
+                for r in rows:
+                    r["_authorized_sha256"] = clean_gold
         return rows
-    summary = pd.read_excel(path, sheet_name="Resumen")
+
+    # Validación estricta de hojas obligatorias en XLSX
+    excel = pd.ExcelFile(path)
+    if "Resumen" not in excel.sheet_names or "Cuentas" not in excel.sheet_names:
+        raise ValueError(
+            f"El libro Gold '{path.name}' debe contener las hojas obligatorias 'Resumen' y 'Cuentas'."
+        )
+
+    summary = pd.read_excel(excel, sheet_name="Resumen")
+    gold_sha256 = extract_and_validate_sha256(summary, required=False, context_label=path.name)
     detected_schema = 1
     if "Gold_schema_version" in summary.columns and not summary.empty:
         detected_schema = int(summary.iloc[0]["Gold_schema_version"])
@@ -211,9 +366,28 @@ def load_gold_rows(path: Path, *, schema_version: Optional[int] = None) -> list[
             f"El libro declara Gold schema {detected_schema}, pero el manifiesto "
             f"exige {schema_version}."
         )
-    frame = pd.read_excel(path, sheet_name="Cuentas")
+
+    contract_version = None
+    if "Gold_confidence_contract_version" in summary.columns and not summary.empty:
+        raw_cv = summary.iloc[0]["Gold_confidence_contract_version"]
+        contract_version = parse_contract_version(raw_cv, allow_none=False)
+
+    frame = pd.read_excel(excel, sheet_name="Cuentas")
     if "Estado_revision" not in frame.columns:
         raise ValueError("El Gold XLSX no contiene la columna Estado_revision.")
+
+    has_conf_min_col = "Confianza_minima" in frame.columns or "Confianza_minima_exigida" in frame.columns
+    if has_conf_min_col and contract_version is None:
+        raise ValueError(
+            "El libro contiene la columna Confianza_minima pero falta el marcador "
+            "Gold_confidence_contract_version en Resumen."
+        )
+    if contract_version is not None and not has_conf_min_col:
+        raise ValueError(
+            f"El libro declara Gold_confidence_contract_version={contract_version} "
+            "pero falta la columna Confianza_minima en Cuentas."
+        )
+
     states = frame["Estado_revision"].fillna("").astype(str).str.upper().str.strip()
     allowed = {"APROBADO", "EXCLUIR"}
     pending = int((~states.isin(allowed)).sum())
@@ -222,13 +396,39 @@ def load_gold_rows(path: Path, *, schema_version: Optional[int] = None) -> list[
             "El Gold aún tiene "
             f"{pending} fila(s) sin Estado_revision=APROBADO o EXCLUIR."
         )
+
     rows = []
     for index, source in frame.iterrows():
         if states.iloc[index] == "EXCLUIR":
             continue
-        confidence = source.get("Confianza_extraccion")
-        if confidence is None or pd.isna(confidence):
+
+        raw_conf = source.get("Confianza_extraccion")
+        if raw_conf is None or pd.isna(raw_conf):
+            if contract_version is not None:
+                raise ValueError(f"Fila {source.get('Fila')} aprobada no tiene Confianza_extraccion definida.")
             confidence = 0.0
+        else:
+            if not _is_valid_confidence(raw_conf):
+                raise ValueError(f"Fila {source.get('Fila')} aprobada tiene Confianza_extraccion inválida: {raw_conf!r}.")
+            confidence = float(raw_conf)
+
+        if contract_version is not None:
+            raw_min = source.get("Confianza_minima")
+            if raw_min is None or pd.isna(raw_min):
+                raw_min = source.get("Confianza_minima_exigida")
+            if raw_min is None or pd.isna(raw_min):
+                raise ValueError(
+                    f"Fila {source.get('Fila')} aprobada bajo contrato v{contract_version} "
+                    "no declara Confianza_minima."
+                )
+            if not _is_valid_confidence(raw_min):
+                raise ValueError(
+                    f"Fila {source.get('Fila')} aprobada tiene Confianza_minima inválida: {raw_min!r}."
+                )
+            confidence_min = float(raw_min)
+        else:
+            confidence_min = None
+
         derived_columns = _json_value(source.get("Columnas_derivadas_JSON"))
         if not isinstance(derived_columns, list):
             derived_columns = []
@@ -246,9 +446,25 @@ def load_gold_rows(path: Path, *, schema_version: Optional[int] = None) -> list[
             "classification_method": _cell_text(source.get("Metodo_clasificacion")),
             "requires_review": _cell_bool(source.get("Requiere_revision")),
             "is_total": _cell_bool(source.get("Es_control_total")),
-            "confidence": float(confidence),
+            "confidence": confidence,
+            "confidence_min": confidence_min,
             "derived_columns": derived_columns,
         })
+
+    if has_approved_sub_one_floor(rows):
+        authorized_hash = validate_sha256_binding(
+            gold_sha256=gold_sha256,
+            manifest_sha256=manifest_sha256,
+            document_sha256=document_sha256,
+            context_label=path.name,
+        )
+        for r in rows:
+            r["_authorized_sha256"] = authorized_hash
+    else:
+        if gold_sha256:
+            clean_gold = str(gold_sha256).strip().lower()
+            for r in rows:
+                r["_authorized_sha256"] = clean_gold
     return rows
 
 
@@ -303,6 +519,14 @@ def evaluate_gold_rows(
         if int(expected_row.get("_gold_schema_version") or 2) >= 2:
             compared_fields.insert(0, "accounting_hierarchy")
         for field in compared_fields:
+            if field == "confidence" and expected_row.get("confidence_min") is not None:
+                min_threshold = expected_row["confidence_min"]
+                actual_conf = actual_row.get("confidence")
+                if not _is_valid_confidence(actual_conf) or not _is_valid_confidence(min_threshold):
+                    differences["confidence"] = [actual_conf, min_threshold]
+                elif float(actual_conf) < float(min_threshold):
+                    differences["confidence"] = [float(actual_conf), float(min_threshold)]
+                continue
             if actual_row.get(field) != expected_row.get(field):
                 differences[field] = [actual_row.get(field), expected_row.get(field)]
         if differences:
@@ -350,6 +574,7 @@ def _candidate_frame(result: dict) -> pd.DataFrame:
             "Requiere_revision": row.get("requires_review"),
             "Es_control_total": row.get("is_total"),
             "Confianza_extraccion": row.get("confidence"),
+            "Confianza_minima": row.get("confidence"),
             "Columnas_derivadas_JSON": json.dumps(
                 row.get("derived_columns") or [], ensure_ascii=False,
             ),
@@ -364,6 +589,7 @@ def write_gold_candidate(result: dict, output_dir: Path) -> Path:
     output = output_dir / f"{safe_name}.gold-candidate.xlsx"
     summary = pd.DataFrame([{
         "Gold_schema_version": GOLD_SCHEMA_VERSION,
+        "Gold_confidence_contract_version": GOLD_CONFIDENCE_CONTRACT_VERSION,
         "Documento": result.get("file"),
         "SHA256": result.get("sha256"),
         "Paginas_seleccionadas": ",".join(
@@ -725,8 +951,28 @@ def evaluate_expectations(result: dict, expectations: dict) -> tuple[list[dict],
             passed,
         )
     if "_gold_rows" in expectations:
+        gold_rows = expectations["_gold_rows"]
+        has_sub_one = any(
+            isinstance(r, dict)
+            and r.get("confidence_min") is not None
+            and is_valid_confidence(r.get("confidence_min"))
+            and float(r.get("confidence_min")) < 1.0
+            for r in gold_rows
+        )
+        if has_sub_one:
+            gold_sha = extract_unique_authorized_sha256(
+                gold_rows, context_label=str(result.get("file") or "documento")
+            )
+            manifest_sha = expectations.get("sha256")
+            doc_sha = result.get("sha256")
+            validate_sha256_binding(
+                gold_sha256=gold_sha,
+                manifest_sha256=manifest_sha,
+                document_sha256=doc_sha,
+                context_label=str(result.get("file") or "documento"),
+            )
         checks.extend(evaluate_gold_rows(
-            result.get("accounts") or [], expectations["_gold_rows"],
+            result.get("accounts") or [], gold_rows,
             float(expectations.get("gold_tolerance", 0)),
         ))
     return checks, all(check["passed"] for check in checks)
@@ -1148,6 +1394,8 @@ def main() -> int:
                         expectations["_gold_rows"] = load_gold_rows(
                             gold_path,
                             schema_version=int(case["gold_schema_version"]),
+                            document_sha256=result.get("sha256"),
+                            manifest_sha256=expectations.get("sha256"),
                         )
                     checks, passed = evaluate_expectations(result, expectations)
                     result["expectation_checks"] = checks
