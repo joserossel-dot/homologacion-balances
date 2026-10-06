@@ -1168,14 +1168,14 @@ def test_29_migracion_exitosa_reemplaza_atomicamente_salida_anterior_y_preserva_
 
 def test_30_piso_sub_uno_triple_hash_binding_aprueba(tmp_path: Path):
     """30. Piso 0.75 con hash autorizado, hash real y manifiesto coincidentes aprueba."""
-    auth_hash = "2c51270ea91ba1e805f99a745c217356312bf8b17d2582f40df5d6e337f30711"
+    document_sha256 = "2c51270ea91ba1e805f99a745c217356312bf8b17d2582f40df5d6e337f30711"
     gold_file = tmp_path / "gold_doc01.xlsx"
     base_acc = _base_row(account_code="1", name="Caja", amount=100.0, confidence=0.75)
     with pd.ExcelWriter(gold_file, engine="openpyxl") as writer:
         pd.DataFrame([{
             "Gold_schema_version": 2,
             "Gold_confidence_contract_version": 1,
-            "SHA256": auth_hash,
+            "SHA256": document_sha256,
         }]).to_excel(writer, sheet_name="Resumen", index=False)
         pd.DataFrame([{
             "Fila": 1,
@@ -1197,21 +1197,21 @@ def test_30_piso_sub_uno_triple_hash_binding_aprueba(tmp_path: Path):
 
     rows = load_gold_rows(
         gold_file,
-        document_sha256=auth_hash,
-        manifest_sha256=auth_hash,
+        document_sha256=document_sha256,
+        manifest_sha256=document_sha256,
     )
     assert len(rows) == 1
     assert rows[0]["confidence_min"] == 0.75
-    assert rows[0]["_authorized_sha256"] == auth_hash
+    assert rows[0]["_authorized_sha256"] == document_sha256
 
     # Evaluar expectativas con documento real coincidente
     result = {
         "file": "DOC-01.pdf",
-        "sha256": auth_hash,
+        "sha256": document_sha256,
         "accounts": [base_acc],
     }
     expectations = {
-        "sha256": auth_hash,
+        "sha256": document_sha256,
         "_gold_rows": rows,
     }
     checks, passed = evaluate_expectations(result, expectations)
@@ -1299,7 +1299,7 @@ def test_32_piso_sub_uno_sin_expectativa_sha256_en_manifiesto_bloquea(tmp_path: 
 
 def test_33_piso_sub_uno_hash_malformado_o_discrepante_bloquea(tmp_path: Path):
     """33. Hash malformado, discrepante entre Gold y manifiesto, o documento distinto bloquea."""
-    auth_hash = "2c51270ea91ba1e805f99a745c217356312bf8b17d2582f40df5d6e337f30711"
+    document_sha256 = "2c51270ea91ba1e805f99a745c217356312bf8b17d2582f40df5d6e337f30711"
     wrong_hash = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
     short_hash = "2c51270ea91ba1e8"
 
@@ -1321,7 +1321,7 @@ def test_33_piso_sub_uno_hash_malformado_o_discrepante_bloquea(tmp_path: Path):
         }]).to_excel(writer, sheet_name="Cuentas", index=False)
 
     with pytest.raises(ValueError, match="malformado o inválido"):
-        load_gold_rows(gold_malformed, document_sha256=auth_hash, manifest_sha256=auth_hash)
+        load_gold_rows(gold_malformed, document_sha256=document_sha256, manifest_sha256=document_sha256)
 
     # B. Gold correcto pero discrepancia con manifiesto
     gold_ok = tmp_path / "gold_ok.xlsx"
@@ -1329,7 +1329,7 @@ def test_33_piso_sub_uno_hash_malformado_o_discrepante_bloquea(tmp_path: Path):
         pd.DataFrame([{
             "Gold_schema_version": 2,
             "Gold_confidence_contract_version": 1,
-            "SHA256": auth_hash,
+            "SHA256": document_sha256,
         }]).to_excel(writer, sheet_name="Resumen", index=False)
         pd.DataFrame([{
             "Fila": 1,
@@ -1341,11 +1341,11 @@ def test_33_piso_sub_uno_hash_malformado_o_discrepante_bloquea(tmp_path: Path):
         }]).to_excel(writer, sheet_name="Cuentas", index=False)
 
     with pytest.raises(ValueError, match="Discrepancia de hash"):
-        load_gold_rows(gold_ok, document_sha256=auth_hash, manifest_sha256=wrong_hash)
+        load_gold_rows(gold_ok, document_sha256=document_sha256, manifest_sha256=wrong_hash)
 
     # C. Mismo nombre de archivo pero documento real con contenido / hash distinto
     with pytest.raises(ValueError, match="Discrepancia de hash"):
-        load_gold_rows(gold_ok, document_sha256=wrong_hash, manifest_sha256=auth_hash)
+        load_gold_rows(gold_ok, document_sha256=wrong_hash, manifest_sha256=document_sha256)
 
 
 def test_34_piso_uno_mantiene_igualdad_estricta_sin_requerir_hash_binding(tmp_path: Path):
@@ -1426,15 +1426,15 @@ def test_35_doc02_y_doc03_mantienen_piso_uno_estricto_y_no_se_rebajan():
 
 def test_36_manual_gold_rows_subone_without_authorized_sha256_blocked():
     """36. Filas Gold construidas manualmente con piso < 1.0 sin _authorized_sha256 bloquean con ValueError."""
-    auth_hash = "2c51270ea91ba1e805f99a745c217356312bf8b17d2582f40df5d6e337f30711"
+    document_sha256 = "2c51270ea91ba1e805f99a745c217356312bf8b17d2582f40df5d6e337f30711"
     row_manual = _base_row(account_code="1", name="Caja", amount=100.0, confidence=0.75, confidence_min=0.75)
     result = {
         "file": "DOC-01.pdf",
-        "sha256": auth_hash,
+        "sha256": document_sha256,
         "accounts": [row_manual],
     }
     expectations = {
-        "sha256": auth_hash,
+        "sha256": document_sha256,
         "_gold_rows": [row_manual],
     }
     with pytest.raises(ValueError, match="no declara un hash documental autorizado"):
