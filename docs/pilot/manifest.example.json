@@ -1,0 +1,17 @@
+{
+  "pilot_id": "piloto-interno-aaaa-mm-dd",
+  "mode": "no_persist",
+  "client_pseudonym": "CLIENTE-001",
+  "reviewer": "José Alfonso Rossel",
+  "candidate_commit": "REEMPLAZAR_CON_SHA_PUBLICADO",
+  "documents": [
+    {
+      "document_id": "DOC-001",
+      "logical_name": "balance-01.pdf",
+      "sha256": "REEMPLAZAR_CON_SHA256",
+      "custody_path": "RUTA_EXTERNA_RESTRINGIDA",
+      "status": "pending_review",
+      "notes": ""
+    }
+  ]
+}

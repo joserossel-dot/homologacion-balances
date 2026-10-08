@@ -7,7 +7,11 @@ from app_validacion import (
     _codigo_compatible_con_origen,
     _etiqueta_origen,
     _indices_incompatibles_lote,
+    _modo_piloto_activo,
     _origen_efectivo,
+    _persistir_catalogo,
+    _persistir_validacion,
+    _save_gold_standard,
 )
 
 
@@ -383,3 +387,47 @@ class TestMetodoPersistencia:
         df.at[0, 'requiere_revision'] = False
         df.at[0, 'metodo'] = 'manual_revision'
         assert not df.at[0, 'requiere_revision']
+
+
+class TestModoPilotoNoMutativo:
+    def test_reconoce_valores_explicitos_de_pilot_mode(self, monkeypatch):
+        for value in ('1', 'true', 'TRUE', ' yes ', 'on'):
+            monkeypatch.setenv('PILOT_MODE', value)
+            assert _modo_piloto_activo()
+
+        for value in ('', '0', 'false', 'off', 'piloto'):
+            monkeypatch.setenv('PILOT_MODE', value)
+            assert not _modo_piloto_activo()
+
+    def test_validacion_neon_no_instancia_store_en_piloto(self, monkeypatch):
+        monkeypatch.setenv('PILOT_MODE', '1')
+
+        def no_debe_usarse():
+            raise AssertionError('No debe instanciar Neon en modo piloto')
+
+        monkeypatch.setattr('app_validacion.NeonKnowledgeStore', no_debe_usarse)
+
+        assert _persistir_validacion(
+            nombre='Clientes', codigo='AC.03', fuente='validacion_humana',
+            agregar_diccionario=False,
+        )
+
+    def test_catalogo_no_instancia_store_en_piloto(self, monkeypatch):
+        monkeypatch.setenv('PILOT_MODE', 'true')
+
+        def no_debe_usarse():
+            raise AssertionError('No debe instanciar Neon en modo piloto')
+
+        monkeypatch.setattr('app_validacion.NeonKnowledgeStore', no_debe_usarse)
+
+        assert _persistir_catalogo({'codigo_estandar': 'AC.99'})
+
+    def test_gold_standard_no_se_construye_en_piloto(self, monkeypatch):
+        monkeypatch.setenv('PILOT_MODE', 'on')
+
+        def no_debe_usarse():
+            raise AssertionError('No debe crear GoldBuilder en modo piloto')
+
+        monkeypatch.setattr('app_validacion.GoldBuilder', no_debe_usarse)
+
+        assert not _save_gold_standard('Clientes', '1.01.05', 'AC.03')

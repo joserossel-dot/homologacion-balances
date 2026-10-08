@@ -59,6 +59,17 @@ USE_LEGACY_ENGINE = False  # True → MotorHibridoLocal (antiguo); False → Hom
 SHADOW_MODE = True  # True → ejecuta nuevo pipeline en paralelo sin afectar UI, guarda logs en logs/shadow/
 
 
+def _modo_piloto_activo() -> bool:
+    """Indica si la sesión debe impedir cualquier persistencia de revisión.
+
+    La variable se evalúa en cada llamada para que el modo sea explícito al
+    arrancar la aplicación y verificable sin estado global adicional.
+    """
+    return os.environ.get("PILOT_MODE", "").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+
+
 def _build_date() -> str:
     configured = os.environ.get("APP_BUILD_DATE")
     if configured:
@@ -112,7 +123,13 @@ def _persistir_validacion(
     sugerido: str | None = None, metodo: str | None = None,
     confianza: float | None = None, archivo: str = '',
 ) -> bool:
-    """Persiste en Neon; retorna False para que el caller use fallback JSON."""
+    """Persiste en Neon, salvo en piloto donde se omite sin usar fallback JSON.
+
+    El valor ``True`` en piloto significa que no se requiere un respaldo local;
+    no representa una escritura remota.
+    """
+    if _modo_piloto_activo():
+        return True
     store = NeonKnowledgeStore()
     if not store.enabled:
         return False
@@ -135,6 +152,9 @@ def _persistir_validacion(
 
 
 def _persistir_catalogo(entry: dict) -> bool:
+    """Persiste una categoría fuera del modo piloto no mutativo."""
+    if _modo_piloto_activo():
+        return True
     store = NeonKnowledgeStore()
     if not store.enabled:
         return False
@@ -714,6 +734,9 @@ class MotorHibridoLocal:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _save_gold_standard(account_name, account_code, final_code, reviewer="analista"):
+    """Registra aprendizaje Gold solo fuera del modo piloto no mutativo."""
+    if _modo_piloto_activo():
+        return False
     try:
         builder = GoldBuilder()
         record = GoldRecord(
@@ -735,6 +758,12 @@ def main():
         "Carga uno o más balances (PDF o Excel) → clasificación híbrida automática "
         "(código → diccionario → reglas) → cola de revisión → balance normalizado."
     )
+    if _modo_piloto_activo():
+        st.warning(
+            "Modo piloto no mutativo activo: las decisiones se conservan solo "
+            "durante este caso y no se guardarán en Neon, JSON, Gold Standard "
+            "ni el catálogo."
+        )
 
     catalogo = cargar_catalogo()
     dic_base = cargar_diccionario_base()
@@ -755,7 +784,11 @@ def main():
         commit = os.environ.get("RENDER_GIT_COMMIT", "local")[:8]
         release_branch = os.environ.get("APP_RELEASE_BRANCH", "desarrollo-local")
         build_date = _build_date()
-        persistence_label = "Neon conectado" if _neon_disponible() else "JSON local"
+        persistence_label = (
+            "piloto no mutativo"
+            if _modo_piloto_activo()
+            else ("Neon conectado" if _neon_disponible() else "JSON local")
+        )
         st.caption(
             f"Rama `{release_branch}` · Commit `{commit}` · Build `{build_date}` · "
             f"Persistencia: **{persistence_label}**"
@@ -1613,7 +1646,16 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
 
     # Catálogo ordenado por grupos de presentación y sin cuentas no
     # seleccionables (cálculo / TOTAL). Ver catalog_selection.py.
-    opciones_codigo = [''] + opciones_clasificacion(catalogo) + ['➕ NUEVA CATEGORÍA', '🚫 NO INCLUIR']
+    modo_piloto = _modo_piloto_activo()
+    opciones_codigo = [''] + opciones_clasificacion(catalogo) + ['🚫 NO INCLUIR']
+    if not modo_piloto:
+        opciones_codigo.insert(-1, '➕ NUEVA CATEGORÍA')
+
+    if modo_piloto:
+        st.info(
+            "Las decisiones de esta revisión son temporales y se descartan al "
+            "terminar la sesión del piloto."
+        )
 
     if 'lote_seleccion' not in st.session_state:
         st.session_state.lote_seleccion = set()
@@ -1629,7 +1671,11 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                 key="lote_categoria"
             )
         with bc2:
-            alcance_lote = st.radio("Alcance", ["Solo este caso", "Agregar al diccionario"], index=1, horizontal=True, key="lote_alcance")
+            if modo_piloto:
+                alcance_lote = "Solo este caso"
+                st.caption("Alcance: solo este caso (piloto)")
+            else:
+                alcance_lote = st.radio("Alcance", ["Solo este caso", "Agregar al diccionario"], index=1, horizontal=True, key="lote_alcance")
         with bc3:
             st.write(""); st.write("")
             confirmar_lote = st.button(f"✅ Confirmar lote ({n_sel})", disabled=(n_sel == 0 or not cat_lote), use_container_width=True)
@@ -1672,14 +1718,14 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                         confianza=float(df.at[idx_lote, 'confianza']),
                         archivo=archivo_nombre,
                     )
-                    if "diccionario" in alcance_lote:
+                    if not modo_piloto and "diccionario" in alcance_lote:
                         entrada = {'cuenta_original': nombre_orig, 'codigo_estandar': codigo_lote, 'fuente': 'validacion_humana_lote'}
                         st.session_state.diccionario.append(entrada)
                         st.session_state.correcciones.append(entrada)
                         fallback_json_lote = fallback_json_lote or not persistido
                     propagar_clasificacion_resultados(nombre_orig, codigo_lote, 'validacion_humana_lote_propagada')
                     procesados += 1
-                if "diccionario" in alcance_lote and fallback_json_lote:
+                if not modo_piloto and "diccionario" in alcance_lote and fallback_json_lote:
                     with open(BASE_DIR / 'diccionario.json', 'w', encoding='utf-8') as f:
                         json.dump(st.session_state.diccionario, f, ensure_ascii=False, indent=2)
                 st.session_state.lote_seleccion = set()
@@ -1788,7 +1834,8 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
 
                 opciones_fila = [opciones_codigo[0]] + [
                     codigo for codigo in opciones_codigo[1:]
-                    if codigo in ('➕ NUEVA CATEGORÍA', '🚫 NO INCLUIR')
+                    if codigo == '🚫 NO INCLUIR'
+                    or (not modo_piloto and codigo == '➕ NUEVA CATEGORÍA')
                     or _codigo_compatible_con_origen(
                         codigo, row.get('origen_columna'), row.get('monto'))
                 ]
@@ -1807,23 +1854,27 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
 
                 es_nueva_cat = seleccion == '➕ NUEVA CATEGORÍA'
                 if es_nueva_cat:
-                    st.info("Define la nueva categoría:")
-                    nuevo_codigo = st.text_input("Código (ej: AC.10, ER.17)",
-                                                  key=f"new_cod_{idx}", max_chars=10)
-                    nuevo_nombre_cat = st.text_input("Nombre de la categoría",
-                                                  key=f"new_nom_{idx}")
-                    nuevo_tipo = st.selectbox("Tipo de estado",
-                                              ['balance', 'resultados'],
-                                              key=f"new_tipo_{idx}")
-                    nuevo_cat = st.selectbox(
-                        "Categoría",
-                        ['activo_corriente', 'activo_no_corriente',
-                         'pasivo_corriente', 'pasivo_no_corriente',
-                         'patrimonio', 'resultado'],
-                        key=f"new_cat_{idx}"
-                    )
+                    if modo_piloto:
+                        st.warning("La creación de categorías no está disponible en el piloto.")
+                    else:
+                        st.info("Define la nueva categoría:")
+                        nuevo_codigo = st.text_input("Código (ej: AC.10, ER.17)",
+                                                      key=f"new_cod_{idx}", max_chars=10)
+                        nuevo_nombre_cat = st.text_input("Nombre de la categoría",
+                                                      key=f"new_nom_{idx}")
+                        nuevo_tipo = st.selectbox("Tipo de estado",
+                                                  ['balance', 'resultados'],
+                                                  key=f"new_tipo_{idx}")
+                        nuevo_cat = st.selectbox(
+                            "Categoría",
+                            ['activo_corriente', 'activo_no_corriente',
+                             'pasivo_corriente', 'pasivo_no_corriente',
+                             'patrimonio', 'resultado'],
+                            key=f"new_cat_{idx}"
+                        )
 
-                if not es_nueva_cat and seleccion not in ('', '🚫 NO INCLUIR'):
+                if (not modo_piloto and not es_nueva_cat
+                        and seleccion not in ('', '🚫 NO INCLUIR')):
                     alcance = st.radio(
                         "¿Aplicar esta clasificación?",
                         ["Solo para este caso",
@@ -1837,7 +1888,9 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                     codigo_final = None
 
                     if es_nueva_cat:
-                        if nuevo_codigo and nuevo_nombre_cat:
+                        if modo_piloto:
+                            st.error("La creación de categorías está deshabilitada en el piloto.")
+                        elif nuevo_codigo and nuevo_nombre_cat:
                             nueva_entrada = {
                                 'codigo_estandar': nuevo_codigo.strip().upper(),
                                 'nombre_estandar': nuevo_nombre_cat.strip(),
@@ -1850,7 +1903,7 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                                 'afecta_ebitda': False,
                             }
                             catalogo[nuevo_codigo.strip().upper()] = nueva_entrada
-                            if not _persistir_catalogo(nueva_entrada):
+                            if not modo_piloto and not _persistir_catalogo(nueva_entrada):
                                 with open(BASE_DIR / 'catalogo_maestro.json', 'w', encoding='utf-8') as f:
                                     json.dump(catalogo, f, ensure_ascii=False, indent=2)
                             codigo_final = nuevo_codigo.strip().upper()
@@ -1863,7 +1916,7 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                         st.session_state.resultados[archivo_nombre].at[idx, 'metodo'] = 'excluido_analista'
                         st.session_state.resultados[archivo_nombre].at[idx, 'confianza'] = 1.0
                         st.session_state.resultados[archivo_nombre].at[idx, 'requiere_revision'] = False
-                        if "diccionario" in alcance:
+                        if not modo_piloto and "diccionario" in alcance:
                             entrada_exclusion = {
                                 'cuenta_original': _nombre_mostrar(row),
                                 'codigo_estandar': '__EXCLUIR__',
@@ -1878,7 +1931,7 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                             metodo=row['metodo'], confianza=float(row['confianza']),
                             archivo=archivo_nombre,
                         )
-                        if "diccionario" in alcance and not persistido:
+                        if not modo_piloto and "diccionario" in alcance and not persistido:
                             with open(BASE_DIR / 'diccionario.json', 'w', encoding='utf-8') as f:
                                 json.dump(st.session_state.diccionario, f, ensure_ascii=False, indent=2)
                         propagar_clasificacion_resultados(row['nombre_original'], '__EXCLUIR__', 'excluido_analista_propagado')
@@ -1904,7 +1957,7 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                             metodo=row['metodo'], confianza=float(row['confianza']),
                             archivo=archivo_nombre,
                         )
-                        if "diccionario" in alcance:
+                        if not modo_piloto and "diccionario" in alcance:
                             nuevo_dic = {
                                 'cuenta_original': row['nombre_original'],
                                 'codigo_estandar': codigo_final,
@@ -1912,7 +1965,7 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                             }
                             st.session_state.diccionario.append(nuevo_dic)
                             st.session_state.correcciones.append(nuevo_dic)
-                            if not persistido:
+                            if not modo_piloto and not persistido:
                                 with open(BASE_DIR / 'diccionario.json', 'w', encoding='utf-8') as f:
                                     json.dump(st.session_state.diccionario, f, ensure_ascii=False, indent=2)
                             st.toast(f"'{_nombre_mostrar(row)[:35]}' → {codigo_final} guardado 📚", icon="✅")
@@ -2160,6 +2213,12 @@ def _tab_diccionario():
 
 def _tab_aprendizaje():
     st.subheader("🧠 Autoaprendizaje — Gold Standard")
+    if _modo_piloto_activo():
+        st.info(
+            "El aprendizaje y la promoción están deshabilitados durante el "
+            "piloto no mutativo."
+        )
+        return
     store = NeonKnowledgeStore()
     if _neon_disponible():
         try:
@@ -2269,6 +2328,12 @@ def _tab_knowledge_manager() -> None:
     Toda acción (promover, rechazar, rollback) requiere aprobación explícita.
     """
     st.subheader("🧠 Knowledge Manager")
+    if _modo_piloto_activo():
+        st.info(
+            "La gestión de conocimiento está deshabilitada durante el piloto "
+            "no mutativo."
+        )
+        return
     if _neon_disponible():
         _tab_neon_knowledge_manager()
         return
@@ -2304,6 +2369,9 @@ def _tab_knowledge_manager() -> None:
 
 def _tab_neon_knowledge_manager() -> None:
     """Gobernanza durable del diccionario cuando Neon es la fuente activa."""
+    if _modo_piloto_activo():
+        st.info("La gestión de diccionario está deshabilitada durante el piloto no mutativo.")
+        return
     store = NeonKnowledgeStore()
     st.caption(
         "Fuente durable: Neon. El rollback solo se permite si el cambio elegido "
@@ -2361,6 +2429,9 @@ def _tab_neon_knowledge_manager() -> None:
 def _km_pendientes(rm: RuntimeManager, gold_path: Path) -> None:
     """TAB 1 — Promociones pendientes: aprobar/rechazar selección múltiple."""
     st.markdown("#### 📥 Promociones pendientes")
+    if _modo_piloto_activo():
+        st.info("Las promociones están deshabilitadas durante el piloto no mutativo.")
+        return
     try:
         pend = rm.get_pending_promotions(gold_path)
     except Exception as e:  # noqa: BLE001
@@ -2448,6 +2519,9 @@ def _km_pendientes(rm: RuntimeManager, gold_path: Path) -> None:
 def _km_conflictos(rm: RuntimeManager, gold_path: Path) -> None:
     """TAB 2 — Conflictos runtime vs gold."""
     st.markdown("#### ⚔️ Conflictos (runtime vs gold)")
+    if _modo_piloto_activo():
+        st.info("Los cambios de runtime están deshabilitados durante el piloto no mutativo.")
+        return
     try:
         conf = rm.get_conflicts(gold_path)
     except Exception as e:  # noqa: BLE001
@@ -2505,6 +2579,9 @@ def _km_conflictos(rm: RuntimeManager, gold_path: Path) -> None:
 def _km_runtime(rm: RuntimeManager) -> None:
     """TAB 3 — Cuentas activas del runtime: filtro, buscador y rollback."""
     st.markdown("#### 🗃️ Runtime (`gold_standard_runtime.db`)")
+    if _modo_piloto_activo():
+        st.info("Los rollbacks están deshabilitados durante el piloto no mutativo.")
+        return
     if not rm.path.exists():
         st.info("El runtime aún no existe. Promueve candidatos desde la pestaña 'Promociones pendientes'.")
         return
