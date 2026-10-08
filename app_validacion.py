@@ -365,6 +365,22 @@ def _codigo_compatible_con_origen(codigo: str | None, origen_columna, monto) -> 
     return HomologationPipeline._is_code_allowed_for_tipo(codigo, tipo)
 
 
+def _indices_incompatibles_lote(codigo: str, df: pd.DataFrame, indices) -> list:
+    """Devuelve las filas que impedirían aplicar un código a todo un lote.
+
+    Mantiene la validación del lote en una función sin estado de Streamlit para
+    que el control de compatibilidad pueda probarse de forma directa.
+    """
+    return [
+        idx for idx in indices
+        if not _codigo_compatible_con_origen(
+            codigo,
+            df.at[idx, 'origen_columna'],
+            df.at[idx, 'monto'],
+        )
+    ]
+
+
 def _explicar_clasificacion(hp, account_code: str, account_name: str, *,
                             account_tipo: str | None = None,
                             origen_columna=None,
@@ -1621,15 +1637,11 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
         if confirmar_lote and n_sel > 0 and cat_lote:
             codigo_lote = '__EXCLUIR__' if cat_lote == '🚫 NO INCLUIR' else (cat_lote if cat_lote != '➕ NUEVA CATEGORÍA' else None)
             if codigo_lote:
-                incompatibles = [
-                    idx_lote for idx_lote in st.session_state.lote_seleccion
-                    if codigo_lote != '__EXCLUIR__'
-                    and not _codigo_compatible_con_origen(
-                        codigo_lote,
-                        df.at[idx_lote, 'origen_columna'],
-                        df.at[idx_lote, 'monto'],
-                    )
-                ]
+                incompatibles = (
+                    [] if codigo_lote == '__EXCLUIR__'
+                    else _indices_incompatibles_lote(
+                        codigo_lote, df, st.session_state.lote_seleccion)
+                )
                 if incompatibles:
                     st.error(
                         "La categoría elegida contradice la columna contable de "

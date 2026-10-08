@@ -6,6 +6,7 @@ import pytest
 from app_validacion import (
     _codigo_compatible_con_origen,
     _etiqueta_origen,
+    _indices_incompatibles_lote,
     _origen_efectivo,
 )
 
@@ -130,6 +131,27 @@ class TestOrigenContableEnRevision:
     def test_perdida_negativa_se_trata_como_ganancia(self):
         assert _origen_efectivo('perdida', -41840145) == 'ganancia'
         assert _codigo_compatible_con_origen('ER.01', 'perdida', -41840145)
+
+
+class TestValidacionLotePorColumnaEfectiva:
+    @pytest.fixture
+    def lote_mixto(self) -> pd.DataFrame:
+        return pd.DataFrame([
+            {'origen_columna': 'activo', 'monto': 100},
+            {'origen_columna': 'pasivo', 'monto': 200},
+            {'origen_columna': 'perdida', 'monto': 300},
+            {'origen_columna': 'ganancia', 'monto': 400},
+            {'origen_columna': 'activo', 'monto': -500},
+        ])
+
+    def test_lote_identifica_todas_las_filas_incompatibles(self, lote_mixto):
+        assert _indices_incompatibles_lote('AC.03', lote_mixto, lote_mixto.index) == [1, 2, 3, 4]
+
+    def test_lote_acepta_filas_de_la_naturaleza_efectiva(self, lote_mixto):
+        assert _indices_incompatibles_lote('AC.03', lote_mixto, [0]) == []
+        assert _indices_incompatibles_lote('PC.02', lote_mixto, [1, 4]) == []
+        assert _indices_incompatibles_lote('ER.09', lote_mixto, [2]) == []
+        assert _indices_incompatibles_lote('ER.01', lote_mixto, [3]) == []
 
 
 class TestVisualNameChange:
