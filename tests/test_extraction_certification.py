@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pandas as pd
+import pytest
 
 import app_validacion as app
 import parser_universal as parser
@@ -213,6 +214,87 @@ def test_codigo_compacto_120_clasifica_activo_fijo_y_depreciacion():
     assert asset is not None and asset.codigo_estandar == "ANC.01"
     assert depreciation is not None and depreciation.codigo_estandar == "ANC.01"
     assert asset.confianza == 0.96
+
+
+@pytest.mark.parametrize(
+    ("code", "expected"),
+    [
+        ("1102-03", "AC.01"),
+        ("1104-09", "AC.03"),
+        ("1108-05", "AC.05"),
+        ("1204-03", "ANC.01.01"),
+        ("1205-06", "ER.04"),
+        ("1301-01", "ANC.03"),
+        ("2202-01", "PC.01"),
+        ("2207-05", "PC.05"),
+        ("2301-01", "PNC.01"),
+        ("2402-12", "PAT.03"),
+        ("4101-01", "ER.02"),
+        ("4203-14", "ER.09"),
+        ("5101-05", "ER.01"),
+    ],
+)
+def test_codigo_nubox_agrupado_clasifica_familias_verificadas(code, expected):
+    result = ClasificadorCodigo().clasificar(code)
+
+    assert result is not None
+    assert result.tipo_formato == "nubox_4x2"
+    assert result.codigo_estandar == expected
+
+
+@pytest.mark.parametrize(
+    ("code", "expected"),
+    [
+        ("1108001", "AC.07"),
+        ("1101202", "AC.01"),
+        ("2201001", "PNC.01"),
+        ("2301001", "PAT.01"),
+        ("3202006", "ER.04"),
+        ("3202014", "ER.09"),
+        ("3301002", "ER.07"),
+        ("3401005", "ER.09"),
+        ("3601001", "ER.10"),
+        ("4101002", "ER.01"),
+    ],
+)
+def test_codigo_compacto_siete_digitos_clasifica_familias_verificadas(code, expected):
+    result = ClasificadorCodigo().clasificar(code)
+
+    assert result is not None
+    assert result.tipo_formato == "compacto"
+    assert result.codigo_estandar == expected
+
+
+@pytest.mark.parametrize(
+    ("code", "expected"),
+    [
+        ("1.1.01.11", "AC.01"),
+        ("1.1.01.15", "AC.01"),
+        ("1.1.08.03", "AC.05"),
+        ("1.2.02.03", "ANC.01"),
+        ("1.2.04.03", "ANC.01"),
+        ("1.3.09.01", "ANC.06"),
+        ("2.1.01.01", "PC.02"),
+        ("2.1.02.01", "PC.02"),
+        ("2.1.07.01", "PC.07"),
+        ("2.1.09.04", "PC.06"),
+        ("2.1.09.07", "PC.06"),
+        ("2.1.09.10", "PC.06"),
+        ("2.1.09.22", "PC.05"),
+        ("2.1.09.23", "PC.08"),
+        ("2.2.01.01", "PNC.01"),
+        ("2.4.01.04", "PAT.03"),
+        ("3.1.01.01", "ER.01"),
+        ("3.1.01.04", "ER.01"),
+        ("4.2.02.02", "ER.09"),
+    ],
+)
+def test_codigo_punto_corto_clasifica_familias_verificadas(code, expected):
+    result = ClasificadorCodigo().clasificar(code)
+
+    assert result is not None
+    assert result.tipo_formato == "punto_separado"
+    assert result.codigo_estandar == expected
 
 
 def test_certificacion_codificada_ignora_ruido_sin_codigo():

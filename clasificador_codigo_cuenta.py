@@ -105,6 +105,24 @@ class ClasificadorCodigo:
 
     # ── FORMATO 2: compacto sin separador XYYZZZ (Wilug, Inmobiliaria) ────────
     MAPEO_COMPACTO = {
+        # Plan compacto de siete dígitos observado en Unidepro. Los patrones
+        # terminan en fin de código para no reinterpretar los planes compactos
+        # de mayor longitud ya cubiertos más abajo.
+        r'^1108001$':       ('AC.07', 0.91), # pagos provisionales mensuales
+        r'^110120[0-9]$':   ('AC.01', 0.91),  # bancos
+        r'^220100[0-9]$':   ('PNC.01', 0.90), # préstamos bancarios LP
+        r'^230100[0-9]$':   ('PAT.01', 0.91), # capital pagado
+        r'^3202006$':       ('ER.04', 0.86), # dominio/marca del período
+        r'^3202014$':       ('ER.09', 0.88), # gastos bancarios
+        r'^3202015$':       ('ER.04', 0.86), # tasación
+        r'^3204008$':       ('ER.04', 0.89), # mantención y reparación
+        r'^3205006$':       ('ER.04', 0.89), # arriendo de maquinaria
+        r'^3301002$':       ('ER.07', 0.91), # depreciación del período
+        r'^340100[345]$':   ('ER.09', 0.90), # reajustes e intereses financieros
+        r'^3401092$':       ('ER.04', 0.86), # impuesto de timbres
+        r'^3601001$':       ('ER.10', 0.91), # impuesto de primera categoría
+        r'^3691003$':       ('ER.10', 0.90), # impuesto diferido
+        r'^410100[23]$':    ('ER.01', 0.91), # ingresos por arriendo
         # Planes compactos de ocho dígitos: bloque 120x corresponde a
         # propiedades, planta y equipo; 1206 agrupa depreciación acumulada.
         r'^120[1-6]':      ('ANC.01', 0.96),
@@ -148,6 +166,38 @@ class ClasificadorCodigo:
 
     # ── FORMATO 3: puntos  X.XX.YY.ZZ (KAME ONE) ─────────────────────────────
     MAPEO_PUNTO = {
+        # Plan con grupos cortos X.X.XX.XX visto en Architec y Esperanza.
+        # Se mantienen reglas por código completo cuando el mismo código y
+        # naturaleza aparecen de forma consistente en el corpus del piloto.
+        r'^1\.1\.01\.11$':  ('AC.01', 0.91), # bancos
+        r'^1\.1\.01\.15$':  ('AC.01', 0.91), # bancos
+        r'^1\.1\.05\.02$':  ('AC.07', 0.86), # préstamos al personal
+        r'^1\.1\.08\.03$':  ('AC.05', 0.91), # inventario de animales
+        r'^1\.1\.09\.07$':  ('AC.07', 0.88), # impuesto retenido recuperable
+        r'^1\.2\.02\.03$':  ('ANC.01', 0.91), # construcción e infraestructura
+        r'^1\.2\.04\.03$':  ('ANC.01', 0.91), # equipo de computación
+        r'^1\.2\.06\.01$':  ('ANC.01', 0.87), # plantaciones permanentes
+        r'^1\.3\.09\.01$':  ('ANC.06', 0.88), # garantías de arriendo LP
+        r'^2\.1\.01\.01$':  ('PC.02', 0.91), # línea de crédito bancaria
+        r'^2\.1\.02\.01$':  ('PC.02', 0.91), # porción corriente de crédito bancario
+        r'^2\.1\.04\.0[3]$': ('PC.01', 0.89), # proveedores
+        r'^2\.1\.04\.10$':  ('PC.01', 0.89), # proveedores
+        r'^2\.1\.05\.01$':  ('PC.02', 0.87), # intereses bancarios por pagar
+        r'^2\.1\.07\.01$':  ('PC.07', 0.90), # empresa relacionada CP
+        r'^2\.1\.09\.04$':  ('PC.06', 0.91), # AFP
+        r'^2\.1\.09\.07$':  ('PC.06', 0.91), # caja de compensación
+        r'^2\.1\.09\.0[89]$': ('PC.06', 0.88), # previsión y descuentos del personal
+        r'^2\.1\.09\.10$':  ('PC.06', 0.91), # remuneraciones por pagar
+        r'^2\.1\.09\.2[12]$': ('PC.05', 0.90), # retenciones tributarias
+        r'^2\.1\.09\.23$':  ('PC.08', 0.88), # retención préstamo solidario
+        r'^2\.1\.12\.01$':  ('PC.08', 0.88), # otros pasivos corrientes
+        r'^2\.2\.01\.0[12]$': ('PNC.01', 0.91), # créditos bancarios LP
+        r'^2\.2\.05\.01$':  ('PNC.05', 0.86), # garantías recibidas LP
+        r'^2\.4\.01\.04$':  ('PAT.03', 0.91), # resultados acumulados
+        r'^3\.1\.01\.01$':  ('ER.01', 0.91), # ventas y arriendos
+        r'^3\.1\.01\.04$':  ('ER.01', 0.90), # otras ventas
+        r'^4\.2\.02\.02$':  ('ER.09', 0.91), # intereses hipotecarios
+        r'^4\.2\.03\.02$':  ('ER.13', 0.86), # pérdida no operacional
         r'^1\.01':         ('AC',    0.85),
         r'^1\.01\.01':     ('AC.01', 0.97),
         r'^1\.01\.02':     ('AC.02', 0.93),
@@ -182,6 +232,43 @@ class ClasificadorCodigo:
         r'^4\.03\.01':     ('ER.10', 0.97),
     }
 
+    # ── FORMATO 4: Nubox agrupado NNNN-NN ─────────────────────────────────
+    # Algunos balances exportados por Nubox conservan la familia de cuatro
+    # dígitos y un correlativo, por ejemplo ``1102-03``. No es equivalente al
+    # formato DSI ``1-01-02``: se modela por separado para no reinterpretar
+    # códigos de otros planes contables que sólo comparten un guión.
+    MAPEO_NUBOX = {
+        # Activo corriente
+        r'^110[23]-':       ('AC.01', 0.91),  # bancos y fondos en moneda
+        r'^1104-':          ('AC.03', 0.90),  # clientes
+        r'^1106-':          ('AC.07', 0.88),  # cuentas corrientes y anticipos
+        r'^1107-':          ('AC.07', 0.88),  # PPM y otros recuperables
+        r'^1108-':          ('AC.05', 0.91),  # existencias
+        # Activo no corriente y diferidos
+        r'^120[23]-':       ('ANC.01', 0.90),
+        r'^1204-':          ('ANC.01.01', 0.90),  # depreciación acumulada
+        r'^1205-':          ('ER.04', 0.88),       # depreciación del ejercicio
+        r'^1301-':          ('ANC.03', 0.90),
+        r'^1302-':          ('ANC.06', 0.88),
+        # Pasivos y patrimonio
+        r'^2201-':          ('PC.02', 0.89),
+        r'^2202-':          ('PC.01', 0.91),
+        r'^220[45]-':       ('PC.06', 0.90),
+        r'^2206-':          ('PC.06', 0.90),
+        r'^2207-':          ('PC.05', 0.91),
+        r'^2208-':          ('PC.08', 0.88),
+        r'^2301-':          ('PNC.01', 0.90),
+        r'^2302-':          ('PNC.05', 0.88),
+        r'^2401-':          ('PAT.01', 0.90),
+        r'^2402-':          ('PAT.03', 0.90),
+        # Estado de resultados
+        r'^4101-':          ('ER.02', 0.90),
+        r'^4201-':          ('ER.04', 0.89),
+        r'^4203-':          ('ER.09', 0.89),
+        r'^4207-':          ('ER.02', 0.89),
+        r'^5101-':          ('ER.01', 0.91),
+    }
+
     def __init__(self):
         # Compilar patrones ordenados de más específico a más general
         self._guion = [(re.compile(p), c, f) for p, (c, f) in sorted(
@@ -190,12 +277,16 @@ class ClasificadorCodigo:
             self.MAPEO_COMPACTO.items(), key=lambda x: -len(x[0]))]
         self._punto = [(re.compile(p), c, f) for p, (c, f) in sorted(
             self.MAPEO_PUNTO.items(), key=lambda x: -len(x[0]))]
+        self._nubox = [(re.compile(p), c, f) for p, (c, f) in sorted(
+            self.MAPEO_NUBOX.items(), key=lambda x: -len(x[0]))]
 
     def detectar_formato(self, codigo: str) -> str:
         """Detecta el tipo de formato del código."""
         if not codigo or not codigo.strip():
             return 'sin_codigo'
         c = codigo.strip()
+        if re.match(r'^\d{4}-\d{2,}$', c):
+            return 'nubox_4x2'
         if '-' in c and re.match(r'^\d+-\d+', c):
             return 'guion'
         if '.' in c and re.match(r'^\d+\.\d+', c):
@@ -217,6 +308,8 @@ class ClasificadorCodigo:
 
         if formato == 'guion':
             return self._buscar_en_mapa(codigo, self._guion, 'guion_separado')
+        elif formato == 'nubox_4x2':
+            return self._buscar_en_mapa(codigo, self._nubox, 'nubox_4x2')
         elif formato == 'punto':
             return self._buscar_en_mapa(codigo, self._punto, 'punto_separado')
         elif formato == 'compacto':

@@ -240,7 +240,7 @@ def _agrupar_palabras_por_linea(words: list[dict], tolerancia: float = 2.5) -> l
 
 
 _HEADER_ALIASES = {
-    "nombre": {"CUENTA", "NOMBRE", "DESCRIPCION", "DETALLE"},
+    "nombre": {"CUENTA", "CUENTAS", "NOMBRE", "DESCRIPCION", "DETALLE"},
     "debitos": {"DEBITOS", "DEBITO", "DEBE", "PEBITOS", "DEBIT0S"},
     "creditos": {"CREDITOS", "CREDITO", "HABER"},
     "saldo_deudor": {"DEUDOR", "SDEUDOR", "SALDODEUDOR"},
@@ -1535,12 +1535,62 @@ _SECTION_HEADING_PATTERNS: tuple[tuple[re.Pattern, OrigenColumna], ...] = (
     ),
      OrigenColumna.GANANCIA),
     (re.compile(
-        r"^(?:costos?|gastos|perdidas?|otros\s+gastos|"
+        r"^(?:costos?|gastos|egresos?|perdidas?|otros\s+gastos|"
         r"(?:operating|non[- ]?operational)?\s*expenses?)$",
         re.I,
     ),
      OrigenColumna.PERDIDA),
 )
+
+_RESULT_SECTION_HEADING_PATTERNS: tuple[tuple[re.Pattern, OrigenColumna], ...] = (
+    (re.compile(
+        r"\b(?:ingresos?\s+de\s+la\s+explotacion|"
+        r"otros\s+ingresos?\s+fuera\s+de\s+la\s+explotacion)\b", re.I,
+    ), OrigenColumna.GANANCIA),
+    (re.compile(
+        r"\b(?:costos?\s+de\s+la\s+explotacion|"
+        r"gastos?\s+de\s+administracion(?:\s+y\s+ventas?)?|"
+        r"gastos?\s+f\w{0,4}cieros?|"
+        r"otros\s+egresos?\s+fuera\s+de\s+la\s+explotacion)\b", re.I,
+    ), OrigenColumna.PERDIDA),
+)
+
+
+def _debe_omitir_pagina_formulario_tributario(
+    texto: str, formulario_activo: bool,
+) -> tuple[bool, bool]:
+    """Descarta un Formulario 22 adjunto sin eliminar un balance posterior.
+
+    Algunos PDF escaneados adjuntan la declaración F22 después de las páginas
+    financieras. La detección exige el marcador específico de formulario o la
+    pareja SII/Año Tributario; si ya se detectó un formulario, sólo conserva una
+    página posterior cuando vuelve a encontrar un encabezado financiero.
+    """
+    normalizado = re.sub(r"\s+", " ", _sin_acentos(texto)).upper()
+    es_formulario = bool(
+        re.search(r"\bFORM(?:ULARIO)?\.?\s*22\b", normalizado)
+        or (
+            "SERVICIO DE IMPUESTOS INTERNOS" in normalizado
+            and "ANO TRIBUTARIO" in normalizado
+        )
+        or (
+            "REPUBLICA DE CHILE" in normalizado
+            and "ANO TRIBUTARIO" in normalizado
+            and "IMPUESTOS ANUALES A LA RENTA" in normalizado
+        )
+    )
+    if es_formulario:
+        return True, True
+
+    contiene_encabezado_financiero = bool(re.search(
+        r"\b(?:BALANCE(?:\s+(?:GENERAL|TRIBUTARIO|CLASIFICADO))?|"
+        r"ESTADO\s+DE\s+RESULTADOS?|ACTIVO\s+CIRCULANTE|"
+        r"PASIVO\s+CIRCULANTE)\b",
+        normalizado,
+    ))
+    if formulario_activo and not contiene_encabezado_financiero:
+        return True, True
+    return False, False
 
 
 def anotar_secciones_balance_clasificado(cuentas: list[CuentaRaw]) -> int:
@@ -1566,7 +1616,13 @@ def anotar_secciones_balance_clasificado(cuentas: list[CuentaRaw]) -> int:
             r"profit\s+and\s+loss(?:\s+account)?)$",
             nombre, re.I,
         ):
-            seccion = None
+            # Los estados de resultado impresos por varias páginas repiten el
+            # título en cada hoja, pero no vuelven a imprimir "Ingreso" o
+            # "Egreso" en las continuaciones. Se conserva únicamente una
+            # sección de resultado ya establecida; toda otra sección se
+            # reinicia para no propagar Activo/Pasivo entre estados distintos.
+            if seccion not in {OrigenColumna.GANANCIA, OrigenColumna.PERDIDA}:
+                seccion = None
             secciones_paralelas = False
             continue
         if re.match(
@@ -1595,10 +1651,19 @@ def anotar_secciones_balance_clasificado(cuentas: list[CuentaRaw]) -> int:
             if patron.fullmatch(encabezado):
                 nueva_seccion = origen
                 break
+        if nueva_seccion is None:
+            for patron, origen in _RESULT_SECTION_HEADING_PATTERNS:
+                if patron.search(encabezado):
+                    nueva_seccion = origen
+                    break
         if nueva_seccion is not None:
             seccion = nueva_seccion
             secciones_paralelas = False
-            continue
+            # Un rótulo puede venir con importe cuando el OCR mezcla subtotal
+            # y detalle. Se actualiza la sección, pero esa fila sigue por el
+            # flujo de anotación para no perder una cuenta real.
+            if cuenta.monto is None:
+                continue
         if (
             secciones_paralelas
             and detalles_por_linea[cuenta.linea] == 2
@@ -3288,50 +3353,69 @@ class ParserPDF:
         # ocho columnas; de lo contrario el fallback por coordenadas intentaba
         # leer una variable local aun no inicializada.
         coordinate_centers: Optional[list[float]] = None
+        formulario_tributario_activo = False
 
-        with pdfplumber.open(path) as pdf:
-            n_paginas = len(pdf.pages)
-            for page in pdf.pages:
-                texto = page.extract_text() or ""
-                if not texto.strip():
-                    continue
-                # Sprint F — doble columna: si la página parece tener dos
-                # columnas de cuenta (pre-filtro barato sobre el texto plano),
-                # intentar la separación estructural por coordenadas (x0).
-                # Si el análisis no confirma, se conserva el texto plano tal
-                # cual (comportamiento universal idéntico).
-                page_lineas: Optional[list[str]] = None
-                try:
-                    from document_intelligence.extractors.double_column import (
-                        _prefiltro_sugiere,
-                        separar_page,
-                    )
-                    if _prefiltro_sugiere(texto):
-                        page_lineas = separar_page(page)
-                except Exception as exc:  # noqa: BLE001 — fallback seguro
-                    logger.debug(
-                        "Detección de doble columna no disponible (%s); "
-                        "universal.", exc,
-                    )
-                if page_lineas:
-                    lineas.extend(l for l in page_lineas if l.strip())
-                else:
-                    tabla_8_columnas = _extraer_tabla_balance_8_columnas(page)
-                    if tabla_8_columnas:
-                        self._extraction_method = "native_table_8_columns"
-                        lineas.extend(tabla_8_columnas)
-                    else:
-                        tabla_coordenadas, detected_centers = (
-                            _extraer_tabla_balance_por_coordenadas(
-                                page, coordinate_centers,
-                            )
+        n_paginas = 0
+        try:
+            with pdfplumber.open(path) as pdf:
+                n_paginas = len(pdf.pages)
+                for numero_pagina, page in enumerate(pdf.pages, 1):
+                    texto = page.extract_text() or ""
+                    if not texto.strip():
+                        continue
+                    omitir, formulario_tributario_activo = (
+                        _debe_omitir_pagina_formulario_tributario(
+                            texto, formulario_tributario_activo,
                         )
-                        coordinate_centers = detected_centers
-                        if tabla_coordenadas:
-                            self._extraction_method = "coordinates_8_amounts"
-                            lineas.extend(tabla_coordenadas)
+                    )
+                    if omitir:
+                        self._ocr_advertencias.append(
+                            f"Página {numero_pagina}: se omitió un Formulario 22 "
+                            "adjunto al balance."
+                        )
+                        continue
+                    # Sprint F — doble columna: si la página parece tener dos
+                    # columnas de cuenta (pre-filtro barato sobre el texto plano),
+                    # intentar la separación estructural por coordenadas (x0).
+                    # Si el análisis no confirma, se conserva el texto plano tal
+                    # cual (comportamiento universal idéntico).
+                    page_lineas: Optional[list[str]] = None
+                    try:
+                        from document_intelligence.extractors.double_column import (
+                            _prefiltro_sugiere,
+                            separar_page,
+                        )
+                        if _prefiltro_sugiere(texto):
+                            page_lineas = separar_page(page)
+                    except Exception as exc:  # noqa: BLE001 — fallback seguro
+                        logger.debug(
+                            "Detección de doble columna no disponible (%s); "
+                            "universal.", exc,
+                        )
+                    if page_lineas:
+                        lineas.extend(l for l in page_lineas if l.strip())
+                    else:
+                        tabla_8_columnas = _extraer_tabla_balance_8_columnas(page)
+                        if tabla_8_columnas:
+                            self._extraction_method = "native_table_8_columns"
+                            lineas.extend(tabla_8_columnas)
                         else:
-                            lineas.extend(texto.split('\n'))
+                            tabla_coordenadas, detected_centers = (
+                                _extraer_tabla_balance_por_coordenadas(
+                                    page, coordinate_centers,
+                                )
+                            )
+                            coordinate_centers = detected_centers
+                            if tabla_coordenadas:
+                                self._extraction_method = "coordinates_8_amounts"
+                                lineas.extend(tabla_coordenadas)
+                            else:
+                                lineas.extend(texto.split('\n'))
+        except Exception as exc:  # noqa: BLE001 — OCR es el respaldo seguro
+            logger.warning(
+                "No se pudo abrir %s con pdfplumber; se intentará OCR: %s",
+                path.name, exc,
+            )
 
         if lineas:
             if self._debe_corregir_rotacion(context):
@@ -3339,7 +3423,37 @@ class ParserPDF:
                 return lineas, False, 180
             return lineas, False, 0
 
+        if n_paginas <= 0:
+            n_paginas = self._contar_paginas_rasterizables(path)
+        if n_paginas <= 0:
+            self._ocr_advertencias.append(
+                "No se pudo determinar la cantidad de páginas para OCR."
+            )
+            return [], True, 0
         return self._ocr_documento(path, n_paginas)
+
+    @staticmethod
+    def _contar_paginas_rasterizables(path: Path) -> int:
+        """Cuenta páginas con Poppler cuando pdfplumber no expone el árbol PDF.
+
+        Algunos PDFs escaneados tienen un árbol de páginas que pdfplumber no
+        recorre, pero Poppler sí puede rasterizarlos. El conteo se usa sólo
+        para activar el OCR de respaldo y no altera la extracción normal.
+        """
+        pdfinfo_bin = shutil.which("pdfinfo") or "pdfinfo"
+        try:
+            result = subprocess.run(
+                [pdfinfo_bin, str(path)],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return 0
+        if result.returncode != 0:
+            return 0
+        match = re.search(r"^Pages:\s*(\d+)\s*$", result.stdout, re.MULTILINE)
+        return int(match.group(1)) if match else 0
 
     @staticmethod
     def _debe_corregir_rotacion(context: Optional[ExtractionContext]) -> bool:
@@ -3362,6 +3476,7 @@ class ParserPDF:
         rotacion_global: Optional[int] = None
         coordinate_centers: Optional[list[float]] = None
         clasificado_doble_detectado = False
+        formulario_tributario_activo = False
 
         pdftoppm_bin = shutil.which('pdftoppm') or 'pdftoppm'
 
@@ -3412,6 +3527,29 @@ class ParserPDF:
 
                 texto = ocr_pagina(img_path, rotacion_global)
                 texto_principal = texto
+                omitir, formulario_tributario_activo = (
+                    _debe_omitir_pagina_formulario_tributario(
+                        texto_principal, formulario_tributario_activo,
+                    )
+                )
+                if omitir:
+                    self._ocr_advertencias.append(
+                        f"Página {pagina}: se omitió un Formulario 22 adjunto "
+                        "al balance."
+                    )
+                    continue
+                if (
+                    clasificado_doble_detectado
+                    and re.search(
+                        r"\bestado\s+de\s+resultados?\b",
+                        _sin_acentos(texto_principal), re.I,
+                    )
+                ):
+                    # Una página de resultados puede alinear detalle y
+                    # subtotales en dos mitades. No corresponde tratarla como
+                    # continuación física ACTIVO|PASIVO del balance previo.
+                    clasificado_doble_detectado = False
+                    coordinate_centers = None
                 words_tsv = ocr_pagina_tsv(img_path, rotacion_global)
                 tabla_coordenadas_usada = False
                 clasificado_doble_usado = False

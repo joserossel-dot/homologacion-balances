@@ -16,6 +16,139 @@ def test_numeric_name_suffix_is_not_merged_into_debit():
     assert lines == ["BANCOESTADO 1 120 20 100 0 100 0 0 0"]
 
 
+def test_coordinate_header_accepts_plural_cuentas():
+    headers = [
+        "Cuentas", "Debe", "Haber", "Deudor", "Acreedor", "Activo",
+        "Pasivo", "Pérdidas", "Ganancias",
+    ]
+    words = [
+        {"text": text, "x0": index * 100, "x1": index * 100 + 40, "top": 10}
+        for index, text in enumerate(headers)
+    ]
+    words += [
+        {"text": "Caja", "x0": 0, "x1": 35, "top": 30},
+        *[
+            {"text": text, "x0": (index + 1) * 100, "x1": (index + 1) * 100 + 35, "top": 30}
+            for index, text in enumerate(["120", "20", "100", "0", "100", "0", "0", "0"])
+        ],
+    ]
+
+    lines, _ = p._extraer_tabla_balance_por_coordenadas(
+        SimpleNamespace(extract_words=lambda **kw: words)
+    )
+
+    assert lines == ["Caja 120 20 100 0 100 0 0 0"]
+
+
+def test_empty_pdfplumber_page_list_uses_rasterizable_page_count(monkeypatch, tmp_path):
+    source = tmp_path / "escaneado.pdf"
+    source.write_bytes(b"placeholder")
+    parser = p.ParserPDF()
+
+    class EmptyPDF:
+        pages = []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    seen = []
+    monkeypatch.setattr(p.pdfplumber, "open", lambda _path: EmptyPDF())
+    monkeypatch.setattr(parser, "_contar_paginas_rasterizables", lambda _path: 2)
+    monkeypatch.setattr(
+        parser,
+        "_ocr_documento",
+        lambda _path, pages: (seen.append(pages) or (["Caja 1"], True, 270)),
+    )
+
+    lines, requires_ocr, rotation = parser._extraer_lineas(source)
+
+    assert seen == [2]
+    assert lines == ["Caja 1"]
+    assert requires_ocr is True
+    assert rotation == 270
+
+
+def test_result_statement_egreso_propagates_loss_across_page_headers():
+    accounts = [
+        p.CuentaRaw(1, None, "ESTADO DE RESULTADO", None),
+        p.CuentaRaw(2, None, "INGRESO", None),
+        p.CuentaRaw(3, None, "Venta de servicios", 100.0),
+        p.CuentaRaw(4, None, "EGRESO", None),
+        p.CuentaRaw(
+            5, None, "Servicio externo", 80.0,
+            origen_columna=p.OrigenColumna.GANANCIA,
+        ),
+        p.CuentaRaw(6, None, "ESTADO DE RESULTADO", None),
+        p.CuentaRaw(7, None, "Servicio continuado", 60.0),
+    ]
+
+    annotated = p.anotar_secciones_balance_clasificado(accounts)
+
+    assert annotated == 3
+    assert accounts[2].origen_columna is p.OrigenColumna.GANANCIA
+    assert accounts[4].origen_columna is p.OrigenColumna.PERDIDA
+    assert accounts[6].origen_columna is p.OrigenColumna.PERDIDA
+
+
+def test_result_statement_subheadings_replace_false_gain_origin():
+    accounts = [
+        p.CuentaRaw(1, None, "ESTADO DE RESULTADOS", None),
+        p.CuentaRaw(2, None, "(+) Ingresos de la Explotación", None),
+        p.CuentaRaw(3, None, "Ventas", 100.0),
+        p.CuentaRaw(4, None, "(-) Costos de la Explotación", None),
+        p.CuentaRaw(
+            5, None, "Costo de Ventas", 80.0,
+            origen_columna=p.OrigenColumna.GANANCIA,
+        ),
+        p.CuentaRaw(6, None, "! mn (+) Gastos de Administracion y ventas", None),
+        p.CuentaRaw(
+            7, None, "Materiales de Oficina", 20.0,
+            origen_columna=p.OrigenColumna.GANANCIA,
+        ),
+        p.CuentaRaw(8, None, "(-) Gastos Fianacieros", None),
+        p.CuentaRaw(
+            9, None, "Intereses Pagados", 10.0,
+            origen_columna=p.OrigenColumna.GANANCIA,
+        ),
+    ]
+
+    annotated = p.anotar_secciones_balance_clasificado(accounts)
+
+    assert annotated == 4
+    assert accounts[2].origen_columna is p.OrigenColumna.GANANCIA
+    assert accounts[4].origen_columna is p.OrigenColumna.PERDIDA
+    assert accounts[6].origen_columna is p.OrigenColumna.PERDIDA
+    assert accounts[8].origen_columna is p.OrigenColumna.PERDIDA
+
+
+def test_formulario_tributario_y_continuacion_se_omiten_sin_perder_balance():
+    omit_form, active = p._debe_omitir_pagina_formulario_tributario(
+        "REPUBLICA DE CHILE SERVICIO DE IMPUESTOS INTERNOS "
+        "AÑO TRIBUTARIO 2016 FORM. 22",
+        False,
+    )
+    omit_continuation, active = p._debe_omitir_pagina_formulario_tributario(
+        "Declaro bajo juramento que esta información es fiel de la verdad.",
+        active,
+    )
+    omit_balance, active = p._debe_omitir_pagina_formulario_tributario(
+        "BALANCE GENERAL ESTADO DE RESULTADOS",
+        active,
+    )
+
+    assert (omit_form, omit_continuation, omit_balance, active) == (
+        True, True, False, False,
+    )
+    assert p._debe_omitir_pagina_formulario_tributario(
+        "REPUBLICA DE CHILE AÑO TRIBUTARIO 2016 "
+        "IMPUESTOS ANUALES A LA RENTA",
+        False,
+    ) == (True, True)
+
+
 def test_hierarchical_parent_requires_prefix_and_amount_evidence():
     lines = ["11012 Bancos 120 20 100 0 100 0 0 0",
              "1101201 Banco uno 70 10 60 0 60 0 0 0",
