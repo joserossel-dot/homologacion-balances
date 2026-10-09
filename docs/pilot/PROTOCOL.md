@@ -26,12 +26,37 @@ modifica Neon, el diccionario, el catálogo, Gold Standard ni el runtime.
 Arrancar la aplicación con el guard de piloto activo:
 
 ```sh
-PILOT_MODE=1 poetry run streamlit run app_validacion.py
+PILOT_MODE=1 DATABASE_URL= poetry run streamlit run app_validacion.py
 ```
 
-Con `PILOT_MODE=1`, las decisiones viven solo en la sesión. La interfaz impide
-guardar validaciones en Neon o JSON, agregar categorías, aprender en Gold
-Standard, promover runtime o gestionar conocimiento.
+Con `PILOT_MODE=1`, las decisiones viven solo en la sesión. La interfaz usa el
+catálogo y diccionario locales, no instancia Neon, no ejecuta el modo shadow y
+no guarda validaciones en Neon o JSON, agrega categorías, aprende en Gold
+Standard, promueve runtime o gestiona conocimiento. Mantener `DATABASE_URL=`
+evita que el proceso herede una conexión configurada fuera del piloto.
+
+La descarga queda deshabilitada hasta que el revisor confirme en la interfaz
+que revisó las cuentas pendientes. El archivo descargado queda nombrado y
+marcado como `BORRADOR_PILOTO`; esa marca no sustituye la evidencia de revisión
+humana exigida en este protocolo.
+
+Con la aplicación detenida, capturar una línea base de los artefactos protegidos
+en una ubicación restringida y externa al repositorio:
+
+```sh
+poetry run python scripts/pilot_integrity.py snapshot > /ruta/restringida/piloto-before.json
+```
+
+Después de cerrar el piloto, verificar la misma línea base:
+
+```sh
+poetry run python scripts/pilot_integrity.py verify /ruta/restringida/piloto-before.json
+```
+
+El comando solo emite hashes, tamaños y estados de los artefactos protegidos,
+incluidos los archivos auxiliares de SQLite; no incluye contenido de documentos
+del cliente. Un resultado distinto de `PASS` obliga a detener el cierre y
+revisar la diferencia antes de continuar.
 
 No usar durante el piloto:
 
@@ -62,4 +87,5 @@ que no cambiaron `diccionario.json`, `catalogo_maestro.json`,
 `datasets/dataset_registry.db`.
 
 No promover correcciones del piloto a conocimiento persistente sin una revisión
-separada y autorización explícita.
+separada y autorización explícita. Adjuntar al cierre el snapshot inicial y el
+resultado de verificación final fuera del repositorio.

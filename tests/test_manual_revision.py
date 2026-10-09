@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+from io import BytesIO
+from unittest.mock import MagicMock
+
 import pandas as pd
 import pytest
+from openpyxl import load_workbook
 
 from app_validacion import (
+    _archivo_temporal_subido,
     _codigo_compatible_con_origen,
     _etiqueta_origen,
     _indices_incompatibles_lote,
@@ -12,6 +17,9 @@ from app_validacion import (
     _persistir_catalogo,
     _persistir_validacion,
     _save_gold_standard,
+    _shadow_mode_activo,
+    cargar_catalogo,
+    cargar_diccionario_base,
 )
 
 
@@ -422,6 +430,27 @@ class TestModoPilotoNoMutativo:
 
         assert _persistir_catalogo({'codigo_estandar': 'AC.99'})
 
+    def test_catalogo_y_diccionario_usan_solo_archivos_locales_en_piloto(self, monkeypatch):
+        monkeypatch.setenv('PILOT_MODE', '1')
+        monkeypatch.setenv('DATABASE_URL', 'postgresql://test')
+
+        def no_debe_usarse():
+            raise AssertionError('No debe instanciar Neon en modo piloto')
+
+        monkeypatch.setattr('app_validacion.NeonKnowledgeStore', no_debe_usarse)
+        cargar_catalogo.clear()
+        cargar_diccionario_base.clear()
+        try:
+            assert cargar_catalogo()
+            assert cargar_diccionario_base()
+        finally:
+            cargar_catalogo.clear()
+            cargar_diccionario_base.clear()
+
+    def test_piloto_desactiva_shadow_mode(self, monkeypatch):
+        monkeypatch.setenv('PILOT_MODE', '1')
+        assert not _shadow_mode_activo()
+
     def test_gold_standard_no_se_construye_en_piloto(self, monkeypatch):
         monkeypatch.setenv('PILOT_MODE', 'on')
 
@@ -431,3 +460,53 @@ class TestModoPilotoNoMutativo:
         monkeypatch.setattr('app_validacion.GoldBuilder', no_debe_usarse)
 
         assert not _save_gold_standard('Clientes', '1.01.05', 'AC.03')
+
+
+class ArchivoSubidoPrueba(BytesIO):
+    name = 'balance.pdf'
+
+
+def test_archivo_temporal_subido_se_elimina_al_cerrar_contexto():
+    archivo = ArchivoSubidoPrueba(b'contenido de prueba')
+    with _archivo_temporal_subido(archivo) as ruta:
+        assert ruta.exists()
+        assert ruta.read_bytes() == b'contenido de prueba'
+    assert not ruta.exists()
+    assert archivo.tell() == 0
+
+
+def test_balance_de_piloto_se_descarga_solo_como_borrador(monkeypatch):
+    import app_validacion
+
+    monkeypatch.setenv('PILOT_MODE', '1')
+    interfaz = MagicMock()
+    interfaz.session_state = {}
+    interfaz.checkbox.return_value = False
+    monkeypatch.setattr(app_validacion, 'st', interfaz)
+    catalogo = {
+        'AC.01': {
+            'nombre_estandar': 'Caja',
+            'categoria': 'activo_corriente',
+        },
+    }
+    monkeypatch.setattr(app_validacion, 'cargar_catalogo', lambda solo_local=None: catalogo)
+    df = pd.DataFrame([{
+        'codigo_clasificado': 'AC.01',
+        'es_total': False,
+        'monto': 1000.0,
+        'nombre_original': 'Caja',
+        'codigo_original': '1.01.01',
+        'nombre_revision_usuario': '',
+        'metodo': 'codigo',
+        'confianza': 1.0,
+    }])
+
+    app_validacion._tab_balance(df, catalogo, 'balance.pdf')
+
+    descarga = interfaz.download_button.call_args.kwargs
+    assert descarga['disabled'] is True
+    assert descarga['file_name'].startswith('BORRADOR_PILOTO_')
+    libro = load_workbook(BytesIO(descarga['data']))
+    assert libro['Balance Normalizado']['B5'].value == (
+        'BORRADOR DE PILOTO - REVISIÓN HUMANA OBLIGATORIA'
+    )

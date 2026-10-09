@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - codex/release-operativa-neon
+      - sprint-1-context-aware-hygiene
 
 jobs:
   certify:
@@ -37,6 +38,7 @@ jobs:
           tests/test_neon_store.py
           tests/test_neon_preflight.py
           tests/test_manual_revision.py
+          tests/test_pilot_integrity.py
           tests/test_learning_engine.py
           tests/test_learning_runtime.py
           tests/test_document_kb.py
@@ -48,6 +50,15 @@ jobs:
           tests/test_cmcc_review_pipeline.py
           tests/test_ui_knowledge_manager.py
           -k "not test_no_se_crea_runtime_en_import"
+      - name: Verify no-write pilot guards
+        env:
+          PILOT_MODE: "1"
+          DATABASE_URL: ""
+        run: >-
+          poetry run pytest -q
+          tests/test_manual_revision.py
+          tests/test_neon_store.py
+          tests/test_pilot_integrity.py
       - name: Require Neon secret
         run: test -n "$DATABASE_URL"
       - name: Verify Neon and pipeline knowledge

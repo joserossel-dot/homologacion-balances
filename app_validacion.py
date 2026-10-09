@@ -24,6 +24,7 @@ import json
 import os
 import re
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 import pandas as pd
@@ -46,6 +47,7 @@ from parsers.column_interpretation import es_ingreso as es_ingreso_col, es_gasto
 from extractor_metadata import extraer_metadata, MetadataEmpresa
 from account_qualification import qualify_cuentas as _safe_qualify_cuentas, \
     safe_mode_enabled as _safe_mode_enabled
+from pilot_mode import pilot_mode_active
 from persistence.neon_store import NeonKnowledgeStore
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -65,9 +67,31 @@ def _modo_piloto_activo() -> bool:
     La variable se evalúa en cada llamada para que el modo sea explícito al
     arrancar la aplicación y verificable sin estado global adicional.
     """
-    return os.environ.get("PILOT_MODE", "").strip().lower() in {
-        "1", "true", "yes", "on",
-    }
+    return pilot_mode_active()
+
+
+def _shadow_mode_activo() -> bool:
+    """Shadow comparisons are never allowed while the no-write pilot is active."""
+    return SHADOW_MODE and not _modo_piloto_activo()
+
+
+@contextmanager
+def _archivo_temporal_subido(archivo, suffix: str | None = None):
+    """Expose an uploaded file through a temporary path and always remove it."""
+    import tempfile
+
+    ruta_temporal: Path | None = None
+    try:
+        archivo.seek(0)
+        sufijo = suffix if suffix is not None else Path(archivo.name).suffix.lower()
+        with tempfile.NamedTemporaryFile(suffix=sufijo, delete=False) as temporal:
+            ruta_temporal = Path(temporal.name)
+            temporal.write(archivo.read())
+        yield ruta_temporal
+    finally:
+        archivo.seek(0)
+        if ruta_temporal is not None:
+            ruta_temporal.unlink(missing_ok=True)
 
 
 def _build_date() -> str:
@@ -91,29 +115,35 @@ st.set_page_config(
 # ─────────────────────────────────────────────────────────────────────────────
 
 @st.cache_data
-def cargar_catalogo() -> dict:
-    store = NeonKnowledgeStore()
-    if store.enabled:
-        try:
-            catalogo = store.load_catalog()
-            if catalogo:
-                return catalogo
-        except Exception:
-            pass
+def cargar_catalogo(solo_local: bool | None = None) -> dict:
+    if solo_local is None:
+        solo_local = _modo_piloto_activo()
+    if not solo_local:
+        store = NeonKnowledgeStore()
+        if store.enabled:
+            try:
+                catalogo = store.load_catalog()
+                if catalogo:
+                    return catalogo
+            except Exception:
+                pass
     with open(BASE_DIR / 'catalogo_maestro.json', encoding='utf-8') as f:
         return json.load(f)
 
 
 @st.cache_data
-def cargar_diccionario_base() -> list[dict]:
-    store = NeonKnowledgeStore()
-    if store.enabled:
-        try:
-            diccionario = store.load_dictionary()
-            if diccionario:
-                return diccionario
-        except Exception:
-            pass
+def cargar_diccionario_base(solo_local: bool | None = None) -> list[dict]:
+    if solo_local is None:
+        solo_local = _modo_piloto_activo()
+    if not solo_local:
+        store = NeonKnowledgeStore()
+        if store.enabled:
+            try:
+                diccionario = store.load_dictionary()
+                if diccionario:
+                    return diccionario
+            except Exception:
+                pass
     with open(BASE_DIR / 'diccionario.json', encoding='utf-8') as f:
         return json.load(f)
 
@@ -765,8 +795,9 @@ def main():
             "ni el catálogo."
         )
 
-    catalogo = cargar_catalogo()
-    dic_base = cargar_diccionario_base()
+    modo_piloto = _modo_piloto_activo()
+    catalogo = cargar_catalogo(solo_local=modo_piloto)
+    dic_base = cargar_diccionario_base(solo_local=modo_piloto)
 
     if 'diccionario' not in st.session_state:
         st.session_state.diccionario = list(dic_base)
@@ -931,15 +962,10 @@ def main():
                     st.session_state.resultados[archivo.name] = df_file
 
                     # SHADOW MODE — homologación comparativa contra motor legacy
-                    if SHADOW_MODE and Path(archivo.name).suffix.lower() == '.pdf':
-                        import tempfile
+                    if _shadow_mode_activo() and Path(archivo.name).suffix.lower() == '.pdf':
                         from pipeline.homologation_pipeline import HomologationPipeline
                         from shadow.shadow_logger import ShadowLogger
-                        tmp_shadow = tempfile.NamedTemporaryFile(suffix='.pdf', delete=False)
-                        try:
-                            tmp_shadow.write(archivo.read())
-                            tmp_shadow.close()
-                            sh_path = Path(tmp_shadow.name)
+                        with _archivo_temporal_subido(archivo, '.pdf') as sh_path:
                             hp_shadow = HomologationPipeline()
                             sh_summary = hp_shadow.process(sh_path)
                             logger_sh = ShadowLogger()
@@ -965,9 +991,6 @@ def main():
                             total_comp = len(comparisons)
                             match_rate = matches / total_comp if total_comp else 1.0
                             logger_sh.log(archivo.name, comparisons, match_rate)
-                        finally:
-                            sh_path.unlink(missing_ok=True)
-                            archivo.seek(0)
     else:
         # NEW PIPELINE (HomologationPipeline)
         import logging as _logging
@@ -1202,7 +1225,7 @@ def main():
 
         with tab_resumen: _tab_resumen(df)
         with tab_revision: _tab_revision(df, catalogo, motor=MotorHibridoLocal(st.session_state.diccionario), archivo_nombre=archivo_activo_name)
-        with tab_balance: _tab_balance(df, catalogo)
+        with tab_balance: _tab_balance(df, catalogo, archivo_activo_name)
         with tab_diccionario: _tab_diccionario()
         with tab_conocimiento: _tab_conocimiento(archivo_activo, _doc_ctx, meta_activo)
         with tab_inteligencia: _tab_inteligencia()
@@ -1229,32 +1252,32 @@ def _visor_documento(archivo):
         clave_imgs = f"_imgs_{archivo.name}"
         if clave_imgs not in st.session_state:
             with st.spinner("Cargando páginas del documento..."):
-                with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
-                    tmp.write(archivo.read())
-                    tmp_path = Path(tmp.name)
-                archivo.seek(0)
-                
-                try:
-                    from pdf2image import convert_from_path
-                    
-                    # CORRECCIÓN 1: Configuración inteligente según el sistema operativo
-                    if platform.system() == "Darwin":
-                        # Entorno local (Mac)
-                        pdftoppm_path = shutil.which('pdftoppm')
-                        poppler_dir = str(Path(pdftoppm_path).parent) if pdftoppm_path else '/opt/homebrew/bin'
-                        imgs = convert_from_path(str(tmp_path), dpi=180, poppler_path=poppler_dir)
-                    else:
-                        # Entorno Render (Linux) - No necesita poppler_path, lo detecta global
-                        imgs = convert_from_path(str(tmp_path), dpi=180)
-                        
-                    st.session_state[clave_imgs] = imgs
-                except Exception:
-                    # CORRECCIÓN 2: Fallback dinámico (busca pdftoppm de forma segura en cualquier Linux)
-                    pdftoppm_bin = shutil.which('pdftoppm') or 'pdftoppm'
-                    tmpdir = tempfile.mkdtemp()
-                    subprocess.run([pdftoppm_bin, '-png', '-r', '180', str(tmp_path), f'{tmpdir}/page'], capture_output=True)
-                    img_files = sorted(glob.glob(f'{tmpdir}/page*.png'))
-                    imgs = [Image.open(f) for f in img_files]
+                with _archivo_temporal_subido(archivo, '.pdf') as tmp_path:
+                    try:
+                        from pdf2image import convert_from_path
+
+                        # CORRECCIÓN 1: Configuración inteligente según el sistema operativo
+                        if platform.system() == "Darwin":
+                            # Entorno local (Mac)
+                            pdftoppm_path = shutil.which('pdftoppm')
+                            poppler_dir = str(Path(pdftoppm_path).parent) if pdftoppm_path else '/opt/homebrew/bin'
+                            imgs = convert_from_path(str(tmp_path), dpi=180, poppler_path=poppler_dir)
+                        else:
+                            # Entorno Render (Linux) - No necesita poppler_path, lo detecta global
+                            imgs = convert_from_path(str(tmp_path), dpi=180)
+                    except Exception:
+                        # CORRECCIÓN 2: Fallback dinámico (busca pdftoppm de forma segura en cualquier Linux)
+                        pdftoppm_bin = shutil.which('pdftoppm') or 'pdftoppm'
+                        with tempfile.TemporaryDirectory() as tmpdir:
+                            subprocess.run(
+                                [pdftoppm_bin, '-png', '-r', '180', str(tmp_path), f'{tmpdir}/page'],
+                                capture_output=True,
+                            )
+                            img_files = sorted(glob.glob(f'{tmpdir}/page*.png'))
+                            imgs = []
+                            for image_path in img_files:
+                                with Image.open(image_path) as image:
+                                    imgs.append(image.copy())
                     st.session_state[clave_imgs] = imgs
 
         imgs = st.session_state.get(clave_imgs, [])
@@ -1307,22 +1330,16 @@ def _visor_documento(archivo):
 
 
 def _extraer_lineas_encabezado(archivo) -> list[str]:
-    import tempfile
     suffix = Path(archivo.name).suffix.lower()
-    archivo.seek(0)
     if suffix == '.pdf':
-        with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
-            tmp.write(archivo.read())
-            tmp_path = Path(tmp.name)
         try:
-            import pdfplumber
-            with pdfplumber.open(tmp_path) as pdf:
-                texto = pdf.pages[0].extract_text() or ""
-                return texto.split('\n')[:40]
+            with _archivo_temporal_subido(archivo, '.pdf') as tmp_path:
+                import pdfplumber
+                with pdfplumber.open(tmp_path) as pdf:
+                    texto = pdf.pages[0].extract_text() or ""
+                    return texto.split('\n')[:40]
         except Exception:
             return []
-        finally:
-            archivo.seek(0)
     else:
         archivo.seek(0)
         df = pd.read_excel(archivo, header=None, nrows=15).fillna('')
@@ -1342,22 +1359,19 @@ def _extraer_cuentas(archivo) -> tuple[list[CuentaRaw], object]:
     """
     suffix = Path(archivo.name).suffix.lower()
     if suffix == '.pdf':
-        import tempfile
-        with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
-            tmp.write(archivo.read())
-            tmp_path = Path(tmp.name)
-        parser = ParserPDF()
-        resultado = parser.parsear(tmp_path)
-        for adv in resultado.advertencias: st.warning(adv)
-        # GATE 4E: SAFE-R02+R03+R08 (ruido de encabezado/pie, URLs/emails,
-        # duplicados) aplicado ANTES de la clasificación, ÚNICAMENTE con
-        # activación explícita (env SAFE_MODE ON). Con SAFE OFF el
-        # comportamiento es exactamente el previo: se devuelven todas las
-        # cuentas extraídas, sin filtrado.
-        if _safe_mode_enabled():
-            return _safe_qualify_cuentas(resultado.cuentas), \
-                getattr(resultado, 'document_context', None)
-        return resultado.cuentas, getattr(resultado, 'document_context', None)
+        with _archivo_temporal_subido(archivo, '.pdf') as tmp_path:
+            parser = ParserPDF()
+            resultado = parser.parsear(tmp_path)
+            for adv in resultado.advertencias: st.warning(adv)
+            # GATE 4E: SAFE-R02+R03+R08 (ruido de encabezado/pie, URLs/emails,
+            # duplicados) aplicado ANTES de la clasificación, ÚNICAMENTE con
+            # activación explícita (env SAFE_MODE ON). Con SAFE OFF el
+            # comportamiento es exactamente el previo: se devuelven todas las
+            # cuentas extraídas, sin filtrado.
+            if _safe_mode_enabled():
+                return _safe_qualify_cuentas(resultado.cuentas), \
+                    getattr(resultado, 'document_context', None)
+            return resultado.cuentas, getattr(resultado, 'document_context', None)
     else:
         return parsear_excel(archivo), None
 
@@ -1420,18 +1434,10 @@ def _build_fingerprint_archivo(archivo, doc_ctx):
     if name in st.session_state.document_fingerprints:
         return st.session_state.document_fingerprints[name]
 
-    import tempfile
     from document_intelligence.knowledge.fingerprint import fingerprint_from_file
     suffix = Path(archivo.name).suffix.lower()
-    archivo.seek(0)
-    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-        tmp.write(archivo.read())
-        tmp_path = Path(tmp.name)
-    try:
+    with _archivo_temporal_subido(archivo, suffix) as tmp_path:
         fp = fingerprint_from_file(tmp_path, signature=doc_ctx.signature)
-    finally:
-        archivo.seek(0)
-        tmp_path.unlink(missing_ok=True)
     st.session_state.document_fingerprints[name] = fp
     return fp
 
@@ -1975,7 +1981,8 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                         st.rerun()
 
 
-def _tab_balance(df: pd.DataFrame, catalogo: dict):
+def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str = ""):
+    modo_piloto = _modo_piloto_activo()
     clasificadas = df[(df['codigo_clasificado'] != '') & (df['codigo_clasificado'] != '__EXCLUIR__') & (~df['es_total'])].copy()
     if clasificadas.empty:
         st.info("No hay cuentas clasificadas todavía.")
@@ -2039,6 +2046,12 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict):
             ws["A2"] = "RUT:";       ws["B2"] = meta.rut or ""
             ws["A3"] = "Período:";   ws["B3"] = f'{meta.periodo_desde or ""} al {meta.periodo_hasta or ""}'
             ws["A4"] = "Giro:";      ws["B4"] = meta.giro or ""
+        if modo_piloto:
+            ws["A5"] = "ESTADO:"
+            ws["B5"] = "BORRADOR DE PILOTO - REVISIÓN HUMANA OBLIGATORIA"
+            ws["A5"].font = Font(bold=True, color="9C0006")
+            ws["B5"].font = Font(bold=True, color="9C0006")
+            ws["B5"].fill = PatternFill("solid", fgColor="FFC7CE")
 
         ws.column_dimensions["A"].width = 12
         ws.column_dimensions["B"].width = 36
@@ -2058,7 +2071,7 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict):
 
         fila_sep = FILA_INICIO_BALANCE + len(export_df) + 3
 
-        catalogo_local = cargar_catalogo()
+        catalogo_local = cargar_catalogo(solo_local=modo_piloto)
         det = clasificadas[
             (clasificadas['codigo_clasificado'] != '') &
             (clasificadas['codigo_clasificado'] != '__EXCLUIR__') &
@@ -2112,11 +2125,26 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict):
     meta_state = st.session_state.get("metadata")
     razon_fn = (meta_state.razon_social or "empresa").replace(" ", "_")[:30] if meta_state else "empresa"
     rut_fn   = (meta_state.rut or "").replace(".", "").replace("-", "") if meta_state else ""
-    nombre_archivo = f"Balance_Unificado-{razon_fn}-{rut_fn}"
+    prefijo_piloto = "BORRADOR_PILOTO_" if modo_piloto else ""
+    nombre_archivo = f"{prefijo_piloto}Balance_Unificado-{razon_fn}-{rut_fn}"
+
+    confirmacion_revisor = True
+    etiqueta_descarga = "⬇️ Descargar balance normalizado (Excel)"
+    if modo_piloto:
+        st.warning(
+            "La descarga se marcará como borrador de piloto. Confirma la revisión "
+            "humana antes de habilitarla."
+        )
+        confirmacion_revisor = st.checkbox(
+            "Confirmo que revisé las cuentas pendientes y que este archivo es solo un borrador.",
+            key=f"confirmar_borrador_piloto_{archivo_nombre}",
+        )
+        etiqueta_descarga = "⬇️ Descargar borrador de piloto (Excel)"
 
     st.download_button(
-        "⬇️ Descargar balance normalizado (Excel)", data=buf.getvalue(),
-        file_name=f"{nombre_archivo}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        etiqueta_descarga, data=buf.getvalue(),
+        file_name=f"{nombre_archivo}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        disabled=not confirmacion_revisor,
     )
 
     _validar_cuadre_utilidad(df, agrupado, clasificadas)
@@ -2182,7 +2210,7 @@ def _validar_cuadre_utilidad(df: pd.DataFrame, agrupado: pd.DataFrame, clasifica
 
 def _tab_diccionario():
     busqueda = st.text_input("Buscar en el diccionario", "")
-    catalogo_local = cargar_catalogo()
+    catalogo_local = cargar_catalogo(solo_local=_modo_piloto_activo())
     dic = st.session_state.diccionario
     df_dic = pd.DataFrame(dic)
     

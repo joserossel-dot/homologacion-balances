@@ -75,6 +75,7 @@ def test_guarda_categoria_en_neon():
 
 
 def test_pipeline_carga_diccionario_desde_neon(monkeypatch):
+    monkeypatch.delenv("PILOT_MODE", raising=False)
     monkeypatch.setenv("DATABASE_URL", "postgresql://test")
     monkeypatch.setattr(
         NeonKnowledgeStore,
@@ -87,6 +88,23 @@ def test_pipeline_carga_diccionario_desde_neon(monkeypatch):
     assert HomologationPipeline._load_dictionary() == [
         {"cuenta_original": "Cuenta aprendida", "codigo_estandar": "AC.01"}
     ]
+
+
+def test_pipeline_usa_diccionario_local_en_piloto(monkeypatch):
+    monkeypatch.setenv("PILOT_MODE", "1")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://test")
+
+    def no_debe_usarse():
+        raise AssertionError("No debe instanciar Neon en modo piloto")
+
+    monkeypatch.setattr(
+        "pipeline.homologation_pipeline.NeonKnowledgeStore",
+        no_debe_usarse,
+    )
+
+    diccionario = HomologationPipeline._load_dictionary()
+    assert diccionario
+    assert all(entry["codigo_estandar"] != "__EXCLUIR__" for entry in diccionario)
 
 
 def test_healthcheck_confirma_conexion():
