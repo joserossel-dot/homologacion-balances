@@ -67,6 +67,7 @@ from parsers.account_type_resolver import (
 from extractor_metadata import extraer_metadata, MetadataEmpresa
 from account_qualification import qualify_cuentas as _safe_qualify_cuentas, \
     safe_mode_enabled as _safe_mode_enabled
+from pilot_mode import pilot_mode_active
 from persistence.neon_store import NeonKnowledgeStore
 from reporting_integrity import (
     resultado_compatible, importe_resultado_homologado, conciliar_resultados,
@@ -142,6 +143,21 @@ USE_LEGACY_ENGINE = False  # True → MotorHibridoLocal (antiguo); False → Hom
 SHADOW_MODE = True  # True → ejecuta nuevo pipeline en paralelo sin afectar UI, guarda logs en logs/shadow/
 
 
+def _modo_piloto_activo() -> bool:
+    """Indica si la sesión debe impedir persistencia de revisiones.
+
+    Las lecturas del catálogo y diccionario de Neon permanecen permitidas: son
+    necesarias para que el piloto use el mismo conocimiento operativo y no
+    modifican datos remotos.
+    """
+    return pilot_mode_active()
+
+
+def _shadow_mode_activo() -> bool:
+    """El shadow logger queda desactivado cuando el piloto no admite escrituras."""
+    return SHADOW_MODE and not _modo_piloto_activo()
+
+
 def _build_date() -> str:
     configured = os.environ.get("APP_BUILD_DATE")
     if configured:
@@ -202,7 +218,13 @@ def _persistir_validacion(
     sugerido: str | None = None, metodo: str | None = None,
     confianza: float | None = None, archivo: str = '',
 ) -> bool:
-    """Persiste en Neon; retorna False para que el caller use fallback JSON."""
+    """Persiste en Neon salvo en el piloto no mutativo.
+
+    Retornar ``True`` en piloto evita que los callers escriban el respaldo
+    JSON. Las decisiones se mantienen sólo en ``session_state``.
+    """
+    if _modo_piloto_activo():
+        return True
     store = NeonKnowledgeStore()
     if not store.enabled:
         return False
@@ -226,6 +248,8 @@ def _persistir_validacion(
 
 def _persistir_validaciones_lote(validaciones: list[dict]) -> bool:
     """Persiste un lote completo en una única transacción Neon."""
+    if _modo_piloto_activo():
+        return True
     store = NeonKnowledgeStore()
     if not store.enabled:
         return False
@@ -242,6 +266,8 @@ def _persistir_validaciones_lote(validaciones: list[dict]) -> bool:
 
 
 def _persistir_catalogo(entry: dict) -> bool:
+    if _modo_piloto_activo():
+        return True
     store = NeonKnowledgeStore()
     if not store.enabled:
         return False
@@ -1114,6 +1140,12 @@ def main():
         "Carga uno o más balances (PDF o Excel) → clasificación híbrida automática "
         "(código → diccionario → reglas) → cola de revisión → balance normalizado."
     )
+    if _modo_piloto_activo():
+        st.info(
+            "Piloto no mutativo: se usa el catálogo y diccionario operativo "
+            "en modo lectura. Las decisiones de esta sesión no se guardarán "
+            "en Neon, JSON, Gold Standard ni runtime."
+        )
 
     catalogo = cargar_catalogo()
     dic_base = cargar_diccionario_base()
@@ -1141,6 +1173,8 @@ def main():
         release_branch = os.environ.get("APP_RELEASE_BRANCH", "desarrollo-local")
         build_date = _build_date()
         persistence_label = "Neon conectado" if _neon_disponible() else "JSON local"
+        if _modo_piloto_activo() and _neon_disponible():
+            persistence_label = "Neon, solo lectura"
         st.caption(
             f"Rama `{release_branch}` · Commit `{commit}` · Build `{build_date}` · "
             f"Persistencia: **{persistence_label}**"
@@ -1401,7 +1435,7 @@ def main():
                     st.session_state.resultados[archivo.name] = df_file
 
                     # SHADOW MODE — homologación comparativa contra motor legacy
-                    if SHADOW_MODE and Path(archivo.name).suffix.lower() == '.pdf':
+                    if _shadow_mode_activo() and Path(archivo.name).suffix.lower() == '.pdf':
                         import tempfile
                         from pipeline.homologation_pipeline import HomologationPipeline
                         from shadow.shadow_logger import ShadowLogger
@@ -3948,6 +3982,12 @@ def _tab_diccionario():
 
 def _tab_aprendizaje():
     st.subheader("🧠 Autoaprendizaje — Gold Standard")
+    if _modo_piloto_activo():
+        st.info(
+            "La gestión de aprendizaje y runtime está deshabilitada durante "
+            "el piloto no mutativo."
+        )
+        return
     store = NeonKnowledgeStore()
     if _neon_disponible():
         try:
@@ -4057,6 +4097,12 @@ def _tab_knowledge_manager() -> None:
     Toda acción (promover, rechazar, rollback) requiere aprobación explícita.
     """
     st.subheader("🧠 Knowledge Manager")
+    if _modo_piloto_activo():
+        st.info(
+            "Las promociones, rechazos y rollbacks están deshabilitados "
+            "durante el piloto no mutativo."
+        )
+        return
     if _neon_disponible():
         _tab_neon_knowledge_manager()
         return
@@ -4092,6 +4138,12 @@ def _tab_knowledge_manager() -> None:
 
 def _tab_neon_knowledge_manager() -> None:
     """Gobernanza durable del diccionario cuando Neon es la fuente activa."""
+    if _modo_piloto_activo():
+        st.info(
+            "Los cambios de diccionario están deshabilitados durante el "
+            "piloto no mutativo."
+        )
+        return
     store = NeonKnowledgeStore()
     st.caption(
         "Fuente durable: Neon. El rollback solo se permite si el cambio elegido "

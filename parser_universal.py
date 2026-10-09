@@ -288,7 +288,13 @@ def _extraer_tabla_balance_por_coordenadas(
                     if alias in normalized:
                         matches[key] = normalized[alias]
                         break
-            if all(key in matches for key in RAW_MONETARY_COLUMNS):
+            # A usable geometric table needs both the account-label column and
+            # every monetary column. OCR can recognize the numeric headers
+            # while losing the left-most ``CUENTA`` label; treating that as a
+            # complete header used to raise KeyError below and abort parsing.
+            if "nombre" in matches and all(
+                key in matches for key in RAW_MONETARY_COLUMNS
+            ):
                 header_words = combined
                 detected = matches
                 break
@@ -2760,6 +2766,154 @@ def _tabla_ocr_necesita_recuperacion(lineas: list[str]) -> bool:
     return False
 
 
+def _texto_palabras_ocr(words: list[dict]) -> str:
+    """Une una celda OCR conservando el orden visual de sus palabras."""
+    return " ".join(
+        str(word.get("text", "")).strip()
+        for word in sorted(words, key=lambda word: float(word["x0"]))
+        if str(word.get("text", "")).strip()
+    ).strip()
+
+
+def _celda_clasificada_ocr(
+    words: list[dict], *, amount_min_x: float,
+) -> Optional[tuple[str, str]]:
+    """Obtiene ``(glosa, importe)`` de una mitad de balance clasificado.
+
+    Los balances clasificados escaneados suelen tener una glosa y un solo
+    importe por mitad de página. El umbral horizontal evita tomar como monto
+    un número que forme parte de la glosa (por ejemplo, ``CTA 2``).
+    """
+    ordered = sorted(words, key=lambda word: float(word["x0"]))
+    amount_index: Optional[int] = None
+    amount = ""
+    for index in range(len(ordered) - 1, -1, -1):
+        word = ordered[index]
+        token = str(word.get("text", "")).strip()
+        xmid = (float(word["x0"]) + float(word["x1"])) / 2
+        normalized = normalizar_token_ocr(token).replace("$", "")
+        if (
+            xmid >= amount_min_x
+            and re.search(r"\d", normalized)
+            and PATRON_MONTOS.fullmatch(normalized)
+        ):
+            amount_index = index
+            amount = normalized
+            break
+    if amount_index is None:
+        return None
+
+    name_tokens = []
+    for word in ordered[:amount_index]:
+        token = str(word.get("text", "")).strip()
+        # Marcas marginales de Tesseract (|, !, /) no son parte de la glosa.
+        if token and re.search(r"[A-Za-z0-9ÁÉÍÓÚÜÑáéíóúüñ]", token):
+            name_tokens.append(token)
+    name = " ".join(name_tokens).strip()
+    if not re.search(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]", name):
+        return None
+    return name, amount
+
+
+def _es_total_final_activo(nombre: str) -> bool:
+    """Reconoce un total final de activos, no un subtotal de sección."""
+    normalized = re.sub(r"\s+", " ", _sin_acentos(nombre)).upper().strip()
+    if "TOTAL" not in normalized or "ACTIV" not in normalized:
+        return False
+    return not any(
+        marker in normalized
+        for marker in (
+            "CIRCUL", "CORRIENT", "FIJO", "NO CORRIENT", "OTROS",
+        )
+    )
+
+
+def _extraer_balance_clasificado_doble_columna_por_coordenadas(
+    page, *, permitir_continuacion: bool = False,
+) -> list[tuple[str, OrigenColumna]]:
+    """Extrae un balance OCR ACTIVO | PASIVO preservando su lado físico.
+
+    No es un fallback textual genérico: sólo se activa tras observar una
+    cabecera ACTIVO|PASIVO y al menos cinco filas paralelas con glosa e importe
+    en ambas mitades. En páginas posteriores del mismo documento se permite
+    continuidad si mantienen al menos ocho filas paralelas. Así una tabla de
+    ocho columnas o dos bloques de texto normales siguen por el flujo usual.
+    """
+    try:
+        words = page.extract_words(use_text_flow=False, keep_blank_chars=False) or []
+        groups = _agrupar_palabras_por_linea(words)
+        page_width = max(float(word["x1"]) for word in words)
+    except (KeyError, TypeError, ValueError):
+        return []
+    if page_width < 200 or not groups:
+        return []
+
+    split_x = page_width / 2
+    left_amount_min_x = split_x * 0.72
+    right_amount_min_x = split_x + ((page_width - split_x) * 0.58)
+    candidates: list[tuple[Optional[tuple[str, str]], Optional[tuple[str, str]]]] = []
+    header_detected = False
+
+    for group in groups:
+        left_words = [
+            word for word in group
+            if (float(word["x0"]) + float(word["x1"])) / 2 < split_x
+        ]
+        right_words = [
+            word for word in group
+            if (float(word["x0"]) + float(word["x1"])) / 2 >= split_x
+        ]
+        left_text = _sin_acentos(_texto_palabras_ocr(left_words)).upper()
+        right_text = _sin_acentos(_texto_palabras_ocr(right_words)).upper()
+        left_cell = _celda_clasificada_ocr(
+            left_words, amount_min_x=left_amount_min_x,
+        )
+        right_cell = _celda_clasificada_ocr(
+            right_words, amount_min_x=right_amount_min_x,
+        )
+        if (
+            left_cell is None
+            and right_cell is None
+            and re.search(r"\bACTIVOS?\b", left_text)
+            and re.search(r"\b(?:PASIVOS?|PATRIMONIO)\b", right_text)
+        ):
+            header_detected = True
+        candidates.append((left_cell, right_cell))
+
+    paired_rows = sum(
+        left is not None and right is not None for left, right in candidates
+    )
+    if not header_detected and not (permitir_continuacion and paired_rows >= 8):
+        return []
+    if paired_rows < 5:
+        return []
+
+    extracted: list[tuple[str, OrigenColumna]] = []
+    for left, right in candidates:
+        if left is not None and right is not None:
+            left_name, left_amount = left
+            right_name, right_amount = right
+            # La última fila de algunos escaneos pierde "TOTAL" sólo en la
+            # derecha (p. ej. OFAL PASIVOS). La pareja física TOTAL ACTIVOS |
+            # PASIVOS permite restaurar únicamente ese rótulo final.
+            if _es_total_final_activo(left_name):
+                left_name = "TOTAL ACTIVOS"
+                right_normalized = _sin_acentos(right_name).upper()
+                if "PATRIMONIO" in right_normalized:
+                    right_name = "TOTAL PASIVOS Y PATRIMONIO"
+                elif "PASIV" in right_normalized:
+                    right_name = "TOTAL PASIVOS"
+            extracted.append((f"{left_name} {left_amount}", OrigenColumna.ACTIVO))
+            extracted.append((f"{right_name} {right_amount}", OrigenColumna.PASIVO))
+        elif left is not None:
+            name, amount = left
+            extracted.append((f"{name} {amount}", OrigenColumna.ACTIVO))
+        elif right is not None:
+            name, amount = right
+            extracted.append((f"{name} {amount}", OrigenColumna.PASIVO))
+    return extracted
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # PARSER PRINCIPAL PDF
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2801,6 +2955,10 @@ class ParserPDF:
 
         self._ocr_advertencias: list[str] = []
         self._extraction_method = "text"
+        # Metadatos paralelos a las líneas OCR. Sólo se rellenan cuando una
+        # extracción geométrica de balance clasificado observó el lado físico
+        # de cada importe; el flujo textual conserva ``None``.
+        self._origenes_lineas_ocr: list[Optional[OrigenColumna]] = []
         lineas, requirio_ocr, rotacion = self._extraer_lineas(path, context)
 
         if not lineas:
@@ -2823,6 +2981,12 @@ class ParserPDF:
         }:
             lineas = [normalizar_montos_fragmentados(l) for l in lineas]
         lineas = [normalizar_codigo_ocr(l) for l in lineas]
+        origenes_lineas = list(self._origenes_lineas_ocr)
+        if len(origenes_lineas) != len(lineas):
+            # Una implementación de extractor nunca debe desalinear los
+            # metadatos de su texto. Si ocurriera, se prefiere no usar la
+            # señal adicional antes que atribuir una columna equivocada.
+            origenes_lineas = [None] * len(lineas)
 
         primer_tokens = [l.split()[0] if l.split() else '' for l in lineas[:60]]
         formato_codigo = detectar_formato_codigo(primer_tokens)
@@ -2964,13 +3128,20 @@ class ParserPDF:
         years, currencies = detectar_años_y_monedas(lineas)
 
         # Pre-process lines to associate vertical labels and amounts
-        lineas = asociar_lineas_verticales(lineas)
+        if not any(origen is not None for origen in origenes_lineas):
+            lineas = asociar_lineas_verticales(lineas)
+        else:
+            advertencias.append(
+                "OCR geométrico: se preservó la columna física ACTIVO/PASIVO "
+                "de un balance clasificado de dos columnas."
+            )
 
         # 4. Parsear todas las líneas
         confianza = 0.75 if requirio_ocr else 1.0
         cuentas = []
         for i, l in enumerate(lineas):
-            sub_lines = split_side_by_side(l)
+            origen_observado = origenes_lineas[i]
+            sub_lines = [l] if origen_observado is not None else split_side_by_side(l)
             for sub_l in sub_lines:
                 c = parsear_linea(sub_l, i, formato_codigo, separador, confianza,
                                   column_order=column_order,
@@ -2978,6 +3149,15 @@ class ParserPDF:
                                   years=years,
                                   currencies=currencies)
                 if c:
+                    if origen_observado is not None and c.monto is not None:
+                        c.origen_columna = origen_observado
+                        # No son ocho columnas reconstruidas: es la columna
+                        # física observada en el OCR. Mantenerla evita que el
+                        # anotador de secciones sobrescriba ACTIVO/PASIVO con
+                        # un encabezado textual visto en otra página.
+                        c.montos_columnas = {
+                            origen_observado.value: float(c.monto),
+                        }
                     cuentas.append(c)
 
         cuentas, cuentas_partidas = fusionar_cuentas_partidas(cuentas)
@@ -3178,8 +3358,10 @@ class ParserPDF:
 
     def _ocr_documento(self, path: Path, n_paginas: int) -> tuple[list[str], bool, int]:
         lineas: list[str] = []
+        origenes_lineas: list[Optional[OrigenColumna]] = []
         rotacion_global: Optional[int] = None
         coordinate_centers: Optional[list[float]] = None
+        clasificado_doble_detectado = False
 
         pdftoppm_bin = shutil.which('pdftoppm') or 'pdftoppm'
 
@@ -3232,6 +3414,8 @@ class ParserPDF:
                 texto_principal = texto
                 words_tsv = ocr_pagina_tsv(img_path, rotacion_global)
                 tabla_coordenadas_usada = False
+                clasificado_doble_usado = False
+                origenes_pagina: Optional[list[OrigenColumna]] = None
                 if words_tsv:
                     tabla_ocr, detected_centers = _extraer_tabla_balance_por_coordenadas(
                         _OCRWordsPage(words_tsv), coordinate_centers,
@@ -3241,6 +3425,17 @@ class ParserPDF:
                         texto = "\n".join(tabla_ocr)
                         self._extraction_method = "ocr_coordinates_8_amounts"
                         tabla_coordenadas_usada = True
+                    if not tabla_coordenadas_usada:
+                        clasificado = _extraer_balance_clasificado_doble_columna_por_coordenadas(
+                            _OCRWordsPage(words_tsv),
+                            permitir_continuacion=clasificado_doble_detectado,
+                        )
+                        if clasificado:
+                            texto = "\n".join(linea for linea, _ in clasificado)
+                            origenes_pagina = [origen for _, origen in clasificado]
+                            self._extraction_method = "ocr_classified_two_columns"
+                            clasificado_doble_usado = True
+                            clasificado_doble_detectado = True
                 if tabla_coordenadas_usada and texto_principal.strip():
                     recovered, replacements = recuperar_filas_tabla_ocr(
                         texto.splitlines(), texto_principal,
@@ -3268,6 +3463,7 @@ class ParserPDF:
                 # pagina. Fusionarla con PSM 4 duplicaba sus cuentas y montos.
                 if (
                     not tabla_coordenadas_usada
+                    and not clasificado_doble_usado
                     and _ocr_requiere_alternativa(texto, pagina == n_paginas)
                 ):
                     texto_tabla = ocr_pagina(img_path, rotacion_global, psm=4)
@@ -3294,8 +3490,14 @@ class ParserPDF:
                         f"Página {pagina}: OCR sin texto utilizable; revise que el "
                         "documento procesado esté completo."
                     )
-                lineas.extend(texto.split('\n'))
+                lineas_pagina = texto.split('\n')
+                lineas.extend(lineas_pagina)
+                if origenes_pagina is not None and len(origenes_pagina) == len(lineas_pagina):
+                    origenes_lineas.extend(origenes_pagina)
+                else:
+                    origenes_lineas.extend([None] * len(lineas_pagina))
 
+        self._origenes_lineas_ocr = origenes_lineas
         return lineas, True, rotacion_global or 0
 
 
