@@ -172,11 +172,25 @@ class PipelineRunner:
         sr = StageResult.make("STAGE_3", "Scientific Validation")
         start = time.time()
         validation_data = self._load_validation_data()
-        accuracy = validation_data.get("accuracy", 1.0)
-        artifacts = {"accuracy": accuracy}
-        if isinstance(validation_data, dict):
-            artifacts["data"] = {k: v for k, v in validation_data.items() if isinstance(v, (int, float, str, bool))}
-        self.context_dict["validation_metrics"] = {"accuracy": accuracy}
+        accuracy = validation_data.get("accuracy") if isinstance(validation_data, dict) else None
+        if isinstance(accuracy, bool) or not isinstance(accuracy, (int, float)):
+            artifacts = {"available": False}
+            self.context_dict["validation_metrics"] = artifacts
+            sr.duration = time.time() - start
+            return sr.fail(
+                ["Scientific validation evidence is missing or invalid"],
+                artifacts,
+            )
+
+        artifacts = {"accuracy": accuracy, "available": True}
+        artifacts["data"] = {
+            k: v for k, v in validation_data.items()
+            if isinstance(v, (int, float, str, bool))
+        }
+        self.context_dict["validation_metrics"] = {
+            "accuracy": accuracy,
+            "available": True,
+        }
         sr.duration = time.time() - start
         return sr.succeed(artifacts)
 

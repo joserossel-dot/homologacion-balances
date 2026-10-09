@@ -69,8 +69,22 @@ class GateEngine:
                           {"total": total, "passed": tests_passed, "failed": tests_failed}, report_path)
 
     def validation_gate(self, context: dict) -> GateResult:
-        accuracy = context.get("validation_metrics", {}).get("accuracy", 1.0)
+        validation_metrics = context.get("validation_metrics", {})
+        if not isinstance(validation_metrics, dict):
+            validation_metrics = {}
+        accuracy = validation_metrics.get("accuracy")
         min_accuracy = self.config.get("min_accuracy", 0.0)
+        if (
+            validation_metrics.get("available") is False
+            or isinstance(accuracy, bool)
+            or not isinstance(accuracy, (int, float))
+        ):
+            return GateResult(
+                "VALIDATION_GATE", "Scientific Validation", GateStatus.FAIL,
+                "Scientific validation evidence is missing or invalid",
+                {"available": False, "min_accuracy": min_accuracy},
+                "reports/scientific_validation/scientific_validation_report.md",
+            )
         if accuracy < min_accuracy:
             return GateResult("VALIDATION_GATE", "Scientific Validation", GateStatus.FAIL,
                               f"Accuracy {accuracy:.1%} below minimum {min_accuracy:.1%}",

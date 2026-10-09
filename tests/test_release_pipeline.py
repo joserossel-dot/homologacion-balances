@@ -198,6 +198,12 @@ class TestGateEngine:
         r = engine.validation_gate(self.make_context(validation_metrics={"accuracy": 0.80}))
         assert r.status == GateStatus.FAIL
 
+    def test_validation_gate_missing_evidence_fail(self):
+        engine = GateEngine({"gates": {"min_accuracy": 0.90}})
+        r = engine.validation_gate(self.make_context(validation_metrics={}))
+        assert r.status == GateStatus.FAIL
+        assert r.evidence["available"] is False
+
     # QUALITY_GATE
     def test_quality_gate_pass(self):
         engine = GateEngine({"gates": {"critical_alerts_max": 0, "high_alerts_max": 3}})
@@ -648,16 +654,17 @@ class TestCoverageGaps:
         assert s.status == StageStatus.ERROR
 
     def test_runner_validation_data_loading(self):
-        """_load_validation_data returns fallback when file missing."""
+        """Missing scientific-validation evidence fails the release stage."""
         runner = PipelineRunner()
         runner.config = {"stages": {"run_tests": False, "parser_validation": False,
                                     "scientific_validation": True, "knowledge_evolution": False,
                                     "quality_snapshot": False, "drift_detection": False,
                                     "regression_detection": False, "deployment_decision": False}}
-        # No validation file exists → should not crash
-        ctx = runner.run()
+        with patch.object(runner, "_load_validation_data", return_value={}):
+            runner.run()
         s = runner.stages[0]
-        assert s.status in (StageStatus.PASS, StageStatus.FAIL, StageStatus.ERROR)
+        assert s.status == StageStatus.FAIL
+        assert runner.context_dict["validation_metrics"]["available"] is False
 
     def test_runner_knowledge_data_loading(self):
         """_load_knowledge_data returns fallback when file missing."""
