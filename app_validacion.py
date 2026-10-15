@@ -37,6 +37,7 @@ from document_scope import (
     page_count, parse_pages, select_pdf, render_page, sugerir_periodos_balance,
 )
 from report_presentation import complete_catalog, add_report_sheets
+from access_control import Permission, ResourceScope, authorize
 
 import pandas as pd
 import streamlit as st
@@ -80,6 +81,20 @@ from account_qualification import qualify_cuentas as _safe_qualify_cuentas, \
     safe_mode_enabled as _safe_mode_enabled
 from pilot_mode import configure_pilot_tempdir, pilot_mode_active
 from pilot_manifest import match_pilot_manifest_uploads_json
+from local_access_ui import (
+    local_access_enabled,
+    render_local_access_gate,
+    render_local_access_sidebar,
+)
+from team_dictionary import (
+    TeamDictionaryError,
+    TeamDictionaryStore,
+    overlay_team_dictionary,
+)
+from team_dictionary_ui import (
+    can_view_team_dictionary,
+    render_team_dictionary_view,
+)
 from persistence.neon_store import NeonKnowledgeStore
 from reporting_integrity import (
     certificar_cuadratura_homologada, debe_incorporar_resultado_derivado,
@@ -796,6 +811,93 @@ def _modo_piloto_activo() -> bool:
     modifican datos remotos.
     """
     return pilot_mode_active()
+
+
+def _tiene_permiso_cuenta_local(permission: Permission) -> bool:
+    """Aplica el rol local a las acciones de la interfaz cuando está activado.
+
+    Cada balance del piloto es propio de la sesión actual. Por eso el recurso
+    se marca con el actor y equipo actuales; no se concede acceso cruzado por
+    sesión hasta que exista un almacén de trabajo compartido.
+    """
+
+    if not local_access_enabled():
+        return True
+    actor = st.session_state.get("local_access_actor")
+    if actor is None:
+        return False
+    scope = ResourceScope(
+        team_id=getattr(actor, "team_id", None),
+        owner_id=getattr(actor, "actor_id", None),
+    )
+    return authorize(actor, permission, scope).allowed
+
+
+def _diccionario_efectivo_para_actor_local(
+    diccionario_base: list[dict], actor,
+) -> tuple[list[dict], str]:
+    """Compone el diccionario base con la superposición privada del equipo.
+
+    La superposición se carga sólo para la identidad local autenticada. El
+    administrador sin equipo conserva el diccionario base y revisa propuestas
+    desde su vista de control; no hereda diccionarios de otros equipos.
+    """
+
+    team_id = getattr(actor, "team_id", None)
+    if not team_id:
+        return list(diccionario_base), "base"
+    store = TeamDictionaryStore()
+    team_entries = store.active_entries_for_team(str(team_id))
+    version = store.revision_token_for_team(str(team_id))
+    return (
+        overlay_team_dictionary(diccionario_base, team_entries),
+        f"team:{team_id}:{version}",
+    )
+
+
+def _usar_diccionario_equipo_local() -> bool:
+    """Indica si una propuesta debe ir al diccionario privado del equipo."""
+
+    if not local_access_enabled():
+        return False
+    actor = st.session_state.get("local_access_actor")
+    return bool(getattr(actor, "team_id", None))
+
+
+def _etiqueta_alcance_diccionario() -> str:
+    """Evita presentar una propuesta de equipo como edición del original."""
+
+    if _usar_diccionario_equipo_local():
+        return "Proponer para el diccionario del equipo"
+    return "Agregar al diccionario"
+
+
+def _proponer_para_diccionario_equipo(
+    *, nombre: str, codigo: str, nota: str,
+) -> bool:
+    """Guarda una propuesta local de equipo sin invocar persistencia global."""
+
+    actor = st.session_state.get("local_access_actor")
+    team_id = getattr(actor, "team_id", None)
+    if actor is None or not team_id:
+        st.error("No hay una identidad de equipo válida para registrar la propuesta.")
+        return False
+    try:
+        TeamDictionaryStore().propose(
+            actor,
+            team_id=str(team_id),
+            account_name=nombre,
+            standard_code=codigo,
+            note=nota,
+        )
+    except TeamDictionaryError as exc:
+        st.warning(f"La clasificación se aplicó al caso, pero no se creó propuesta de equipo: {exc}")
+        return False
+    st.info(
+        "La clasificación se aplicó al caso y quedó como propuesta para el "
+        "diccionario del equipo. Jefatura debe activarla antes de usarla en casos futuros."
+    )
+    return True
 
 
 def _token_local_carga_piloto(posicion: int) -> str:
@@ -2359,6 +2461,12 @@ def _confirmar_alcance_documentos(archivos) -> bool:
 
 
 def main():
+    actor_local = None
+    if local_access_enabled():
+        actor_local = render_local_access_gate()
+        if actor_local is None:
+            return
+        st.session_state["local_access_actor"] = actor_local
     if _modo_piloto_activo():
         temporales_piloto = configure_pilot_tempdir()
         if not temporales_piloto.ready:
@@ -2376,15 +2484,32 @@ def main():
     if _modo_piloto_activo():
         st.info(
             "Piloto no mutativo: se usa el catálogo y diccionario operativo "
-            "en modo lectura. Las decisiones de esta sesión no se guardarán "
-            "en Neon, JSON, Gold Standard ni runtime."
+            "en modo lectura. Las decisiones del balance no se guardarán en "
+            "Neon, JSON, Gold Standard ni runtime. Las propuestas explícitas "
+            "del diccionario de equipo quedan sólo en el control local y no "
+            "modifican el diccionario original."
         )
 
     catalogo = cargar_catalogo()
     dic_base = cargar_diccionario_base()
 
-    if 'diccionario' not in st.session_state:
-        st.session_state.diccionario = list(dic_base)
+    try:
+        diccionario_efectivo, contexto_diccionario = (
+            _diccionario_efectivo_para_actor_local(dic_base, actor_local)
+            if actor_local is not None else (list(dic_base), "base")
+        )
+    except TeamDictionaryError as exc:
+        st.error(
+            "No se pudo cargar el diccionario privado del equipo. "
+            f"El procesamiento se detuvo para no ignorar sus asignaciones: {exc}"
+        )
+        return
+    if (
+        'diccionario' not in st.session_state
+        or st.session_state.get("team_dictionary_context") != contexto_diccionario
+    ):
+        st.session_state.diccionario = diccionario_efectivo
+        st.session_state["team_dictionary_context"] = contexto_diccionario
     if 'resultados' not in st.session_state or not isinstance(st.session_state.resultados, dict):
         st.session_state.resultados = {}
     if 'metadata_files' not in st.session_state:
@@ -2417,6 +2542,8 @@ def main():
     manifiesto_piloto = None
     with st.sidebar:
         st.header("⚙️ Configuración")
+        if actor_local is not None:
+            render_local_access_sidebar(actor_local)
         release_branch, commit = _trazabilidad_release_local()
         build_date = _build_date()
         persistence_label = "Neon conectado" if _neon_disponible() else "JSON local"
@@ -2426,17 +2553,25 @@ def main():
             f"Rama `{release_branch}` · Commit `{commit}` · Build `{build_date}` · "
             f"Persistencia: **{persistence_label}**"
         )
-        archivos = st.file_uploader(
-            "Balances tributarios", type=['pdf', 'xlsx', 'xls'], accept_multiple_files=True
-        )
-        if _modo_piloto_activo():
-            st.caption(
-                "Antes de procesar, cargue el manifiesto JSON que autoriza "
-                "este lote por contenido."
+        if _tiene_permiso_cuenta_local(Permission.ENTRY_UPLOAD):
+            archivos = st.file_uploader(
+                "Balances tributarios", type=['pdf', 'xlsx', 'xls'],
+                accept_multiple_files=True, key="balance_uploads",
             )
-            manifiesto_piloto = st.file_uploader(
-                "Manifiesto de autorización del piloto (JSON)",
-                type=["json"], key="pilot_manifest_file",
+            if _modo_piloto_activo():
+                st.caption(
+                    "Antes de procesar, cargue el manifiesto JSON que autoriza "
+                    "este lote por contenido."
+                )
+                manifiesto_piloto = st.file_uploader(
+                    "Manifiesto de autorización del piloto (JSON)",
+                    type=["json"], key="pilot_manifest_file",
+                )
+        else:
+            archivos = []
+            st.info(
+                "Este rol no carga balances. En el piloto actual las cargas "
+                "aún no se comparten entre sesiones."
             )
         if archivos and st.session_state.get("document_scope_confirmed"):
             if st.button("Cambiar páginas a analizar"):
@@ -2483,6 +2618,8 @@ def main():
         st.session_state.pilot_manifest_authorizations = {}
         st.session_state.pop("pilot_manifest_context", None)
         st.session_state.pop("pilot_manifest_client_id", None)
+        if actor_local is not None and can_view_team_dictionary(actor_local):
+            render_team_dictionary_view(actor_local, catalogo)
         _mostrar_resumen_catalogo(catalogo)
         return
 
@@ -2676,7 +2813,9 @@ def main():
                             tmp_shadow.write(archivo.read())
                             tmp_shadow.close()
                             sh_path = Path(tmp_shadow.name)
-                            hp_shadow = HomologationPipeline()
+                            hp_shadow = HomologationPipeline(
+                                dictionary_entries=st.session_state.diccionario,
+                            )
                             sh_summary = hp_shadow.process(sh_path)
                             logger_sh = ShadowLogger()
                             comparisons = []
@@ -2716,7 +2855,12 @@ def main():
             archivo for archivo in archivos
             if archivo.name not in st.session_state.resultados
         ]
-        hp = HomologationPipeline() if archivos_nuevos else None
+        hp = (
+            HomologationPipeline(
+                dictionary_entries=st.session_state.diccionario,
+            )
+            if archivos_nuevos else None
+        )
         for archivo in archivos_nuevos:
             if archivo.name not in st.session_state.resultados:
                 with st.spinner(f"Clasificando cuentas de {archivo.name}..."):
@@ -3130,12 +3274,23 @@ def main():
 
     with col_trabajo:
         tab_km = "🧠 Knowledge Manager"
-        vistas = [
-            "📈 Resumen", "🔍 Cola de Revisión", "📋 Balance Normalizado",
-            "📚 Diccionario", "🧠 Aprendizaje", "📊 Analytics",
-            "📖 Conocimiento Documental", "📈 Inteligencia del Dataset",
-            tab_km,
-        ]
+        vistas = ["📈 Resumen"]
+        if _tiene_permiso_cuenta_local(Permission.ACCOUNT_REVIEW):
+            vistas.append("🔍 Cola de Revisión")
+        if _tiene_permiso_cuenta_local(Permission.EXPORT_REVIEW_PACKAGE):
+            vistas.append("📋 Balance Normalizado")
+        if (
+            _tiene_permiso_cuenta_local(Permission.ENTRY_VIEW_OWN)
+            or _tiene_permiso_cuenta_local(Permission.ENTRY_VIEW_TEAM)
+        ):
+            vistas.append("📖 Conocimiento Documental")
+        if actor_local is not None and can_view_team_dictionary(actor_local):
+            vistas.append("🗂️ Diccionario del equipo")
+        if _tiene_permiso_cuenta_local(Permission.GLOBAL_DICTIONARY_EDIT):
+            vistas.extend([
+                "📚 Diccionario", "🧠 Aprendizaje", "📊 Analytics",
+                "📈 Inteligencia del Dataset", tab_km,
+            ])
         vista_solicitada = st.session_state.pop("vista_trabajo_solicitada", None)
         if vista_solicitada in vistas:
             st.session_state["vista_trabajo"] = vista_solicitada
@@ -3162,6 +3317,8 @@ def main():
             st.markdown("Analytics Dashboard (Work in Progress)")
         elif vista == "📖 Conocimiento Documental":
             _tab_conocimiento(archivo_activo, _doc_ctx, meta_activo)
+        elif vista == "🗂️ Diccionario del equipo":
+            render_team_dictionary_view(actor_local, catalogo)
         elif vista == "📈 Inteligencia del Dataset":
             _tab_inteligencia()
         elif vista == tab_km:
@@ -4586,7 +4743,10 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
 
     # Catálogo ordenado por grupos de presentación y sin cuentas no
     # seleccionables (cálculo / TOTAL). Ver catalog_selection.py.
-    opciones_codigo = [''] + opciones_clasificacion(catalogo) + ['➕ NUEVA CATEGORÍA', '🚫 NO INCLUIR']
+    opciones_codigo = [''] + opciones_clasificacion(catalogo)
+    if _tiene_permiso_cuenta_local(Permission.GLOBAL_DICTIONARY_EDIT):
+        opciones_codigo.append('➕ NUEVA CATEGORÍA')
+    opciones_codigo.append('🚫 NO INCLUIR')
 
     checkbox_prefix = f"chk_{doc_key}"
     if st.session_state.get('lote_archivo') != archivo_nombre:
@@ -4607,7 +4767,10 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                 key=f"lote_categoria_{doc_key}"
             )
         with bc2:
-            alcance_lote = st.radio("Alcance", ["Solo este caso", "Agregar al diccionario"], index=1, horizontal=True, key=f"lote_alcance_{doc_key}")
+            alcance_lote = st.radio(
+                "Alcance", ["Solo este caso", _etiqueta_alcance_diccionario()],
+                index=1, horizontal=True, key=f"lote_alcance_{doc_key}",
+            )
         with bc3:
             st.write(""); st.write("")
             confirmar_lote = st.button(f"✅ Confirmar lote ({n_sel})", disabled=(n_sel == 0 or not cat_lote), use_container_width=True)
@@ -4615,6 +4778,13 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
         if confirmar_lote and n_sel > 0 and cat_lote:
             codigo_lote = '__EXCLUIR__' if cat_lote == '🚫 NO INCLUIR' else (cat_lote if cat_lote != '➕ NUEVA CATEGORÍA' else None)
             if codigo_lote:
+                agregar_diccionario_lote = (
+                    "diccionario" in alcance_lote.lower()
+                    and codigo_lote != '__EXCLUIR__'
+                )
+                propuesta_equipo_lote = (
+                    agregar_diccionario_lote and _usar_diccionario_equipo_local()
+                )
                 incompatibles = [
                     idx_lote for idx_lote in st.session_state.lote_seleccion
                     if codigo_lote != '__EXCLUIR__'
@@ -4658,17 +4828,30 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                         'account_name': nombre_orig,
                         'validated_code': codigo_lote,
                         'source': 'validacion_humana_lote',
-                        'add_to_dictionary': "diccionario" in alcance_lote,
+                        'add_to_dictionary': (
+                            agregar_diccionario_lote and not propuesta_equipo_lote
+                        ),
                         'suggested_code': codigo_sugerido,
                         'suggested_method': metodo_sugerido,
                         'suggested_confidence': confianza_sugerida,
                         'source_file': archivo_nombre,
                     })
-                    if "diccionario" in alcance_lote:
-                        entrada = {'cuenta_original': nombre_orig, 'codigo_estandar': codigo_lote, 'fuente': 'validacion_humana_lote'}
-                        st.session_state.diccionario.append(entrada)
-                        st.session_state.correcciones.append(entrada)
-                    if "diccionario" in alcance_lote:
+                    if agregar_diccionario_lote:
+                        if propuesta_equipo_lote:
+                            _proponer_para_diccionario_equipo(
+                                nombre=nombre_orig,
+                                codigo=codigo_lote,
+                                nota="Confirmación en lote por analista.",
+                            )
+                        else:
+                            entrada = {
+                                'cuenta_original': nombre_orig,
+                                'codigo_estandar': codigo_lote,
+                                'fuente': 'validacion_humana_lote',
+                            }
+                            st.session_state.diccionario.append(entrada)
+                            st.session_state.correcciones.append(entrada)
+                    if agregar_diccionario_lote:
                         propagar_clasificacion_resultados(
                             nombre_orig, codigo_lote,
                             'validacion_humana_lote_propagada',
@@ -4677,7 +4860,11 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                     procesados += 1
                 persistido = _persistir_validaciones_lote(validaciones_lote)
                 fallback_json_lote = not persistido
-                if "diccionario" in alcance_lote and fallback_json_lote:
+                if (
+                    agregar_diccionario_lote
+                    and not propuesta_equipo_lote
+                    and fallback_json_lote
+                ):
                     with open(BASE_DIR / 'diccionario.json', 'w', encoding='utf-8') as f:
                         json.dump(st.session_state.diccionario, f, ensure_ascii=False, indent=2)
                 st.session_state.lote_seleccion = set()
@@ -4969,7 +5156,7 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                     alcance = st.radio(
                         "¿Aplicar esta clasificación?",
                         ["Solo para este caso",
-                         "Agregar al diccionario (aplica a casos futuros iguales)"],
+                         f"{_etiqueta_alcance_diccionario()} (aplica a casos futuros iguales)"],
                         index=1 if row.get('requiere_revision', False) else 0,
                         key=f"alc_{doc_key}_{idx}", horizontal=True
                     )
@@ -4978,8 +5165,19 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
 
                 if st.button("✅ Confirmar", key=f"btn_{doc_key}_{idx}"):
                     codigo_final = None
+                    agregar_diccionario = "diccionario" in alcance.lower()
+                    propuesta_equipo = (
+                        agregar_diccionario and _usar_diccionario_equipo_local()
+                    )
 
                     if es_nueva_cat:
+                        if not _tiene_permiso_cuenta_local(
+                                Permission.GLOBAL_DICTIONARY_EDIT):
+                            st.error(
+                                "Solo el administrador puede crear una categoría "
+                                "del catálogo original."
+                            )
+                            st.stop()
                         if nuevo_codigo and nuevo_nombre_cat:
                             nueva_entrada = {
                                 'codigo_estandar': nuevo_codigo.strip().upper(),
@@ -5029,7 +5227,7 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                         st.session_state.resultados[archivo_nombre].at[
                             idx, 'propagacion_origen_archivo'
                         ] = ''
-                        if "diccionario" in alcance:
+                        if agregar_diccionario and not propuesta_equipo:
                             entrada_exclusion = {
                                 'cuenta_original': _nombre_mostrar(row),
                                 'codigo_estandar': '__EXCLUIR__',
@@ -5039,15 +5237,21 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                         persistido = _persistir_validacion(
                             nombre=_nombre_mostrar(row), codigo='__EXCLUIR__',
                             fuente='excluido_analista',
-                            agregar_diccionario="diccionario" in alcance,
+                            agregar_diccionario=(
+                                agregar_diccionario and not propuesta_equipo
+                            ),
                             sugerido=row['codigo_clasificado'] or None,
                             metodo=row['metodo'], confianza=float(row['confianza']),
                             archivo=archivo_nombre,
                         )
-                        if "diccionario" in alcance and not persistido:
+                        if (
+                            agregar_diccionario
+                            and not propuesta_equipo
+                            and not persistido
+                        ):
                             with open(BASE_DIR / 'diccionario.json', 'w', encoding='utf-8') as f:
                                 json.dump(st.session_state.diccionario, f, ensure_ascii=False, indent=2)
-                        if "diccionario" in alcance:
+                        if agregar_diccionario:
                             propagar_clasificacion_resultados(
                                 row['nombre_original'],
                                 '__EXCLUIR__',
@@ -5082,26 +5286,40 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                         persistido = _persistir_validacion(
                             nombre=row['nombre_original'], codigo=codigo_final,
                             fuente='validacion_humana',
-                            agregar_diccionario="diccionario" in alcance,
+                            agregar_diccionario=(
+                                agregar_diccionario and not propuesta_equipo
+                            ),
                             sugerido=row['codigo_clasificado'] or None,
                             metodo=row['metodo'], confianza=float(row['confianza']),
                             archivo=archivo_nombre,
                         )
-                        if "diccionario" in alcance:
-                            nuevo_dic = {
-                                'cuenta_original': row['nombre_original'],
-                                'codigo_estandar': codigo_final,
-                                'fuente': 'validacion_humana'
-                            }
-                            st.session_state.diccionario.append(nuevo_dic)
-                            st.session_state.correcciones.append(nuevo_dic)
-                            if not persistido:
-                                with open(BASE_DIR / 'diccionario.json', 'w', encoding='utf-8') as f:
-                                    json.dump(st.session_state.diccionario, f, ensure_ascii=False, indent=2)
-                            st.toast(f"'{_nombre_mostrar(row)[:35]}' → {codigo_final} guardado 📚", icon="✅")
+                        if agregar_diccionario:
+                            if propuesta_equipo:
+                                _proponer_para_diccionario_equipo(
+                                    nombre=row['nombre_original'],
+                                    codigo=codigo_final,
+                                    nota="Confirmación individual por analista.",
+                                )
+                                st.toast(
+                                    f"'{_nombre_mostrar(row)[:35]}' → {codigo_final} "
+                                    "propuesto para el equipo",
+                                    icon="✅",
+                                )
+                            else:
+                                nuevo_dic = {
+                                    'cuenta_original': row['nombre_original'],
+                                    'codigo_estandar': codigo_final,
+                                    'fuente': 'validacion_humana'
+                                }
+                                st.session_state.diccionario.append(nuevo_dic)
+                                st.session_state.correcciones.append(nuevo_dic)
+                                if not persistido:
+                                    with open(BASE_DIR / 'diccionario.json', 'w', encoding='utf-8') as f:
+                                        json.dump(st.session_state.diccionario, f, ensure_ascii=False, indent=2)
+                                st.toast(f"'{_nombre_mostrar(row)[:35]}' → {codigo_final} guardado 📚", icon="✅")
                         else:
                             st.toast(f"'{_nombre_mostrar(row)[:35]}' → {codigo_final} (solo este caso)", icon="✅")
-                        if "diccionario" in alcance:
+                        if agregar_diccionario:
                             propagar_clasificacion_resultados(
                                 row['nombre_original'], codigo_final,
                                 'validacion_humana_propagada',
@@ -5994,6 +6212,10 @@ def _tab_aprendizaje():
 
 
 def _km_usuario() -> str:
+    actor = st.session_state.get("local_access_actor")
+    actor_id = getattr(actor, "actor_id", None)
+    if actor_id:
+        return str(actor_id)
     return str(st.session_state.get("km_usuario", "analista"))
 
 

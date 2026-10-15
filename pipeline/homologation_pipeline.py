@@ -6,7 +6,7 @@ import re
 import time
 import unicodedata
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable, Mapping
 
 from rapidfuzz import fuzz
 
@@ -134,12 +134,16 @@ class HomologationPipeline:
         self,
         db_path: str | Path = "gold_standard.db",
         features: CMCCFeatureFlags | None = None,
+        dictionary_entries: Iterable[Mapping[str, Any]] | None = None,
     ) -> None:
         self._parser = ParserPDF()
         self._code_classifier = ClasificadorCodigo()
         self._rule_processor = ProcesadorReglasEspeciales()
         self._learning_engine = LearningEngine(db_path)
-        self._dictionary: list[dict[str, str]] = self._load_dictionary()
+        self._dictionary: list[dict[str, str]] = (
+            [dict(entry) for entry in dictionary_entries]
+            if dictionary_entries is not None else self._load_dictionary()
+        )
         self._semantic_engine = SemanticEngine()
         self._cmcc_classifier = CMCCClassifier()
         self._decision_engine = DecisionEngine()

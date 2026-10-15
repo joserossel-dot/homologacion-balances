@@ -8,18 +8,21 @@ objetivo es comprobar el flujo de lectura, extracción, clasificación,
 cuadratura y revisión analista bajo condiciones controladas.
 
 No autoriza una operación productiva, el aprendizaje automático, promociones
-de conocimiento, cambios al diccionario ni integración automática de un
-resultado con los procesos del cliente.
+automáticas de conocimiento, cambios al diccionario original ni integración
+automática de un resultado con los procesos del cliente.
 
 El piloto se ejecuta con `PILOT_MODE=1`. La evidencia automatizada actual
 cubre las siguientes protecciones de aplicación:
 
 - Las funciones de persistencia de validaciones, validaciones en lote y
   catálogo no instancian Neon en modo piloto.
-- Las decisiones de la sesión se conservan en el estado de sesión de la
-  aplicación.
+- Las decisiones de balances se conservan en el estado de sesión de la
+  aplicación. Cuando `LOCAL_ACCESS_MODE=1`, el control local puede conservar
+  cuentas, roles y propuestas explícitas del diccionario privado de un equipo;
+  no conserva PDFs, balances ni resultados extraídos.
 - El diccionario operativo puede leerse para usar el conocimiento vigente,
-  pero no se modifica desde el piloto.
+  pero el diccionario original no se modifica desde el piloto. Una asignación
+  privada de equipo sólo se aplica a ese equipo y exige activación humana.
 - El registro shadow, la gestión de aprendizaje, promociones, rechazos y
   rollbacks se deshabilitan en la interfaz durante el piloto.
 - El único punto de entrada autorizado es Streamlit. La API FastAPI se
@@ -62,8 +65,9 @@ piloto deja constancia de la excepción en el informe de cierre.
    deducirlo del nombre del archivo. Si el año no puede confirmarse, las
    reglas dependientes del período permanecen en revisión.
 6. Registrar el commit, rama, fecha y responsable de la ejecución. No cambiar
-   el código, el diccionario ni la configuración durante una misma tanda del
-   piloto.
+   el código, el diccionario original ni la configuración durante una misma
+   tanda del piloto. Si se activa o revoca una asignación privada de equipo,
+   registrar su identificador y volver a ejecutar el documento afectado.
 7. Confirmar que hay como máximo diez documentos con estado `AUTHORIZED` y
    que todos pertenecen al único cliente autorizado.
 8. Confirmar `PILOT_MODE=1` antes de abrir la aplicación. Si no puede
@@ -125,8 +129,11 @@ recibe `PILOT_MODE=1`. No debe iniciarse como alternativa al comando anterior.
    columna de origen, naturaleza efectiva, código elegido y el PDF o Excel
    original.
 5. Las decisiones tomadas durante la sesión se documentan en el paquete de
-   revisión externo. No se promueven al diccionario, Gold Standard, runtime ni
-   a una base de conocimiento desde el piloto.
+   revisión externo. No se promueven al diccionario original, Gold Standard,
+   runtime ni a una base de conocimiento desde el piloto. La única excepción
+   es una propuesta humana explícita al diccionario privado del equipo: queda
+   local, auditada y no se incorpora al original sin una decisión posterior
+   del Administrador.
 6. Toda exportación queda marcada como `PILOTO`, con identificador opaco,
    SHA-256 de origen, commit de ejecución y resultado de la revisión. No se
    integra automáticamente a procesos del cliente.
@@ -179,9 +186,10 @@ Detener todos los documentos pendientes y escalar al responsable cuando:
 - Falta `PILOT_TMPDIR`, no cumple las restricciones de acceso, se detecta un
   temporal del piloto fuera de ese directorio o quedan residuos temporales al
   cierre de una sesión sin una justificación y limpieza registrada.
-- Se detecta una escritura persistente fuera de los temporales técnicos
-  autorizados, una promoción, aprendizaje, rollback o cambio de diccionario
-  atribuible a la sesión de piloto.
+- Se detecta una escritura persistente no autorizada fuera de los temporales
+  técnicos o de la base local privada de accesos y diccionario de equipo, una
+  promoción, aprendizaje, rollback o cambio del diccionario original atribuible
+  a la sesión de piloto.
 - Cambia el commit, la rama, la configuración o el manifiesto sin una nueva
   autorización documentada.
 - Un original, una exportación con datos reales o un identificador real de
