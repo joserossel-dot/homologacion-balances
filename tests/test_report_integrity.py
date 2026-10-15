@@ -90,6 +90,30 @@ def test_controles_impresos_no_suman_y_resultado_declarado_se_contrasta():
     assert any('PAT.04' in msg for msg in result['problemas'])
 
 
+def test_control_emision_usa_cierre_fuente_sin_duplicar_pat04():
+    rows = [
+        cuenta('Caja', 150, 'activo', 'AC.01'),
+        cuenta('Proveedor', 10, 'pasivo', 'PC.01'),
+        cuenta('Capital', 20, 'pasivo', 'PAT.01'),
+        cuenta('Saldo patrimonial previo', 20, 'pasivo', 'PAT.04'),
+        cuenta('Ventas', 100, 'ganancia', 'ER.01'),
+    ]
+
+    control = _control_emision(
+        pd.DataFrame(rows),
+        catalogo_local(),
+        {
+            'cuadra': True,
+            'cuadratura_homologada': {
+                'resultado_final_fuente_incorporado': True,
+            },
+        },
+    )
+
+    assert control['definitivo'] is True
+    assert control['resultado']['problemas'] == []
+
+
 def test_enforced_no_certifica_y_shadow_no_bloquea_por_si_solo():
     df = pd.DataFrame(afuminsal(False))
     assert not _control_emision(df, catalogo_local(), {'cuadra': True},
@@ -225,9 +249,18 @@ def report_app(rows):
     import streamlit as st
     import pandas as pd
     import app_validacion as app
+    from types import SimpleNamespace
     from extractor_metadata import MetadataEmpresa
     from reporting_integrity import catalogo_local
     st.session_state.setdefault('metadata_files', {'caso.pdf': MetadataEmpresa(moneda='$')})
+    st.session_state.setdefault('extraction_certifications', {
+        'caso.pdf': SimpleNamespace(
+            estado='certificada',
+            metodo='coordinates_8_amounts',
+            orientacion_certificada=True,
+            razones=[],
+        ),
+    })
     previous = app.st.download_button
     def capture(label, **kwargs):
         st.session_state['export_label'] = label
@@ -239,15 +272,32 @@ def report_app(rows):
         app.st.download_button = previous
 
 
+@pytest.mark.parametrize('pilot_mode', [False, True], ids=['normal', 'piloto'])
 @pytest.mark.parametrize('mal', [True, False])
-def test_reporte_real_ui_y_excel(mal, monkeypatch):
+def test_reporte_real_ui_y_excel(mal, pilot_mode, monkeypatch):
     monkeypatch.setenv('QUALITY_CONTROL_ENFORCE_EXPORT', 'false')
+    if pilot_mode:
+        monkeypatch.setenv('PILOT_MODE', '1')
+    else:
+        monkeypatch.delenv('PILOT_MODE', raising=False)
     at = AppTest.from_function(report_app, args=(afuminsal(mal),)).run(timeout=20)
     assert not at.exception
     download = at.session_state.export_kwargs
-    assert ('BORRADOR' in download['file_name']) is mal
     wb = load_workbook(BytesIO(download['data']), data_only=True)
-    assert ('BORRADOR' in wb['Balance Normalizado']['F1'].value) is mal
+    encabezado = wb['Balance Normalizado']['F1'].value
+    if pilot_mode:
+        assert download['file_name'].startswith('PILOTO-')
+        assert encabezado == 'PILOTO: PAQUETE PROVISIONAL, NO INTEGRAR'
+        assert 'DEFINITIVO' not in encabezado
+        assert 'LISTO PARA INTEGRAR' not in encabezado
+    else:
+        assert ('REVISION-' in download['file_name']) is mal
+        assert (
+            'PAQUETE DE REVISIÓN ANALISTA' in wb['Balance Normalizado']['F1'].value
+        ) is mal
+        assert (
+            'DEFINITIVO: LISTO PARA INTEGRAR' in wb['Balance Normalizado']['F1'].value
+        ) is (not mal)
     assert wb['Balance Normalizado']['C7'].value == 'Monto Total ($)'
     assert 'Control de emisión' in wb.sheetnames
     rows = list(wb['Balance Normalizado'].iter_rows(min_row=8, max_row=7+len(catalogo_local()), values_only=True))

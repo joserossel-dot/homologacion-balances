@@ -85,8 +85,33 @@ def detectar_años_y_monedas(lineas: list[str]) -> tuple[list[str], list[str]]:
     return años, monedas
 
 
-def split_side_by_side(line: str) -> list[str]:
-    tokens = line.split()
+def _normalizar_ruido_terminal_monetario(linea: str) -> str:
+    """Quita sólo puntuación OCR pegada al último importe de una fila.
+
+    Un sufijo como ``0!`` no representa una novena columna ni un signo
+    contable. La regla es intencionalmente estrecha: no toca puntuación
+    separada, símbolos monetarios ni tokens que incluyan otros caracteres
+    (por ejemplo, ``12%``).
+    """
+    return re.sub(r"(?<=\d)[!¿:]+(?=\s*$)", "", linea)
+
+
+def split_side_by_side(
+    line: str,
+    *,
+    permitir_corte_con_ocho_columnas: bool = False,
+) -> list[str]:
+    """Separa tablas laterales cuando la estructura no es ambigua.
+
+    Una fila sin código que contiene un número en su propia glosa tiene el
+    mismo patrón textual que dos tablas adyacentes. Con ocho columnas finales,
+    la opción segura es conservarla completa por defecto. El llamador puede
+    solicitar el corte candidato y validar después que ambos fragmentos traen
+    códigos contables independientes.
+    """
+    # Usa el texto saneado para decidir el corte y para los fragmentos que se
+    # entregan al parseo. Si no hay corte, conserva ``line`` sin modificar.
+    tokens = _normalizar_ruido_terminal_monetario(line).split()
     if len(tokens) < 6:
         return [line]
 
@@ -95,6 +120,7 @@ def split_side_by_side(line: str) -> list[str]:
     # el patrón textual T-N-T-N y antes se confundían con dos tablas paralelas.
     # Si las ocho columnas están presentes, la fila es canónica y no se parte.
     trailing_amounts = 0
+    terminal_noise = True
     for token in reversed(tokens):
         cleaned = token.replace("$", "").strip()
         if (
@@ -102,11 +128,21 @@ def split_side_by_side(line: str) -> list[str]:
             or re.fullmatch(r"-?\(?\d[\d.,]*\)?", cleaned)
         ):
             trailing_amounts += 1
+            terminal_noise = False
+            continue
+        # Tesseract puede dejar una marca de escaneo al final de una fila
+        # completa (por ejemplo ``!`` o ``¿``). No es una celda ni parte de
+        # la glosa: al ignorarla aquí se preservan las ocho posiciones ya
+        # observadas, sin agregar ni alterar importes. Sólo se omite mientras
+        # sea estrictamente terminal: una puntuación entre dos grupos conserva
+        # la señal de que podrían ser tablas paralelas.
+        if (
+            terminal_noise
+            and cleaned
+            and not re.search(r"[A-Za-z0-9]", cleaned)
+        ):
             continue
         break
-    if trailing_amounts >= len(RAW_MONETARY_COLUMNS):
-        return [line]
-
     # Classify tokens
     types = []
     for t in tokens:
@@ -132,10 +168,13 @@ def split_side_by_side(line: str) -> list[str]:
     # Build the collapsed pattern string
     pattern = "".join(g[0] for g in groups)
 
-    # Check if we have a side-by-side transition 'TNTN'
+    # Check if we have a side-by-side transition 'TNTN'. Se calcula el corte
+    # antes de decidir que ocho importes finales vuelven canónica a la fila:
+    # un escaneo de dos zonas puede contener una segunda tabla completa al
+    # lado derecho.
+    split_token_idx = -1
     if "TNTN" in pattern:
         t_count = 0
-        split_token_idx = -1
         for g_idx, (g_type, g_start, g_end) in enumerate(groups):
             if g_type == 'T':
                 t_count += 1
@@ -148,9 +187,65 @@ def split_side_by_side(line: str) -> list[str]:
                 prev_tok = tokens[split_token_idx - 1]
                 if re.match(r'^\d+[\d.\-]*$', prev_tok) and len(prev_tok) >= 3:
                     split_token_idx -= 1
-            left_line = " ".join(tokens[:split_token_idx]).strip(' .-–—−')
-            right_line = " ".join(tokens[split_token_idx:]).strip(' .-–—−')
-            return [left_line, right_line]
+
+    if trailing_amounts >= len(RAW_MONETARY_COLUMNS):
+        if not permitir_corte_con_ocho_columnas:
+            return [line]
+        # La protección original conserva una fila tributaria canónica con
+        # guiones internos en la glosa. Sólo se deja pasar el corte cuando la
+        # porción izquierda termina en un importe observado, no en un guion o
+        # marcador OCR, y no parece el patrón de una cuenta codificada cuyo
+        # nombre contiene un número ("Cuenta 10 CP", por ejemplo).
+        left_ends_in_amount = (
+            split_token_idx > 0
+            and bool(re.fullmatch(
+                r"-?\(?\d[\d.,]*\)?",
+                tokens[split_token_idx - 1].replace("$", "").strip(),
+            ))
+        )
+        left_amount_digits = (
+            len(re.sub(r"\D", "", tokens[split_token_idx - 1]))
+            if left_ends_in_amount else 0
+        )
+
+        def parece_codigo_cuenta(token: str) -> bool:
+            candidato = token.strip()
+            return bool(re.fullmatch(
+                r"(?:\d{3,}|\d{1,2}(?:[.\-/]\d{1,3}){2,})",
+                candidato,
+            ))
+
+        def inicia_fila_descriptiva(index: int) -> bool:
+            """Evita cortar dentro de las ocho celdas de una fila canónica."""
+            if index >= len(tokens):
+                return False
+            candidato = tokens[index].strip()
+            letras = re.sub(r"[^A-Za-zÁÉÍÓÚÑáéíóúñ]", "", candidato)
+            if len(letras) >= 2:
+                return True
+            if not parece_codigo_cuenta(candidato) or index + 1 >= len(tokens):
+                return False
+            letras_siguiente = re.sub(
+                r"[^A-Za-zÁÉÍÓÚÑáéíóúñ]", "", tokens[index + 1],
+            )
+            return len(letras_siguiente) >= 2
+
+        corte_lateral_observado = (
+            left_ends_in_amount
+            and left_amount_digits >= 2
+            and inicia_fila_descriptiva(split_token_idx)
+            and not (
+                parece_codigo_cuenta(tokens[0])
+                and not parece_codigo_cuenta(tokens[split_token_idx])
+            )
+        )
+        if not corte_lateral_observado:
+            return [line]
+
+    if split_token_idx != -1:
+        left_line = " ".join(tokens[:split_token_idx]).strip(' .-–—−')
+        right_line = " ".join(tokens[split_token_idx:]).strip(' .-–—−')
+        return [left_line, right_line]
 
     return [line]
 
@@ -241,12 +336,12 @@ def _agrupar_palabras_por_linea(words: list[dict], tolerancia: float = 2.5) -> l
 
 _HEADER_ALIASES = {
     "nombre": {"CUENTA", "CUENTAS", "NOMBRE", "DESCRIPCION", "DETALLE"},
-    "debitos": {"DEBITOS", "DEBITO", "DEBE", "PEBITOS", "DEBIT0S"},
+    "debitos": {"DEBITOS", "DEBITO", "DEBE", "DCHE", "PEBITOS", "DEBIT0S"},
     "creditos": {"CREDITOS", "CREDITO", "HABER"},
     "saldo_deudor": {"DEUDOR", "SDEUDOR", "SALDODEUDOR"},
-    "saldo_acreedor": {"ACREEDOR", "ACREEEDOR", "SACREEDOR", "SALDOACREEDOR"},
-    "activo": {"ACTIVO", "ACTIVOS"},
-    "pasivo": {"PASIVO", "PASIVOS", "PASIWO", "PATRIMONIO"},
+    "saldo_acreedor": {"ACREEDOR", "ACREEEDOR", "SACREEDOR", "SALDOACREEDOR", "VERCEDOR", "VERVEDOR"},
+    "activo": {"ACTIVO", "ACTIVOS", "ACLIVO"},
+    "pasivo": {"PASIVO", "PASIVOS", "PASIWO", "PASIVA", "PATRIMONIO"},
     "perdida": {"PERDIDA", "PERDIDAS"},
     "ganancia": {"GANANCIA", "GANANCIAS"},
 }
@@ -254,16 +349,26 @@ _HEADER_ALIASES = {
 
 def _extraer_tabla_balance_por_coordenadas(
     page, column_centers: Optional[list[float]] = None,
-) -> tuple[list[str], Optional[list[float]]]:
+    *, incluir_evidencia_celdas: bool = False,
+) -> tuple:
     """Extrae Cuenta + ocho importes usando encabezados y geometría.
 
     Acepta documentos con o sin código y sinónimos comunes de encabezado. El
     layout detectado se puede reutilizar en páginas continuadas sin encabezado.
     """
+    def resultado(
+        lineas_resultado: list[str],
+        centros_resultado: Optional[list[float]],
+        evidencias_resultado: list[dict[str, Any]],
+    ) -> tuple:
+        if incluir_evidencia_celdas:
+            return lineas_resultado, centros_resultado, evidencias_resultado
+        return lineas_resultado, centros_resultado
+
     try:
         words = page.extract_words(use_text_flow=False, keep_blank_chars=False) or []
     except Exception:
-        return [], column_centers
+        return resultado([], column_centers, [])
     grupos = _agrupar_palabras_por_linea(words)
     header_words: list[dict] | None = None
     detected: dict[str, dict] = {}
@@ -301,20 +406,84 @@ def _extraer_tabla_balance_por_coordenadas(
         if header_words:
             break
     if not header_words and not column_centers:
-        return [], None
+        return resultado([], None, [])
 
+    inherited_amount_distance: Optional[float] = None
+    continuation_body_start_top: Optional[float] = None
     if not header_words and column_centers:
         # No heredar una tabla de ocho columnas al comenzar otro estado de
         # una sola columna (p. ej. balance tributario seguido del clasificado).
+        # Una continuación auténtica, sin embargo, puede imprimir sólo los
+        # importes no nulos en cada fila. Para distinguir ambos casos no basta
+        # contar valores por fila: exigimos varias filas dispersas y cobertura
+        # de al menos seis de las ocho posiciones monetarias heredadas.
         numeric_counts = []
-        for group in grupos:
-            if any(re.search(r"[A-Za-z]", str(w["text"])) for w in group):
-                numeric_counts.append(sum(
-                    bool(PATRON_MONTOS.fullmatch(normalizar_token_ocr(str(w["text"]))))
-                    for w in group
-                ))
-        if sum(1 <= n <= 3 for n in numeric_counts) >= 5 and not any(n >= 6 for n in numeric_counts):
-            return [], None
+        sparse_rows = 0
+        observed_amount_columns: set[int] = set()
+        sparse_candidate_indices: list[int] = []
+        anchored_counts_by_group: dict[int, int] = {}
+        inherited_amount_centers = list(column_centers)[1:]
+        if len(inherited_amount_centers) != len(RAW_MONETARY_COLUMNS):
+            return resultado([], column_centers, [])
+        minimum_gap = min(
+            right - left
+            for left, right in zip(
+                inherited_amount_centers, inherited_amount_centers[1:],
+            )
+        )
+        max_inherited_distance = minimum_gap * 0.48
+        inherited_amount_distance = max_inherited_distance
+        for group_index, group in enumerate(grupos):
+            if not any(re.search(r"[A-Za-z]", str(w["text"])) for w in group):
+                continue
+            amounts_in_group = []
+            anchored_amounts = 0
+            for word in group:
+                token = normalizar_token_ocr(str(word["text"]))
+                if not PATRON_MONTOS.fullmatch(token):
+                    continue
+                xmid = (float(word["x0"]) + float(word["x1"])) / 2
+                nearest = min(
+                    range(len(inherited_amount_centers)),
+                    key=lambda index: abs(xmid - inherited_amount_centers[index]),
+                )
+                if abs(xmid - inherited_amount_centers[nearest]) <= max_inherited_distance:
+                    observed_amount_columns.add(nearest)
+                    anchored_amounts += 1
+                amounts_in_group.append(word)
+            amount_count = len(amounts_in_group)
+            numeric_counts.append(amount_count)
+            anchored_counts_by_group[group_index] = anchored_amounts
+            if 4 <= anchored_amounts <= 5:
+                sparse_rows += 1
+                sparse_candidate_indices.append(group_index)
+        sparse_eight_column_continuation = (
+            sparse_rows >= 3 and len(observed_amount_columns) >= 6
+        )
+        if sparse_eight_column_continuation:
+            # Empieza en la primera fila que demuestra ser parte de la grilla,
+            # no en los metadatos o encabezados OCR que preceden la tabla. Se
+            # recuperan también las filas inmediatamente anteriores que tienen
+            # uno a tres importes anclados: una cuenta válida puede comenzar
+            # con menos valores impresos que las filas posteriores.
+            first_body_index = min(sparse_candidate_indices)
+            while first_body_index > 0:
+                previous_index = first_body_index - 1
+                previous_top = float(grupos[previous_index][0]["top"])
+                current_top = float(grupos[first_body_index][0]["top"])
+                if (
+                    anchored_counts_by_group.get(previous_index, 0) < 1
+                    or current_top - previous_top > 24
+                ):
+                    break
+                first_body_index = previous_index
+            continuation_body_start_top = float(grupos[first_body_index][0]["top"])
+        if (
+            sum(1 <= n <= 4 for n in numeric_counts) >= 5
+            and not any(n >= 6 for n in numeric_counts)
+            and not sparse_eight_column_continuation
+        ):
+            return resultado([], None, [])
 
     if header_words:
         ordered = [detected["nombre"]] + [detected[key] for key in RAW_MONETARY_COLUMNS]
@@ -325,14 +494,21 @@ def _extraer_tabla_balance_por_coordenadas(
     else:
         centers = list(column_centers or [])
     if len(centers) != 9:
-        return [], column_centers
+        return resultado([], column_centers, [])
     name_center = centers[0]
     amount_centers = centers[1:]
     text_boundary = (name_center + amount_centers[0]) / 2
     header_bottom = max(float(w["top"]) for w in header_words) if header_words else -1.0
     lineas: list[str] = []
-    for grupo in grupos:
+    evidencias_celdas: list[dict[str, Any]] = []
+    control_fisico_pendiente: Optional[dict[str, Any]] = None
+    for indice_grupo, grupo in enumerate(grupos):
         if float(grupo[0]["top"]) <= header_bottom + 1.5:
+            continue
+        if (
+            continuation_body_start_top is not None
+            and float(grupo[0]["top"]) < continuation_body_start_top
+        ):
             continue
         text_words: list[dict] = []
         amount_cells: list[list[dict]] = [[] for _ in range(8)]
@@ -365,32 +541,141 @@ def _extraer_tabla_balance_por_coordenadas(
             )
             if es_cero_en_celda:
                 es_monto = True
-            if not es_monto or float(word["x1"]) < tail_boundary:
-                text_words.append(word)
-                continue
             nearest = min(
                 range(len(amount_centers)),
                 key=lambda index: abs(xmid - amount_centers[index]),
             )
+            if (
+                not es_monto
+                or float(word["x1"]) < tail_boundary
+                or (
+                    inherited_amount_distance is not None
+                    and abs(xmid - amount_centers[nearest])
+                    > inherited_amount_distance
+                )
+            ):
+                text_words.append(word)
+                continue
             amount_cells[nearest].append(word)
         text_tokens = [str(w["text"]) for w in sorted(text_words, key=lambda w: w["x0"])]
         code = ""
         if text_tokens and re.fullmatch(r"\d{4,10}|\d+(?:[.-]\d+){1,}", text_tokens[0]):
             code = text_tokens.pop(0)
         name = " ".join(text_tokens).strip()
-        if not name:
-            continue
         amounts = []
+        celdas_evidencia: list[Optional[dict[str, Any]]] = []
         for cell in amount_cells:
             token = "".join(str(w["text"]) for w in sorted(cell, key=lambda w: w["x0"])).strip()
             token_normalizado = normalizar_token_ocr(token).replace("$", "")
             amounts.append(
-                token if token != "-" and PATRON_MONTOS.fullmatch(token_normalizado)
+                token_normalizado
+                if token != "-" and PATRON_MONTOS.fullmatch(token_normalizado)
                 else "0"
             )
+            if not cell:
+                celdas_evidencia.append(None)
+                continue
+            celdas_evidencia.append({
+                "token": token,
+                "bbox": (
+                    min(float(w["x0"]) for w in cell),
+                    min(float(w.get("image_top", w["top"])) for w in cell),
+                    max(float(w["x1"]) for w in cell),
+                    max(float(w.get("image_bottom", w["top"])) for w in cell),
+                ),
+            })
+        if name:
+            name = _normalizar_etiqueta_control_ocr(name, celdas_evidencia)
+        if not header_words and not any(amount_cells):
+            # Sin cabecera detectada, una glosa sin importe posicionado no
+            # constituye evidencia suficiente de una cuenta. Evita incorporar
+            # metadatos iniciales y leyendas de pie de página como cuentas.
+            control_fisico_pendiente = None
+            continue
+        if not name:
+            if control_fisico_pendiente is not None:
+                anteriores = control_fisico_pendiente["celdas"]
+                indices_anteriores = {
+                    indice for indice, celda in enumerate(anteriores)
+                    if celda is not None
+                }
+                indices_actuales = {
+                    indice for indice, celda in enumerate(celdas_evidencia)
+                    if celda is not None
+                }
+                if (
+                    len(indices_anteriores) == 4
+                    and len(indices_actuales) == 4
+                    and not indices_anteriores.intersection(indices_actuales)
+                    and indices_anteriores.union(indices_actuales)
+                    == set(range(len(RAW_MONETARY_COLUMNS)))
+                ):
+                    importes_anteriores = control_fisico_pendiente["importes"]
+                    importes_combinados = [
+                        importes_anteriores[indice]
+                        if anteriores[indice] is not None else amounts[indice]
+                        for indice in range(len(RAW_MONETARY_COLUMNS))
+                    ]
+                    celdas_combinadas = [
+                        anteriores[indice] or celdas_evidencia[indice]
+                        for indice in range(len(RAW_MONETARY_COLUMNS))
+                    ]
+                    indice_linea = int(control_fisico_pendiente["indice"])
+                    nombre_control = str(control_fisico_pendiente["nombre"])
+                    linea_combinada = (
+                        f"{nombre_control} {' '.join(importes_combinados)}"
+                    )
+                    lineas[indice_linea] = linea_combinada
+                    evidencias_celdas[indice_linea] = {
+                        "linea": linea_combinada,
+                        "celdas": celdas_combinadas,
+                    }
+                    control_fisico_pendiente = None
+                    continue
+            siguiente_texto = ""
+            for siguiente_grupo in grupos[indice_grupo + 1:]:
+                candidato = _texto_palabras_ocr(siguiente_grupo)
+                if re.search(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]", candidato):
+                    siguiente_texto = candidato
+                    break
+            if not (
+                _fila_subtotal_anonima(" ".join(amounts))
+                and _es_puente_resultado(siguiente_texto)
+                and all(amount_cells)
+            ):
+                control_fisico_pendiente = None
+                continue
+            # Algunos formatos dejan el subtotal de ocho columnas sin rótulo
+            # justo antes del resultado del ejercicio. La etiqueta sólo
+            # identifica ese control observado; no completa ni altera cifras.
+            name = "SUBTOTAL SIN ETIQUETA"
         prefix = f"{code} " if code else ""
-        lineas.append(f"{prefix}{name} {' '.join(amounts)}")
-    return lineas, centers
+        linea = f"{prefix}{name} {' '.join(amounts)}"
+        lineas.append(linea)
+        evidencias_celdas.append({
+            "linea": linea,
+            "celdas": celdas_evidencia,
+        })
+        nombre_control = _sin_acentos(name).lower().strip()
+        if (
+            re.match(r"^(?:total(?:es)?|sub[-\s]?total(?:es)?)\b", nombre_control)
+            and sum(celda is not None for celda in celdas_evidencia) == 4
+        ):
+            control_fisico_pendiente = {
+                "indice": len(lineas) - 1,
+                "nombre": name,
+                "importes": list(amounts),
+                "celdas": list(celdas_evidencia),
+            }
+        else:
+            control_fisico_pendiente = None
+        # Un control final completo delimita la tabla de esta página. Todo lo
+        # que queda después son firmas, notas o metadatos que no deben entrar
+        # como cuentas. La condición exige los ocho valores físicos y un
+        # rótulo final inequívoco, por lo que no corta subtotales intermedios.
+        if _es_control_final_ocho_columnas(name, celdas_evidencia):
+            break
+    return resultado(lineas, centers, evidencias_celdas)
 
 
 def _extraer_tabla_balance_10_columnas_por_coordenadas(
@@ -398,6 +683,92 @@ def _extraer_tabla_balance_10_columnas_por_coordenadas(
 ) -> tuple[list[str], Optional[list[float]]]:
     """Alias compatible para la estrategia general de ocho montos."""
     return _extraer_tabla_balance_por_coordenadas(page, column_centers)
+
+
+def _es_balance_tributario(texto: str) -> bool:
+    """Identifica el encabezado de la tabla tributaria canónica."""
+    normalizado = re.sub(r"\s+", " ", _sin_acentos(texto or "")).lower()
+    return "balance tributario" in normalizado
+
+
+def _es_balance_clasificado_suplementario(
+    texto: str,
+    ya_hay_balance_tributario_ocho_columnas: bool,
+) -> bool:
+    """Evita duplicar un anexo clasificado después de su tabla canónica.
+
+    Un archivo puede adjuntar un ``BALANCE CLASIFICADO`` detallado después de
+    un balance tributario de ocho columnas del mismo período. Sólo se omite
+    ese anexo cuando la tabla tributaria completa ya fue extraída en el mismo
+    documento. Un balance clasificado que sea el único estado disponible no
+    se descarta.
+    """
+    if not ya_hay_balance_tributario_ocho_columnas:
+        return False
+    normalizado = re.sub(r"\s+", " ", _sin_acentos(texto or "")).lower()
+    return "balance clasificado" in normalizado
+
+
+def _es_estado_resultado(texto: str) -> bool:
+    normalizado = re.sub(r"\s+", " ", _sin_acentos(texto or "")).lower()
+    return "estado de resultado" in normalizado
+
+
+# ``pdfplumber`` puede devolver los glifos de un PDF lateral como palabras
+# invertidas y columnas verticales, aun cuando el archivo tiene texto nativo.
+# Estos rótulos son reversos exactos de encabezados contables. Exigir ambos
+# identificadores principales y varios adicionales evita activar el respaldo
+# por una glosa aislada o por un OCR deficiente.
+_NATIVE_SIDEWAYS_REVERSED_HEADERS = frozenset({
+    "ATNEUC", "ERBMON", "SOTIBED", "SOTIDERC", "RODUED", "RODEERCA",
+    "OVITCA", "OVISAP", "ADIDREP", "AICNANAG",
+})
+
+
+def _texto_nativo_parece_lateral(lineas: list[str]) -> bool:
+    """Detecta el patrón estricto de encabezados nativos invertidos.
+
+    No estima una rotación visual desde el texto. Sólo identifica el caso en
+    que la extracción nativa ya demostró ser ilegible porque devolvió los
+    encabezados de una tabla tributaria caracter por caracter al revés.
+    """
+    tokens = set(re.findall(
+        r"[A-Z]+",
+        _sin_acentos("\n".join(lineas or [])).upper(),
+    ))
+    return bool(
+        {"ATNEUC", "ERBMON"}.issubset(tokens)
+        and len(tokens & _NATIVE_SIDEWAYS_REVERSED_HEADERS) >= 5
+    )
+
+
+def _extraer_texto_nativo_layout(path: Path) -> list[str]:
+    """Recupera el orden visual de una tabla lateral con Poppler.
+
+    Se invoca sólo después de ``_texto_nativo_parece_lateral``. La salida se
+    acepta únicamente si aporta varias filas con ocho importes, de modo que un
+    texto libre o una salida parcial nunca reemplace la lectura nativa.
+    """
+    pdftotext_bin = shutil.which("pdftotext")
+    if not pdftotext_bin:
+        return []
+    try:
+        resultado = subprocess.run(
+            [pdftotext_bin, "-layout", str(path), "-"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    if resultado.returncode != 0 or not resultado.stdout:
+        return []
+    lineas = [linea.rstrip() for linea in resultado.stdout.splitlines() if linea.strip()]
+    filas_ocho_importes = sum(
+        len(PATRON_MONTOS.findall(linea)) >= len(RAW_MONETARY_COLUMNS)
+        for linea in lineas
+    )
+    return lineas if filas_ocho_importes >= 3 else []
 
 
 # Feature flag: cuando está en False, se usa la heurística fija ULTIMAS_COLS.
@@ -412,6 +783,16 @@ ENABLE_ACCOUNT_TYPE_RESOLVER = False
 # Umbral de confianza para aplicar corrección de rotación 180°
 # sobre texto nativo. Por debajo de este umbral se usa el flujo normal.
 ROTATION_CORRECTION_THRESHOLD = 0.7
+
+# La orientación de una imagen OCR se decide por página. Tesseract OSD por sí
+# solo no es suficiente para balances: las grillas y los importes pueden darle
+# una respuesta de orientación con baja confianza. Se prueban las cuatro
+# rotaciones en una imagen reducida y se conserva evidencia de la selección.
+OCR_ORIENTATION_CANDIDATES = (0, 90, 180, 270)
+OCR_ORIENTATION_PROBE_MAX_PIXELS = 900_000
+OCR_ORIENTATION_PROBE_TIMEOUT_SECONDS = 25
+OCR_ORIENTATION_MIN_SCORE = 16.0
+OCR_ORIENTATION_MIN_MARGIN = 4.0
 
 # Umbral de confianza para usar LayoutDetector desde ExtractionContext.
 # Si la confianza del layout detectado por DocumentAnalyzer supera este
@@ -432,6 +813,44 @@ OCR_MAX_PIXELS = 3_500_000
 OCR_RETRY_MAX_PIXELS = 1_200_000
 OCR_PAGE_TIMEOUT_SECONDS = 120
 OCR_RETRY_TIMEOUT_SECONDS = 90
+# La segunda lectura focal se aplica solamente a las celdas que ya fallaron
+# controles independientes. Sus límites son deliberadamente menores que los
+# de una página completa para no convertir una recuperación puntual en una
+# nueva fuente de timeouts.
+OCR_CELL_TIMEOUT_SECONDS = 8
+OCR_CELL_PADDING_PIXELS = 8
+# Las cajas TSV de una cifra pueden medir sólo 12-20 píxeles de alto a 200
+# DPI. Se amplían antes de la relectura, pero el resultado sigue necesitando
+# consenso OCR, identidades de fila y mejora de certificación para aplicarse.
+OCR_CELL_MIN_HEIGHT_PIXELS = 72
+OCR_CELL_MAX_UPSCALE = 4.0
+# Los dos umbrales primarios privilegian el trazo interior de 6/8 en impresos
+# tenues. Si divergen, dos umbrales de desempate aportan evidencia adicional;
+# sólo se acepta un valor que aparezca en al menos dos lecturas y que además
+# supere las identidades y controles independientes del llamador.
+OCR_CELL_THRESHOLDS = (100, 120)
+# Si ambos umbrales bajos quedan vacíos, el escaneo suele ser tenue, no
+# ambiguo. Se salta directamente al par alto para conservar presupuesto OCR.
+OCR_CELL_EMPTY_PRIMARY_THRESHOLDS = (200, 220)
+# Si 200 y 220 divergen, 210 aporta una tercera lectura independiente. Sólo
+# resuelve el empate cuando coincide exactamente con una de las dos; no se
+# admite nunca una cifra vista una sola vez.
+OCR_CELL_EMPTY_PRIMARY_TIEBREAK_THRESHOLD = 210
+# Si los primarios entregan lecturas distintas, estos dos umbrales intermedios
+# actúan como desempate. En ambos caminos siguen siendo necesarias dos
+# lecturas exactamente iguales.
+OCR_CELL_TIEBREAK_THRESHOLDS = (140, 180)
+# Una diferencia pequeña en un control puede provenir de una cifra OCR espuria
+# que deja la identidad de su propia fila aparentemente válida. No se corrige
+# por aritmética: este tope limita una tercera lectura nativa a residuos muy
+# acotados, donde una cifra observada puede ser contrastada contra el control.
+OCR_CONTROL_RESIDUAL_MAX_ABSOLUTE = 100.0
+# Una cifra final reconstruida no equivale a una cifra observada. Sin embargo,
+# cuando los controles fuente independientes son exactos y el caso es
+# excepcional, el producto puede preparar un paquete explícitamente marcado
+# para revisión de extracción. El tope evita que una tabla mayoritariamente
+# reconstruida se presente como una revisión corta.
+MAX_PROPORCION_FINALES_RECONSTRUIDOS_PARA_REVISION = 0.10
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -483,6 +902,15 @@ class CuentaRaw:
     montos_columnas: dict[str, float] = field(default_factory=dict)
     montos_periodos: dict[str, float] = field(default_factory=dict)
     columnas_derivadas: list[str] = field(default_factory=list)
+    # Sección contable observada en el documento, distinta de la columna
+    # física. En balances clasificados de dos columnas el lado derecho puede
+    # contener primero PASIVO y luego PATRIMONIO; conservar ambos evita
+    # convertir la evidencia geométrica en una reclasificación silenciosa.
+    seccion_contable: Optional[str] = None
+    # Estado financiero explícitamente identificado por sus encabezados.
+    # Distingue una hoja de situación de una hoja de resultados cuando ambas
+    # conviven en el mismo PDF.
+    estado_financiero: Optional[str] = None
 
 
 @dataclass
@@ -501,7 +929,28 @@ class CertificacionExtraccion:
     columnas_total_reconstruidas: list[str] = field(default_factory=list)
     # Independiente del estado de certificación de las ocho columnas.
     columnas_finales_validadas: bool = False
+    # Filas cuyo importe de Activo/Pasivo/Pérdida/Ganancia se reconstruyó a
+    # partir de otras columnas. No se confunde con una celda observada.
+    reconstrucciones_finales: list[dict[str, Any]] = field(default_factory=list)
+    proporcion_finales_reconstruidos: float = 0.0
+    # Autoriza exclusivamente un paquete para que el analista contraste estas
+    # filas con el original. Nunca certifica extracción ni integración.
+    reconstruccion_final_revisable: bool = False
     observaciones_auxiliares: list[dict] = field(default_factory=list)
+    # Diagnóstico de la evidencia observada, no una afirmación sobre la causa
+    # del documento. Permite separar, por ejemplo, un subtotal no detectado de
+    # inconsistencias masivas de fila sin convertir esa señal en una corrección.
+    diagnostico: str = "NO_EVALUADO"
+    senales_diagnostico: list[str] = field(default_factory=list)
+    # Una extracción OCR sólo puede ser automática cuando la orientación de
+    # cada página también quedó respaldada por evidencia independiente.
+    orientacion_certificada: Optional[bool] = None
+    orientaciones_paginas: list[dict[str, Any]] = field(default_factory=list)
+    # Ecuación observada en el balance tributario de ocho columnas:
+    # Activo - Pasivo = Ganancia - Pérdida. Es una certificación de la fuente,
+    # independiente de la cuadratura del balance ya homologado por código.
+    ecuacion_contable_fuente_valida: Optional[bool] = None
+    diferencia_ecuacion_contable_fuente: Optional[float] = None
 
 
 @dataclass
@@ -510,7 +959,7 @@ class ResultadoParseo:
     formato_codigo: FormatoCodigo
     separador_miles: str            # '.' o ','
     requirio_ocr: bool
-    rotacion_aplicada: int           # 0 o 90
+    rotacion_aplicada: int           # 0/90/180/270; -1 cuando es mixta
     cuentas: list[CuentaRaw] = field(default_factory=list)
     advertencias: list[str] = field(default_factory=list)
     # Sprint 31: contexto del análisis documental previo al parseo.
@@ -523,6 +972,8 @@ class ResultadoParseo:
     certificacion_extraccion: CertificacionExtraccion = field(
         default_factory=CertificacionExtraccion
     )
+    orientacion_certificada: Optional[bool] = None
+    orientaciones_paginas: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -689,6 +1140,20 @@ def parsear_monto(valor: str, separador_miles: str) -> Optional[float]:
 
     v = v.replace('(', '').replace(')', '')
 
+    # Tesseract puede alternar punto y coma entre grupos de miles dentro de
+    # una misma celda de control, por ejemplo ``5.833,800,607``. Si hay al
+    # menos dos grupos completos de tres dígitos, son miles inequívocos en el
+    # contexto de estos balances y se normalizan antes de aplicar el
+    # separador predominante del documento. No se toca una cifra con decimal
+    # final de uno o dos dígitos.
+    grupos_miles_repetidos = (
+        re.fullmatch(r"\d{1,3}(?:,\d{3}){2,}", v)
+        or re.fullmatch(r"\d{1,3}(?:\.\d{3}){2,}", v)
+        or re.fullmatch(r"\d{1,3}(?:[.,]\d{3}){3,}", v)
+    )
+    if grupos_miles_repetidos:
+        v = v.replace('.', '').replace(',', '')
+
     if separador_miles == '.':
         v = v.replace('.', '').replace(',', '.')
     elif separador_miles == ',':
@@ -738,12 +1203,70 @@ def obtener_tesseract_bin() -> str:
     return shutil.which('tesseract') or 'tesseract'
 
 
+def _texto_subproceso(valor: Any) -> str:
+    if isinstance(valor, bytes):
+        return valor.decode("utf-8", errors="replace")
+    return str(valor or "")
+
+
+def _tesseract_no_pudo_abrir_imagen(resultado: subprocess.CompletedProcess) -> bool:
+    """Reconoce el error de Leptonica antes de reintentar por entrada estándar."""
+    detalle = _texto_subproceso(resultado.stderr).lower()
+    return (
+        "failed to open locally" in detalle
+        or "image file not found" in detalle
+        or "image file cannot be read" in detalle
+    )
+
+
+def _ejecutar_tesseract_imagen(
+    imagen: Path,
+    salida: str,
+    argumentos: list[str],
+    *,
+    timeout: int,
+) -> subprocess.CompletedProcess:
+    """Ejecuta Tesseract por ruta y reintenta por stdin sólo si Leptonica falla.
+
+    Algunos entornos locales permiten crear la imagen temporal pero bloquean a
+    Leptonica al reabrirla por ruta. El reintento transmite los mismos bytes al
+    mismo binario y conserva la salida textual normalizada; no modifica el PDF
+    ni sustituye una lectura OCR por otra fuente.
+    """
+    comando = [obtener_tesseract_bin(), str(imagen), salida, *argumentos]
+    resultado = subprocess.run(
+        comando,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=timeout,
+        env=_tesseract_env(),
+    )
+    if not _tesseract_no_pudo_abrir_imagen(resultado):
+        return resultado
+    try:
+        reintento = subprocess.run(
+            [obtener_tesseract_bin(), "stdin", salida, *argumentos],
+            input=imagen.read_bytes(),
+            capture_output=True,
+            timeout=timeout,
+            env=_tesseract_env(),
+        )
+    except OSError:
+        return resultado
+    return subprocess.CompletedProcess(
+        reintento.args,
+        reintento.returncode,
+        stdout=_texto_subproceso(reintento.stdout),
+        stderr=_texto_subproceso(reintento.stderr),
+    )
+
+
 def detectar_rotacion_osd(img_path: Path) -> Optional[int]:
     try:
-        result = subprocess.run(
-            [obtener_tesseract_bin(), str(img_path), '-', '--psm', '0', '-l', 'osd'],
-            capture_output=True, text=True, timeout=60,
-            env=_tesseract_env()
+        result = _ejecutar_tesseract_imagen(
+            img_path, "-", ["--psm", "0", "-l", "osd"], timeout=60,
         )
         for line in result.stdout.splitlines():
             if 'Orientation in degrees' in line:
@@ -755,36 +1278,428 @@ def detectar_rotacion_osd(img_path: Path) -> Optional[int]:
 
 
 def detectar_rotacion_heuristica(img_path: Path) -> int:
-    img = Image.open(img_path)
-    mejor_rotacion = 0
-    mejor_score = -1
+    """Compatibilidad: devuelve la mejor rotación probada en las cuatro caras."""
+    return int(_seleccionar_orientacion_ocr(img_path)["rotacion"])
 
-    for rot in (0, 90):
-        test_img = img if rot == 0 else img.rotate(rot, expand=True)
 
-        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
-            test_img.save(tmp.name)
-            tmp_path = Path(tmp.name)
+_ORIENTATION_KEYWORD_GROUPS: dict[str, tuple[str, ...]] = {
+    # El bloque documental permite certificar orientación aunque una grilla
+    # deteriorada no reconozca todavía los encabezados de sus ocho columnas.
+    "documento": (
+        "razon", "social", "rut", "direccion", "ciudad", "balance",
+        "tributario",
+    ),
+    "cuenta": ("cuenta", "cuentas", "codigo", "descripcion", "detalle", "glosa"),
+    # Una página intermedia de un balance suele no repetir su cabecera, pero
+    # sí contiene varias glosas contables. Estas palabras no bastan aisladas
+    # para certificar orientación: deben acumularse y superar el margen frente
+    # a las otras rotaciones.
+    "partida_contable": (
+        "banco", "bancos", "cliente", "clientes", "proveedor", "proveedores",
+        "rendicion", "anticipo", "prestamo", "prestamos", "impuesto",
+        "impuestos", "iva", "remuneracion", "remuneraciones", "inventario",
+        "arriendo", "arriendos", "depreciacion", "amortizacion", "retencion",
+        "retenciones", "honorario", "honorarios", "factura", "facturas",
+        "credito", "creditos", "deudor", "deudores", "acreedor", "acreedores",
+    ),
+    "movimiento": ("debe", "debitos", "haber", "creditos"),
+    "saldos": ("deudor", "acreedor", "saldo"),
+    "balance": ("activo", "pasivo", "patrimonio"),
+    "resultado": ("perdida", "ganancia", "resultado", "ingresos", "gastos"),
+    "controles": ("total", "totales", "subtotal", "sumas"),
+}
 
-        try:
-            result = subprocess.run(
-                [obtener_tesseract_bin(), str(tmp_path), '-', '--psm', '6', '-l', 'spa'],
-                capture_output=True, text=True, timeout=90,
-                env=_tesseract_env()
-            )
-            texto = result.stdout
-            palabras = re.findall(r'[a-záéíóúñA-ZÁÉÍÓÚÑ]{3,}', texto)
-            score = len(palabras)
-        except Exception:
-            score = 0
-        finally:
+
+def _ocr_pagina_orientacion(img_path: Path, rotacion: int) -> str:
+    """OCR reducido para comparar orientación sin cuadruplicar el OCR final."""
+    tmp_path: Optional[Path] = None
+    imagen_ocr = img_path
+    try:
+        with Image.open(img_path) as img:
+            preparada = img.rotate(rotacion, expand=True) if rotacion else img.copy()
+            pixeles = preparada.width * preparada.height
+            if pixeles > OCR_ORIENTATION_PROBE_MAX_PIXELS:
+                escala = (OCR_ORIENTATION_PROBE_MAX_PIXELS / pixeles) ** 0.5
+                preparada = preparada.resize(
+                    (
+                        max(1, int(preparada.width * escala)),
+                        max(1, int(preparada.height * escala)),
+                    ),
+                    Image.Resampling.LANCZOS,
+                )
+            if rotacion or pixeles > OCR_ORIENTATION_PROBE_MAX_PIXELS:
+                with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+                    preparada.save(tmp.name)
+                    tmp_path = Path(tmp.name)
+                    imagen_ocr = tmp_path
+        result = _ejecutar_tesseract_imagen(
+            imagen_ocr,
+            "-",
+            ["--psm", "6", "-l", "spa"],
+            timeout=OCR_ORIENTATION_PROBE_TIMEOUT_SECONDS,
+        )
+        if result.returncode != 0:
+            return ""
+        return result.stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    finally:
+        if tmp_path is not None:
             tmp_path.unlink(missing_ok=True)
 
-        if score > mejor_score:
-            mejor_score = score
-            mejor_rotacion = rot
 
-    return mejor_rotacion
+def _puntuar_orientacion_ocr(texto: str) -> dict[str, Any]:
+    """Puntúa legibilidad y vocabulario contable de un candidato OCR."""
+    normalizado = _sin_acentos(texto or "").lower()
+    palabras = re.findall(r"[a-z]{3,}", normalizado)
+    numeros = re.findall(r"\b\d[\d.,]*\b", normalizado)
+    grupos: dict[str, int] = {}
+    impactos = 0
+    for nombre, terminos in _ORIENTATION_KEYWORD_GROUPS.items():
+        encontrados = sum(
+            len(re.findall(rf"\b{re.escape(termino)}\b", normalizado))
+            for termino in terminos
+        )
+        grupos[nombre] = encontrados
+        impactos += encontrados
+    grupos_presentes = sum(valor > 0 for valor in grupos.values())
+    # Los términos contables pesan mucho más que cantidad de palabras: una
+    # imagen lateral puede producir bastante texto, pero no una cabecera ni
+    # vocabulario contable coherente.
+    puntaje = (
+        grupos_presentes * 12.0
+        + min(impactos, 20) * 2.0
+        + min(len(palabras), 250) * 0.04
+        + min(len(numeros), 250) * 0.02
+    )
+    return {
+        "puntaje": round(puntaje, 3),
+        "grupos": grupos,
+        "grupos_presentes": grupos_presentes,
+        "terminos_contables": impactos,
+        "palabras": len(palabras),
+        "numeros": len(numeros),
+    }
+
+
+def _seleccionar_orientacion_ocr(img_path: Path) -> dict[str, Any]:
+    """Elige la rotación por evidencia, sin confiar ciegamente en OSD.
+
+    El resultado incluye el margen frente al segundo candidato. Si el margen
+    o la evidencia contable son insuficientes, la extracción puede continuar
+    para diagnóstico, pero queda bloqueada para decisiones automáticas.
+    """
+    candidatos: list[dict[str, Any]] = []
+    for rotacion in OCR_ORIENTATION_CANDIDATES:
+        metricas = _puntuar_orientacion_ocr(
+            _ocr_pagina_orientacion(img_path, rotacion)
+        )
+        candidatos.append({"rotacion": rotacion, **metricas})
+    ordenados = sorted(
+        candidatos,
+        key=lambda candidato: (-float(candidato["puntaje"]), int(candidato["rotacion"])),
+    )
+    mejor = ordenados[0]
+    segundo = ordenados[1] if len(ordenados) > 1 else {"puntaje": 0.0}
+    margen = round(float(mejor["puntaje"]) - float(segundo["puntaje"]), 3)
+    suficiente_vocabulario = (
+        int(mejor["grupos_presentes"]) >= 2
+        or int(mejor["terminos_contables"]) >= 4
+    )
+    margen_minimo = max(
+        OCR_ORIENTATION_MIN_MARGIN,
+        float(mejor["puntaje"]) * 0.12,
+    )
+    # Un escaneo con una grilla muy densa puede conservar sólo dos palabras
+    # contables legibles. En ese caso se admite la orientación únicamente si
+    # gana de forma amplia a las otras tres, no por la palabra aislada.
+    evidencia_minima_con_margen_fuerte = bool(
+        int(mejor["terminos_contables"]) >= 2
+        and float(mejor["puntaje"]) >= OCR_ORIENTATION_MIN_SCORE
+        and margen >= max(8.0, float(mejor["puntaje"]) * 0.40)
+    )
+    certificada = bool(
+        (suficiente_vocabulario or evidencia_minima_con_margen_fuerte)
+        and float(mejor["puntaje"]) >= OCR_ORIENTATION_MIN_SCORE
+        and margen >= margen_minimo
+    )
+    return {
+        "rotacion": int(mejor["rotacion"]),
+        "puntaje": float(mejor["puntaje"]),
+        "margen": margen,
+        "certificada": certificada,
+        "candidatos": [
+            {
+                "rotacion": int(candidato["rotacion"]),
+                "puntaje": float(candidato["puntaje"]),
+                "grupos_presentes": int(candidato["grupos_presentes"]),
+                "terminos_contables": int(candidato["terminos_contables"]),
+            }
+            for candidato in ordenados
+        ],
+    }
+
+
+def _puntuar_orientacion_tabla_ocr(texto: str) -> dict[str, Any]:
+    """Mide si una lectura OCR de tabla es suficiente para elegir orientación.
+
+    La sonda reducida es barata y funciona bien en la mayoría de las páginas,
+    pero las grillas densas pueden perder los encabezados al reducirse. Esta
+    métrica se usa sólo como segundo intento para una página que quedó
+    ambigua. Conserva el vocabulario contable como señal principal y usa el
+    número de filas monetarias únicamente para desempatar lecturas de tabla.
+    """
+    metricas = _puntuar_orientacion_ocr(texto)
+    lineas = [linea for linea in (texto or "").splitlines() if linea.strip()]
+    filas_monetarias = sum(
+        bool(PATRON_MONTOS.search(linea))
+        and bool(re.search(r"[A-Za-zÁÉÍÓÚÑáéíóúñ]", linea))
+        for linea in lineas
+    )
+    montos = sum(len(PATRON_MONTOS.findall(linea)) for linea in lineas)
+    # No se deja que una grilla ilegible gane sólo por contener muchos dígitos.
+    # El componente semántico es el mismo que la sonda y domina el puntaje.
+    calidad = (
+        float(metricas["puntaje"])
+        + min(filas_monetarias, 40) * 0.10
+        + min(montos, 80) * 0.01
+    )
+    return {
+        **metricas,
+        "filas_monetarias": filas_monetarias,
+        "montos": montos,
+        "calidad_tabla": round(calidad, 3),
+    }
+
+
+def _recuperar_orientacion_por_tabla_ocr(
+    img_path: Path,
+    evidencia_sondeo: dict[str, Any],
+) -> tuple[Optional[str], int, dict[str, Any]]:
+    """Reintenta una página OCR ambigua con lectura tabular completa.
+
+    Se prueban las cuatro rotaciones sólo cuando la sonda reducida no pudo
+    certificar una página. Una alternativa se acepta únicamente si el texto
+    de tabla contiene evidencia contable suficiente y gana por un margen
+    explícito. Así no se transforma una orientación incierta en automática por
+    sumar números o filas corruptas.
+    """
+    rotacion_sondeo = int(evidencia_sondeo.get("rotacion", 0))
+    if evidencia_sondeo.get("certificada"):
+        return None, rotacion_sondeo, evidencia_sondeo
+
+    candidatos: list[dict[str, Any]] = []
+
+    def evaluar(rotaciones: list[int]) -> None:
+        for rotacion in rotaciones:
+            if any(int(candidato["rotacion"]) == int(rotacion) for candidato in candidatos):
+                continue
+            texto = ocr_pagina(img_path, int(rotacion), psm=4)
+            metricas = _puntuar_orientacion_tabla_ocr(texto)
+            candidatos.append({
+                "rotacion": int(rotacion),
+                "texto": texto,
+                **metricas,
+            })
+
+    # La sonda ya ordenó las cuatro rotaciones. Probar primero sus dos mejores
+    # opciones cubre los casos de página densa sin multiplicar por cuatro el
+    # OCR completo. Las otras dos se usan sólo si esa comparación no entrega
+    # evidencia suficiente.
+    orden_sondeo = [
+        int(candidato["rotacion"])
+        for candidato in evidencia_sondeo.get("candidatos", [])
+        if str(candidato.get("rotacion", "")).lstrip("-").isdigit()
+    ]
+    if rotacion_sondeo not in orden_sondeo:
+        orden_sondeo.insert(0, rotacion_sondeo)
+    if not orden_sondeo:
+        orden_sondeo = list(OCR_ORIENTATION_CANDIDATES)
+    evaluar(orden_sondeo[:2])
+
+    def ordenar() -> list[dict[str, Any]]:
+        return sorted(
+            candidatos,
+            key=lambda candidato: (
+                -float(candidato["calidad_tabla"]), int(candidato["rotacion"]),
+            ),
+        )
+
+    def evidencia_suficiente(ordenados: list[dict[str, Any]]) -> bool:
+        if not ordenados:
+            return False
+        mejor_local = ordenados[0]
+        segundo_local = (
+            ordenados[1] if len(ordenados) > 1 else {"calidad_tabla": 0.0}
+        )
+        margen_local = float(mejor_local["calidad_tabla"]) - float(
+            segundo_local["calidad_tabla"]
+        )
+        vocabulario = (
+            int(mejor_local["grupos_presentes"]) >= 2
+            or int(mejor_local["terminos_contables"]) >= 4
+        )
+        return bool(
+            vocabulario
+            and float(mejor_local["puntaje"]) >= OCR_ORIENTATION_MIN_SCORE
+            and margen_local >= max(
+                OCR_ORIENTATION_MIN_MARGIN,
+                float(mejor_local["calidad_tabla"]) * 0.12,
+            )
+        )
+
+    if not evidencia_suficiente(ordenar()):
+        evaluar(orden_sondeo[2:] or list(OCR_ORIENTATION_CANDIDATES))
+
+    ordenados = ordenar()
+    mejor = ordenados[0]
+    segundo = ordenados[1] if len(ordenados) > 1 else {"calidad_tabla": 0.0}
+    margen = round(
+        float(mejor["calidad_tabla"]) - float(segundo["calidad_tabla"]), 3,
+    )
+    vocabulario_suficiente = (
+        int(mejor["grupos_presentes"]) >= 2
+        or int(mejor["terminos_contables"]) >= 4
+    )
+    margen_minimo = max(
+        OCR_ORIENTATION_MIN_MARGIN,
+        float(mejor["calidad_tabla"]) * 0.12,
+    )
+    certificada = bool(
+        vocabulario_suficiente
+        and float(mejor["puntaje"]) >= OCR_ORIENTATION_MIN_SCORE
+        and margen >= margen_minimo
+    )
+
+    evidencia = dict(evidencia_sondeo)
+    evidencia["candidatos_tabla"] = [
+        {
+            "rotacion": int(candidato["rotacion"]),
+            "puntaje": float(candidato["puntaje"]),
+            "calidad_tabla": float(candidato["calidad_tabla"]),
+            "grupos_presentes": int(candidato["grupos_presentes"]),
+            "terminos_contables": int(candidato["terminos_contables"]),
+            "filas_monetarias": int(candidato["filas_monetarias"]),
+        }
+        for candidato in ordenados
+    ]
+    if not certificada:
+        return None, rotacion_sondeo, evidencia
+
+    evidencia.update({
+        "rotacion_sondeo": rotacion_sondeo,
+        "rotacion": int(mejor["rotacion"]),
+        "puntaje_sondeo": evidencia_sondeo.get("puntaje"),
+        "puntaje": float(mejor["puntaje"]),
+        "margen": margen,
+        "certificada": True,
+        "metodo_certificacion": "lectura_tabular_ocr",
+    })
+    return str(mejor["texto"]), int(mejor["rotacion"]), evidencia
+
+
+def _certificar_consenso_documental_orientacion(
+    evidencias: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Certifica orientación repetida en varias páginas con señal moderada.
+
+    La regla no sustituye la evidencia fuerte por página. Sólo completa casos
+    donde todas las páginas financieras eligen la misma rotación, cada una
+    tiene un margen suficiente y el conjunto aporta señal acumulada. Las
+    páginas excluidas, por ejemplo un F22 adjunto, no participan.
+    """
+    salida = [dict(evidencia) for evidencia in evidencias]
+    relevantes = [
+        evidencia for evidencia in salida
+        if evidencia.get("utilizada_en_extraccion", True)
+    ]
+    if len(relevantes) < 2 or all(
+        bool(evidencia.get("certificada")) for evidencia in relevantes
+    ):
+        return salida
+
+    try:
+        rotaciones = {int(evidencia["rotacion"]) for evidencia in relevantes}
+    except (KeyError, TypeError, ValueError):
+        return salida
+    if len(rotaciones) != 1:
+        return salida
+
+    puntajes = [float(evidencia.get("puntaje", 0.0)) for evidencia in relevantes]
+    margenes = [float(evidencia.get("margen", 0.0)) for evidencia in relevantes]
+    # 12 puntos y 8 de margen son deliberadamente más bajos que la evidencia
+    # individual, pero se requieren por cada página y una suma de 40 puntos
+    # repartida en al menos dos páginas independientes.
+    if (
+        min(puntajes, default=0.0) < 12.0
+        or min(margenes, default=0.0) < 8.0
+        or sum(puntajes) < 40.0
+    ):
+        return salida
+
+    rotacion = next(iter(rotaciones))
+    for evidencia in salida:
+        if not evidencia.get("utilizada_en_extraccion", True):
+            continue
+        if evidencia.get("certificada"):
+            continue
+        evidencia.update({
+            "certificada": True,
+            "metodo_certificacion": "consenso_documental",
+            "rotacion_consenso": rotacion,
+            "paginas_consenso": len(relevantes),
+        })
+    return salida
+
+
+def _resumir_rotaciones_paginas(rotaciones: list[int]) -> int:
+    """Mantiene el contrato histórico y señala explícitamente una mezcla."""
+    unicas = set(rotaciones)
+    if not unicas:
+        return 0
+    if len(unicas) == 1:
+        return next(iter(unicas))
+    return -1
+
+
+def _anotar_certificacion_orientacion(
+    certificacion: CertificacionExtraccion,
+    evidencias: list[dict[str, Any]],
+) -> CertificacionExtraccion:
+    """Evita que una orientación OCR ambigua se presente como automática.
+
+    La evidencia de una página descartada explícitamente, por ejemplo un F22
+    adjunto después del balance, se conserva para trazabilidad pero no invalida
+    la orientación de las páginas que sí aportaron cuentas a la extracción.
+    """
+    certificacion.orientaciones_paginas = [dict(evidencia) for evidencia in evidencias]
+    relevantes = [
+        evidencia for evidencia in evidencias
+        if evidencia.get("utilizada_en_extraccion", True)
+    ]
+    certificacion.orientacion_certificada = bool(relevantes) and all(
+        bool(evidencia.get("certificada")) for evidencia in relevantes
+    )
+    if certificacion.orientacion_certificada:
+        return certificacion
+    paginas = [
+        str(evidencia.get("pagina"))
+        for evidencia in relevantes
+        if not evidencia.get("certificada")
+    ]
+    detalle = ", ".join(paginas) if paginas else "sin evidencia OCR"
+    razon = (
+        "La orientación OCR no quedó certificada en página(s) " + detalle
+        + "; se bloquean decisiones automáticas."
+    )
+    if razon not in certificacion.razones:
+        certificacion.razones.append(razon)
+    # La cuadratura original se conserva para diagnóstico. El estado sólo se
+    # degrada cuando habría habilitado una decisión automática sin la prueba
+    # visual de orientación.
+    if certificacion.estado == "certificada":
+        certificacion.estado = "parcial"
+    return certificacion
 
 
 def ocr_pagina(img_path: Path, rotacion: int, psm: int = 6) -> str:
@@ -811,10 +1726,11 @@ def ocr_pagina(img_path: Path, rotacion: int, psm: int = 6) -> str:
 
     try:
         try:
-            result = subprocess.run(
-                [obtener_tesseract_bin(), str(imagen_ocr), '-', '--psm', str(psm), '-l', 'spa'],
-                capture_output=True, text=True, timeout=OCR_PAGE_TIMEOUT_SECONDS,
-                env=_tesseract_env()
+            result = _ejecutar_tesseract_imagen(
+                imagen_ocr,
+                "-",
+                ["--psm", str(psm), "-l", "spa"],
+                timeout=OCR_PAGE_TIMEOUT_SECONDS,
             )
         except subprocess.TimeoutExpired:
             logger.warning(
@@ -838,11 +1754,11 @@ def ocr_pagina(img_path: Path, rotacion: int, psm: int = 6) -> str:
                     reducida.save(tmp.name)
                     retry_path = Path(tmp.name)
             try:
-                result = subprocess.run(
-                    [obtener_tesseract_bin(), str(retry_path), '-', '--psm', str(psm), '-l', 'spa'],
-                    capture_output=True, text=True,
+                result = _ejecutar_tesseract_imagen(
+                    retry_path,
+                    "-",
+                    ["--psm", str(psm), "-l", "spa"],
                     timeout=OCR_RETRY_TIMEOUT_SECONDS,
-                    env=_tesseract_env(),
                 )
             except subprocess.TimeoutExpired:
                 logger.warning(
@@ -880,14 +1796,11 @@ def ocr_pagina_tsv(img_path: Path, rotacion: int, psm: int = 6) -> list[dict]:
                 imagen_ocr = tmp_path
     try:
         try:
-            result = subprocess.run(
-                [
-                    obtener_tesseract_bin(), str(imagen_ocr), "stdout", "-l", "spa",
-                    "--psm", str(psm), "tsv",
-                ],
-                capture_output=True, text=True,
+            result = _ejecutar_tesseract_imagen(
+                imagen_ocr,
+                "stdout",
+                ["-l", "spa", "--psm", str(psm), "tsv"],
                 timeout=OCR_PAGE_TIMEOUT_SECONDS,
-                env=_tesseract_env(),
             )
         except subprocess.TimeoutExpired:
             logger.warning("OCR TSV excedió el timeout: %s", img_path.name)
@@ -896,7 +1809,15 @@ def ocr_pagina_tsv(img_path: Path, rotacion: int, psm: int = 6) -> list[dict]:
             return []
         words: list[dict] = []
         line_positions: dict[tuple[str, str, str, str], float] = {}
-        for row in csv.DictReader(io.StringIO(result.stdout), delimiter="\t"):
+        # El TSV de Tesseract no escapa necesariamente comillas que OCR lee
+        # como glifos aislados. El dialecto CSV por defecto las interpreta
+        # como apertura de campo y puede absorber el resto del archivo TSV en
+        # una sola "palabra". En este formato los tabuladores son el único
+        # delimitador estructural esperado, por eso las comillas se conservan
+        # literalmente.
+        for row in csv.DictReader(
+            io.StringIO(result.stdout), delimiter="\t", quoting=csv.QUOTE_NONE,
+        ):
             text = str(row.get("text") or "").strip()
             if row.get("level") != "5" or not text:
                 continue
@@ -904,6 +1825,7 @@ def ocr_pagina_tsv(img_path: Path, rotacion: int, psm: int = 6) -> list[dict]:
                 left = float(row["left"])
                 top = float(row["top"])
                 width = float(row["width"])
+                height = float(row["height"])
             except (KeyError, TypeError, ValueError):
                 continue
             line_key = (
@@ -916,6 +1838,12 @@ def ocr_pagina_tsv(img_path: Path, rotacion: int, psm: int = 6) -> list[dict]:
                 "text": text,
                 "x0": left,
                 "x1": left + width,
+                # ``top`` conserva el orden lógico de las líneas para los
+                # extractores actuales. La caja real queda aparte para que
+                # una relectura focal recorte exactamente la celda que OCR
+                # observó, sin volver a inferir su posición por la glosa.
+                "image_top": top,
+                "image_bottom": top + height,
                 "top": line_positions[line_key],
             })
         return words
@@ -1039,6 +1967,84 @@ def _validar_columnas_finales(
     return True
 
 
+def _diagnosticar_controles_extraccion(
+    *,
+    tiene_subtotal: bool,
+    filas_evaluadas: int,
+    filas_inconsistentes: list[int],
+    diferencias: dict[str, float],
+    tolerancia: float,
+    totales_finales_validos: Optional[bool],
+    fila_final_incompleta: bool,
+    puente_invalido: bool,
+    ecuacion_subtotal_invalida: bool,
+    parcial: bool,
+) -> tuple[str, list[str]]:
+    """Resume señales de extracción sin atribuir una causa no observada.
+
+    Los códigos describen únicamente el control que falló. Por ejemplo,
+    ``SUBTOTAL_NO_DETECTADO`` no afirma que el PDF no tenga subtotal: puede
+    faltar en el original o haber fallado su lectura. Esa distinción queda
+    disponible para la revisión humana y evita declarar un formato como no
+    soportado sólo a partir de una señal OCR.
+    """
+    senales: list[str] = []
+    if filas_evaluadas <= 0:
+        senales.append("SIN_FILAS_CONTABLES")
+    if not tiene_subtotal:
+        senales.append("SUBTOTAL_NO_DETECTADO")
+
+    if filas_inconsistentes:
+        proporcion = len(filas_inconsistentes) / max(filas_evaluadas, 1)
+        if len(filas_inconsistentes) >= 3 and proporcion >= 0.20:
+            senales.append("INCONSISTENCIAS_MASIVAS_DE_FILA")
+        else:
+            senales.append("FILAS_INCONSISTENTES")
+
+    diferencias_reales = {
+        columna: diferencia
+        for columna, diferencia in diferencias.items()
+        if abs(float(diferencia)) > tolerancia
+    }
+    if diferencias_reales:
+        if (
+            not filas_inconsistentes
+            and len(diferencias_reales) == 1
+            and max(abs(float(valor)) for valor in diferencias_reales.values())
+            <= tolerancia * 2
+        ):
+            senales.append("DIFERENCIA_PUNTUAL_EN_CONTROL")
+        else:
+            senales.append("CONTROLES_NO_CONCILIAN")
+    if totales_finales_validos is False:
+        senales.append("FILA_FINAL_NO_CUADRADA")
+    if fila_final_incompleta:
+        senales.append("FILA_FINAL_INCOMPLETA")
+    if ecuacion_subtotal_invalida:
+        senales.append("ECUACION_SUBTOTAL_NO_CONCILIA")
+    if puente_invalido:
+        senales.append("PUENTE_RESULTADO_NO_CONCILIA")
+
+    prioridades = (
+        "SIN_FILAS_CONTABLES",
+        "INCONSISTENCIAS_MASIVAS_DE_FILA",
+        "SUBTOTAL_NO_DETECTADO",
+        "FILA_FINAL_NO_CUADRADA",
+        "ECUACION_SUBTOTAL_NO_CONCILIA",
+        "PUENTE_RESULTADO_NO_CONCILIA",
+        "FILA_FINAL_INCOMPLETA",
+        "DIFERENCIA_PUNTUAL_EN_CONTROL",
+        "CONTROLES_NO_CONCILIAN",
+        "FILAS_INCONSISTENTES",
+    )
+    for diagnostico in prioridades:
+        if diagnostico in senales:
+            return diagnostico, senales
+    if parcial:
+        return "CONTROLES_VALIDOS_CON_REVISION", senales
+    return "CONTROLES_VALIDADOS", senales
+
+
 def certificar_extraccion_columnas(
     cuentas: list[CuentaRaw], metodo: str = "",
     tolerancia_absoluta: float = 10.0,
@@ -1078,6 +2084,57 @@ def certificar_extraccion_columnas(
     def control_key(cuenta: CuentaRaw) -> str:
         return re.sub(r"[^a-z0-9]+", "", normalized_name(cuenta))
 
+    puentes_resultado = [
+        cuenta for cuenta in cuentas
+        if cuenta.es_total and cuenta.montos_columnas
+        and re.match(
+            r"^(?:perdida o ganancia|ganancia(?: neta|(?: del)? ejercicio)|"
+            r"resultado|utilidad|perdida net[ao]|total perdida)\b",
+            normalized_name(cuenta),
+        )
+    ]
+    ids_puentes_resultado = {id(cuenta) for cuenta in puentes_resultado}
+
+    # Algunos generadores imprimen ``Sumas``, luego el puente ``Resultado`` y
+    # cierran con el rótulo singular ``Total``. Un Total genérico puede ser un
+    # subtotal intermedio, por lo que sólo se acepta como cierre cuando el
+    # control inmediatamente anterior es precisamente ese puente, existe una
+    # suma o subtotal verificable antes del puente y las ocho columnas ya
+    # fueron observadas por la comprensión de ``finales``.
+    def es_subtotal_referencia(cuenta: CuentaRaw) -> bool:
+        clave = control_key(cuenta)
+        return bool(
+            cuenta.es_total
+            and set(RAW_MONETARY_COLUMNS).issubset(cuenta.montos_columnas)
+            and (
+                "subtotal" in clave
+                or clave in {"suma", "sumas"}
+                or clave.startswith("totalacumulado")
+            )
+        )
+
+    ids_totales_tras_puente: set[int] = set()
+    for indice, cuenta in enumerate(cuentas):
+        if not cuenta.es_total or control_key(cuenta) != "total":
+            continue
+        control_anterior = next(
+            (
+                anterior for anterior in reversed(cuentas[:indice])
+                if anterior.es_total
+            ),
+            None,
+        )
+        tiene_subtotal_previo = any(
+            es_subtotal_referencia(anterior)
+            for anterior in cuentas[:indice]
+        )
+        if (
+            control_anterior is not None
+            and id(control_anterior) in ids_puentes_resultado
+            and tiene_subtotal_previo
+        ):
+            ids_totales_tras_puente.add(id(cuenta))
+
     finales = [
         cuenta for cuenta in cuentas
         if (
@@ -1088,8 +2145,10 @@ def certificar_extraccion_columnas(
             "totales iguales" in normalized_name(cuenta)
             or "sumas iguales" in normalized_name(cuenta)
             or control_key(cuenta) in {"totales", "totalgeneral", "sumastotales"}
+            or id(cuenta) in ids_totales_tras_puente
         )
     ]
+    ids_finales = {id(cuenta) for cuenta in finales}
     totales_finales_validos: Optional[bool] = None
     fila_final_incompleta = False
     if finales:
@@ -1116,9 +2175,11 @@ def certificar_extraccion_columnas(
             cuenta.es_total
             and set(RAW_MONETARY_COLUMNS).issubset(cuenta.montos_columnas)
         )
+        and id(cuenta) not in ids_finales
         and (
             "subtotal" in control_key(cuenta)
-            or control_key(cuenta) == "sumas"
+            or control_key(cuenta) in {"suma", "sumas"}
+            or control_key(cuenta) == "total"
             or control_key(cuenta).startswith("totalacumulado")
         )
     ]
@@ -1151,6 +2212,18 @@ def certificar_extraccion_columnas(
         if totales_finales_validos is False:
             estado = "fallida"
             razones.append("La fila final impresa no está cuadrada.")
+        diagnostico, senales_diagnostico = _diagnosticar_controles_extraccion(
+            tiene_subtotal=False,
+            filas_evaluadas=len(filas_detalle),
+            filas_inconsistentes=filas_inconsistentes,
+            diferencias=diferencias_parciales,
+            tolerancia=tolerancia_absoluta,
+            totales_finales_validos=totales_finales_validos,
+            fila_final_incompleta=fila_final_incompleta,
+            puente_invalido=False,
+            ecuacion_subtotal_invalida=False,
+            parcial=False,
+        )
         return CertificacionExtraccion(
             estado=estado, metodo=metodo,
             diferencias=diferencias_parciales,
@@ -1158,6 +2231,8 @@ def certificar_extraccion_columnas(
             filas_evaluadas=len(filas_detalle),
             filas_inconsistentes=filas_inconsistentes,
             totales_finales_validos=totales_finales_validos,
+            diagnostico=diagnostico,
+            senales_diagnostico=senales_diagnostico,
         )
     acumulados = [
         cuenta for cuenta in candidatos
@@ -1165,14 +2240,6 @@ def certificar_extraccion_columnas(
     ]
     subtotal_referencia = acumulados[-1] if acumulados else candidatos[-1]
     total_impreso = dict(subtotal_referencia.montos_columnas)
-    puentes_resultado = [
-        cuenta for cuenta in cuentas
-        if cuenta.es_total and cuenta.montos_columnas
-        and re.match(
-            r"^(?:perdida o ganancia|resultado|utilidad|perdida net[ao])\b",
-            normalized_name(cuenta),
-        )
-    ]
     calculados = {column: 0.0 for column in RAW_MONETARY_COLUMNS}
     filas = 0
     for cuenta in filas_detalle:
@@ -1180,6 +2247,18 @@ def certificar_extraccion_columnas(
         for column in RAW_MONETARY_COLUMNS:
             calculados[column] += float(cuenta.montos_columnas.get(column, 0.0) or 0.0)
     if not filas:
+        diagnostico, senales_diagnostico = _diagnosticar_controles_extraccion(
+            tiene_subtotal=True,
+            filas_evaluadas=0,
+            filas_inconsistentes=filas_inconsistentes,
+            diferencias={},
+            tolerancia=tolerancia_absoluta,
+            totales_finales_validos=totales_finales_validos,
+            fila_final_incompleta=fila_final_incompleta,
+            puente_invalido=False,
+            ecuacion_subtotal_invalida=False,
+            parcial=False,
+        )
         return CertificacionExtraccion(
             estado="fallida", metodo=metodo,
             totales_impresos=dict(total_impreso),
@@ -1187,6 +2266,8 @@ def certificar_extraccion_columnas(
             filas_evaluadas=0,
             filas_inconsistentes=filas_inconsistentes,
             totales_finales_validos=totales_finales_validos,
+            diagnostico=diagnostico,
+            senales_diagnostico=senales_diagnostico,
         )
     columnas_total_reconstruidas: list[str] = []
     for column in ("debitos", "creditos"):
@@ -1242,11 +2323,32 @@ def certificar_extraccion_columnas(
         float(total_impreso.get("ganancia", 0.0) or 0.0)
         - float(total_impreso.get("perdida", 0.0) or 0.0)
     )
-    ecuacion_subtotal_invalida = (
-        fila_final_incompleta
-        and abs(resultado_balance_subtotal - resultado_estado_subtotal)
-        > tolerancia_absoluta
+    diferencia_ecuacion_contable_fuente: Optional[float] = None
+    ecuacion_contable_fuente_valida: Optional[bool] = None
+    # Una hoja de situación sin estado de resultado puede traer las dos
+    # columnas de resultado a cero. En ese caso no se deduce una ecuación
+    # inexistente. Sí se controla cuando ambos lados están observados, o
+    # cuando una fila final incompleta declara explícitamente esa estructura.
+    hay_balance_fuente = any(
+        abs(float(total_impreso.get(column, 0.0) or 0.0))
+        for column in ("activo", "pasivo")
     )
+    hay_resultado_fuente = any(
+        abs(float(total_impreso.get(column, 0.0) or 0.0))
+        for column in ("perdida", "ganancia")
+    )
+    hay_evidencia_fuente = hay_balance_fuente and (
+        hay_resultado_fuente or fila_final_incompleta
+    )
+    if hay_evidencia_fuente:
+        diferencia_ecuacion_contable_fuente = round(
+            resultado_balance_subtotal - resultado_estado_subtotal, 2,
+        )
+        ecuacion_contable_fuente_valida = (
+            abs(diferencia_ecuacion_contable_fuente)
+            <= tolerancia_absoluta
+        )
+    ecuacion_subtotal_invalida = ecuacion_contable_fuente_valida is False
     if ecuacion_subtotal_invalida:
         razones.append(
             "El subtotal impreso no satisface la ecuación entre balance y "
@@ -1310,9 +2412,31 @@ def certificar_extraccion_columnas(
         or ecuacion_subtotal_invalida
     )
     filas_derivadas = [cuenta.linea for cuenta in filas_detalle if cuenta.columnas_derivadas]
+    columnas_finales = set(RAW_MONETARY_COLUMNS[4:])
+    reconstrucciones_finales = []
+    filas_monetarias = 0
+    for cuenta in filas_detalle:
+        try:
+            monto = float(cuenta.monto or 0.0)
+        except (TypeError, ValueError):
+            monto = 0.0
+        if abs(monto) > tolerancia_absoluta:
+            filas_monetarias += 1
+        columnas_reconstruidas = sorted(
+            set(cuenta.columnas_derivadas).intersection(columnas_finales),
+        )
+        if not columnas_reconstruidas or abs(monto) <= tolerancia_absoluta:
+            continue
+        reconstrucciones_finales.append({
+            "linea": cuenta.linea,
+            "cuenta": cuenta.nombre,
+            "columnas": columnas_reconstruidas,
+            "importe": monto,
+        })
     total_derivado = bool(
         subtotal_referencia.columnas_derivadas or fila_final_incompleta
     )
+    parcial = bool(filas_derivadas or total_derivado)
     if (filas_derivadas or total_derivado) and not failed:
         razones.append(
             f"{len(filas_derivadas)} filas contienen movimientos reconstruidos "
@@ -1326,6 +2450,23 @@ def certificar_extraccion_columnas(
             cuentas, filas_detalle, total_impreso, calculados, finales,
             puentes_resultado, tolerancia_absoluta,
         )
+    )
+    proporcion_finales_reconstruidos = (
+        len(reconstrucciones_finales) / filas_monetarias
+        if filas_monetarias else 0.0
+    )
+    controles_finales_reconstruidos = any(
+        set(control.columnas_derivadas).intersection(columnas_finales)
+        for control in [subtotal_referencia, *finales, *puentes_resultado]
+    )
+    reconstruccion_final_revisable = bool(
+        reconstrucciones_finales
+        and not failed
+        and totales_finales_validos is True
+        and ecuacion_contable_fuente_valida is True
+        and not controles_finales_reconstruidos
+        and proporcion_finales_reconstruidos
+        <= MAX_PROPORCION_FINALES_RECONSTRUIDOS_PARA_REVISION
     )
     observaciones_auxiliares = []
     if columnas_finales_validadas:
@@ -1351,10 +2492,20 @@ def certificar_extraccion_columnas(
                     "El saldo respalda el importe final; no cambie la columna de clasificación."
                 ),
             })
+    diagnostico, senales_diagnostico = _diagnosticar_controles_extraccion(
+        tiene_subtotal=True,
+        filas_evaluadas=filas,
+        filas_inconsistentes=filas_inconsistentes,
+        diferencias=diferencias,
+        tolerancia=tolerancia_absoluta,
+        totales_finales_validos=totales_finales_validos,
+        fila_final_incompleta=fila_final_incompleta,
+        puente_invalido=puente_invalido,
+        ecuacion_subtotal_invalida=ecuacion_subtotal_invalida,
+        parcial=parcial,
+    )
     return CertificacionExtraccion(
-        estado="fallida" if failed else (
-            "parcial" if filas_derivadas or total_derivado else "certificada"
-        ),
+        estado="fallida" if failed else ("parcial" if parcial else "certificada"),
         metodo=metodo,
         totales_impresos={k: float(total_impreso.get(k, 0.0) or 0.0) for k in RAW_MONETARY_COLUMNS},
         totales_calculados={k: round(v, 2) for k, v in calculados.items()},
@@ -1367,12 +2518,139 @@ def certificar_extraccion_columnas(
         tipo_resultado=tipo_resultado,
         columnas_total_reconstruidas=columnas_total_reconstruidas,
         columnas_finales_validadas=columnas_finales_validadas,
+        reconstrucciones_finales=reconstrucciones_finales,
+        proporcion_finales_reconstruidos=proporcion_finales_reconstruidos,
+        reconstruccion_final_revisable=reconstruccion_final_revisable,
         observaciones_auxiliares=observaciones_auxiliares,
+        diagnostico=diagnostico,
+        senales_diagnostico=senales_diagnostico,
+        ecuacion_contable_fuente_valida=ecuacion_contable_fuente_valida,
+        diferencia_ecuacion_contable_fuente=(
+            diferencia_ecuacion_contable_fuente
+        ),
     )
+
+
+def _es_subtotal_fisico_clasificado(
+    nombre: str, origen: OrigenColumna,
+) -> bool:
+    """Reconoce subtotales de una mitad física de balance clasificado."""
+    normalizado = re.sub(r"\s+", " ", _sin_acentos(nombre).lower()).strip()
+    if origen is OrigenColumna.ACTIVO:
+        return normalizado in {
+            "total activo circulante",
+            "total activos circulantes",
+            "total activo corriente",
+            "total activos corrientes",
+            "total activo fijo",
+            "total activos fijos",
+            "total activo no corriente",
+            "total activos no corrientes",
+            "total otros activos",
+        }
+    if origen is OrigenColumna.PASIVO:
+        return normalizado in {
+            "total pasivo circulante",
+            "total pasivos circulantes",
+            "total pasivo corriente",
+            "total pasivos corrientes",
+            "total pasivo largo plazo",
+            "total pasivos largo plazo",
+            "total pasivo no corriente",
+            "total pasivos no corrientes",
+            "total patrimonio",
+            "total patrimonio neto",
+        }
+    return False
+
+
+def _diferencias_subtotales_fisicos_clasificados(
+    cuentas: list[CuentaRaw],
+) -> dict[str, float]:
+    """Contrasta subtotales por lado cuando OCR observó ACTIVO y PASIVO.
+
+    El orden de lectura alterna filas de ambas mitades. Por ello se acumula
+    cada lado de forma independiente, en lugar de sumar las filas intercaladas
+    como si fueran una única columna vertical.
+    """
+    diferencias: dict[str, float] = {}
+    for origen in (OrigenColumna.ACTIVO, OrigenColumna.PASIVO):
+        subtotal_calculado = 0.0
+        detalles = 0
+        filas_lado = [
+            cuenta for cuenta in cuentas
+            if cuenta.origen_columna is origen
+        ]
+        for cuenta in filas_lado:
+            if cuenta.monto is None:
+                continue
+            if _es_subtotal_fisico_clasificado(cuenta.nombre, origen):
+                if detalles:
+                    nombre = re.sub(
+                        r"\s+", " ", _sin_acentos(cuenta.nombre).lower(),
+                    ).strip()
+                    diferencias[f"seccion:{origen.value}:{nombre}"] = round(
+                        subtotal_calculado - float(cuenta.monto), 2,
+                    )
+                subtotal_calculado = 0.0
+                detalles = 0
+                continue
+            if cuenta.es_total:
+                continue
+            subtotal_calculado += float(cuenta.monto)
+            detalles += 1
+    return diferencias
+
+
+def _subtotales_fisicos_posiblemente_no_verificables(
+    cuentas: list[CuentaRaw], tolerancia_absoluta: float,
+) -> set[str]:
+    """Señala controles OCR con muchos menos dígitos que su detalle.
+
+    No afirma que el impreso esté tapado o truncado: identifica el patrón en
+    que la ecuación final se conserva y un subtotal físico aislado tiene una
+    longitud monetaria incompatible con el detalle que pretende controlar.
+    Sirve para explicar por qué el documento queda bloqueado, no para reparar
+    ni sustituir el subtotal desde la suma.
+    """
+    no_verificables: set[str] = set()
+    for origen in (OrigenColumna.ACTIVO, OrigenColumna.PASIVO):
+        acumulado = 0.0
+        detalles = 0
+        for cuenta in (
+            cuenta for cuenta in cuentas if cuenta.origen_columna is origen
+        ):
+            if cuenta.monto is None:
+                continue
+            if _es_subtotal_fisico_clasificado(cuenta.nombre, origen):
+                diferencia = acumulado - float(cuenta.monto)
+                calculado = abs(int(round(acumulado)))
+                impreso = abs(int(round(float(cuenta.monto))))
+                digitos_calculado = len(str(calculado))
+                digitos_impreso = len(str(impreso))
+                nombre = re.sub(
+                    r"\s+", " ", _sin_acentos(cuenta.nombre).lower(),
+                ).strip()
+                if (
+                    detalles
+                    and abs(diferencia) > tolerancia_absoluta
+                    and calculado >= 100_000
+                    and digitos_impreso + 2 <= digitos_calculado
+                ):
+                    no_verificables.add(f"seccion:{origen.value}:{nombre}")
+                acumulado = 0.0
+                detalles = 0
+                continue
+            if cuenta.es_total:
+                continue
+            acumulado += float(cuenta.monto)
+            detalles += 1
+    return no_verificables
 
 
 def certificar_totales_clasificados(
     cuentas: list[CuentaRaw], tolerancia_absoluta: float = 10.0,
+    *, metodo: str = "classified_totals",
 ) -> CertificacionExtraccion:
     """Control parcial para balances clasificados/IFRS de una o dos columnas.
 
@@ -1407,14 +2685,19 @@ def certificar_totales_clasificados(
             totals["pasivo_patrimonio"] = matching_totals[-1]
     if set(totals) != {"activo", "pasivo_patrimonio"}:
         return CertificacionExtraccion(
-            estado="no_evaluable", metodo="classified_totals",
+            estado="no_evaluable", metodo=metodo,
             razones=[
                 "No se encontraron ambos totales finales del balance clasificado."
             ],
+            diagnostico="TOTALES_FINALES_NO_DETECTADOS",
+            senales_diagnostico=["TOTALES_FINALES_NO_DETECTADOS"],
         )
     difference = round(totals["activo"] - totals["pasivo_patrimonio"], 2)
     secciones: dict[str, float] = {}
     diferencias_seccion: dict[str, float] = {}
+    diferencias_fisicas: dict[str, float] = {}
+    subtotales_posiblemente_no_verificables: set[str] = set()
+    subtotales_fisicos_validados = False
     nombres = [
         re.sub(r"\s+", " ", _sin_acentos(cuenta.nombre).lower()).strip()
         for cuenta in cuentas
@@ -1461,39 +2744,91 @@ def certificar_totales_clasificados(
         for nombre, diferencia in diferencias_seccion.items()
         if abs(diferencia) > tolerancia_absoluta
     }
+    if metodo in {
+        "ocr_classified_two_columns",
+        "native_classified_two_columns",
+    }:
+        diferencias_fisicas = _diferencias_subtotales_fisicos_clasificados(
+            cuentas,
+        )
+        subtotales_posiblemente_no_verificables = (
+            _subtotales_fisicos_posiblemente_no_verificables(
+                cuentas, tolerancia_absoluta,
+            )
+        )
+        # Para habilitar sólo revisión asistida exigimos al menos un subtotal
+        # físico reproducido en cada lado. La ecuación final por sí sola no
+        # demuestra que el detalle se extrajo completo.
+        subtotales_fisicos_validados = (
+            any(nombre.startswith("seccion:activo:") for nombre in diferencias_fisicas)
+            and any(nombre.startswith("seccion:pasivo:") for nombre in diferencias_fisicas)
+        )
+        diferencias_seccion.update(diferencias_fisicas)
+        secciones_fallidas.update({
+            nombre: diferencia
+            for nombre, diferencia in diferencias_fisicas.items()
+            if abs(diferencia) > tolerancia_absoluta
+        })
     if secciones_fallidas:
         detalle = ", ".join(
             f"{nombre.removeprefix('seccion:')}={diferencia:,.0f}"
             for nombre, diferencia in secciones_fallidas.items()
         )
+        subtotal_no_verificable = (
+            len(secciones_fallidas) == 1
+            and abs(difference) <= tolerancia_absoluta
+            and next(iter(secciones_fallidas))
+            in subtotales_posiblemente_no_verificables
+        )
+        diagnostico = (
+            "SUBTOTAL_IMPRESO_NO_VERIFICABLE"
+            if subtotal_no_verificable else "SUBTOTALES_SECCION_NO_CONCILIAN"
+        )
+        senales = ["SUBTOTALES_SECCION_NO_CONCILIAN"]
+        if subtotal_no_verificable:
+            senales.insert(0, "SUBTOTAL_IMPRESO_NO_VERIFICABLE")
+        if abs(difference) > tolerancia_absoluta:
+            senales.append("ECUACION_FINAL_NO_CONCILIA")
+        razones = [
+            "El detalle extraído no reproduce uno o más subtotales impresos: "
+            f"{detalle}."
+        ]
+        if subtotal_no_verificable:
+            razones.append(
+                "El subtotal discrepante tiene muchos menos dígitos que su "
+                "detalle OCR; no se pudo verificar desde el documento y "
+                "permanece bloqueado para revisión del original."
+            )
         return CertificacionExtraccion(
-            estado="fallida", metodo="classified_section_totals",
+            estado="fallida",
+            metodo=("classified_section_totals" if metodo == "classified_totals" else metodo),
             totales_impresos={**totals, **{f"seccion:{k}": v for k, v in secciones.items()}},
             diferencias={
                 "activo_menos_pasivo_patrimonio": difference,
                 **diferencias_seccion,
             },
-            razones=[
-                "El detalle extraído no reproduce uno o más subtotales impresos: "
-                f"{detalle}."
-            ],
+            razones=razones,
             filas_evaluadas=sum(
                 1 for cuenta in cuentas if cuenta.monto is not None and not cuenta.es_total
             ),
             totales_finales_validos=abs(difference) <= tolerancia_absoluta,
+            diagnostico=diagnostico,
+            senales_diagnostico=senales,
         )
     if abs(difference) > tolerancia_absoluta:
         return CertificacionExtraccion(
-            estado="fallida", metodo="classified_totals",
+            estado="fallida", metodo=metodo,
             totales_impresos=totals,
             diferencias={"activo_menos_pasivo_patrimonio": difference},
             razones=[
                 "El total de activos no coincide con el total de pasivos y patrimonio."
             ],
             totales_finales_validos=False,
+            diagnostico="ECUACION_FINAL_NO_CONCILIA",
+            senales_diagnostico=["ECUACION_FINAL_NO_CONCILIA"],
         )
     return CertificacionExtraccion(
-        estado="parcial", metodo="classified_totals",
+        estado="parcial", metodo=metodo,
         totales_impresos=totals,
         diferencias={
             "activo_menos_pasivo_patrimonio": difference,
@@ -1511,6 +2846,9 @@ def certificar_totales_clasificados(
             1 for cuenta in cuentas if cuenta.monto is not None and not cuenta.es_total
         ),
         totales_finales_validos=True,
+        columnas_finales_validadas=subtotales_fisicos_validados,
+        diagnostico="ECUACION_FINAL_VALIDA_CON_REVISION",
+        senales_diagnostico=[],
     )
 
 
@@ -1698,6 +3036,51 @@ def anotar_secciones_balance_clasificado(cuentas: list[CuentaRaw]) -> int:
     return anotadas
 
 
+def anotar_estado_financiero(cuentas: list[CuentaRaw]) -> int:
+    """Anota el estado financiero desde encabezados explícitos del PDF.
+
+    El etiquetado no clasifica cuentas. Sólo evita que una hoja de estado de
+    resultados, adjunta a un estado de situación ya cuadrado, se incorpore por
+    segunda vez a la ecuación patrimonial. Si no aparece un título explícito,
+    la función deja la cuenta sin contexto salvo en filas geométricas
+    ACTIVO/PASIVO, cuya pertenencia al balance de situación es observable.
+    """
+    estado_actual: Optional[str] = None
+    anotadas = 0
+    for cuenta in cuentas:
+        nombre = re.sub(
+            r"\s+", " ", _sin_acentos(cuenta.nombre).lower(),
+        ).strip(" :")
+        if re.search(
+            r"\b(?:estado(?:s)?\s+de\s+resultados?(?:\s+"
+            r"(?:integrales?|intermedios?))?|resultados?\s+integrales?)\b",
+            nombre,
+        ):
+            estado_actual = "resultados"
+        elif re.search(
+            r"\b(?:balance(?:\s+(?:general|clasificado))?|"
+            r"estado\s+de\s+situacion(?:\s+financiera)?)\b",
+            nombre,
+        ):
+            estado_actual = "balance"
+        elif (
+            estado_actual is None
+            and cuenta.origen_columna in {
+                OrigenColumna.ACTIVO, OrigenColumna.PASIVO,
+            }
+            and cuenta.monto is not None
+        ):
+            estado_actual = "balance"
+
+        if (
+            estado_actual is not None
+            and cuenta.estado_financiero != estado_actual
+        ):
+            cuenta.estado_financiero = estado_actual
+            anotadas += 1
+    return anotadas
+
+
 def fusionar_cuentas_partidas(cuentas: list[CuentaRaw]) -> tuple[list[CuentaRaw], int]:
     """Une una cuenta partida entre la glosa con código y su fila de importes.
 
@@ -1748,6 +3131,85 @@ def fusionar_cuentas_partidas(cuentas: list[CuentaRaw]) -> tuple[list[CuentaRaw]
     return fusionadas, cantidad
 
 
+def fusionar_control_total_general_partido(
+    cuentas: list[CuentaRaw],
+) -> tuple[list[CuentaRaw], int]:
+    """Une las dos mitades complementarias de un control ``TOTAL GENERAL``.
+
+    Ciertos PDF nativos distribuyen el rótulo y los ocho importes de cierre
+    en dos líneas físicas consecutivas: ``TOTAL`` contiene las cuatro
+    columnas de la izquierda y ``GENERAL`` las cuatro de la derecha. No son
+    dos cuentas ni dos controles independientes. La regla exige ese par
+    literal, líneas consecutivas y columnas monetarias complementarias; así
+    no fusiona glosas ni totales ordinarios por simple proximidad.
+    """
+    fusionadas: list[CuentaRaw] = []
+    cantidad = 0
+    indice = 0
+    columnas_izquierda = ("debitos", "saldo_deudor", "activo", "perdida")
+    columnas_derecha = ("creditos", "saldo_acreedor", "pasivo", "ganancia")
+
+    def _nombre_control(cuenta: CuentaRaw) -> str:
+        return re.sub(r"[^a-z0-9]+", "", _sin_acentos(cuenta.nombre).lower())
+
+    def _monto(cuenta: CuentaRaw, columna: str) -> float:
+        try:
+            return float(cuenta.montos_columnas.get(columna, 0.0) or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    while indice < len(cuentas):
+        actual = cuentas[indice]
+        siguiente = cuentas[indice + 1] if indice + 1 < len(cuentas) else None
+        es_par_total_general = (
+            siguiente is not None
+            and actual.linea + 1 == siguiente.linea
+            and actual.codigo is None
+            and siguiente.codigo is None
+            and actual.es_total
+            and _nombre_control(actual) == "total"
+            and _nombre_control(siguiente) in {"general", "generales"}
+            and bool(actual.montos_columnas)
+            and bool(siguiente.montos_columnas)
+            and any(abs(_monto(actual, columna)) > 0.01 for columna in columnas_izquierda)
+            and any(abs(_monto(siguiente, columna)) > 0.01 for columna in columnas_derecha)
+            and all(abs(_monto(actual, columna)) <= 0.01 for columna in columnas_derecha)
+            and all(abs(_monto(siguiente, columna)) <= 0.01 for columna in columnas_izquierda)
+        )
+        if es_par_total_general:
+            montos = {
+                columna: _monto(actual, columna) + _monto(siguiente, columna)
+                for columna in RAW_MONETARY_COLUMNS
+            }
+            fusionadas.append(CuentaRaw(
+                linea=actual.linea,
+                codigo=None,
+                nombre="TOTAL GENERAL",
+                monto=max((abs(valor) for valor in montos.values()), default=0.0),
+                origen_columna=OrigenColumna.DESCONOCIDO,
+                es_total=True,
+                confianza_extraccion=min(
+                    actual.confianza_extraccion, siguiente.confianza_extraccion,
+                ),
+                montos_columnas=montos,
+                montos_periodos={
+                    **actual.montos_periodos,
+                    **siguiente.montos_periodos,
+                },
+                columnas_derivadas=[
+                    *actual.columnas_derivadas,
+                    *siguiente.columnas_derivadas,
+                    "control_total_general_fusionado",
+                ],
+            ))
+            cantidad += 1
+            indice += 2
+            continue
+        fusionadas.append(actual)
+        indice += 1
+    return fusionadas, cantidad
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # PARSER DE LÍNEAS DE TEXTO → CUENTAS
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1765,8 +3227,17 @@ PATRONES_CODIGO_LINEA = {
 # (montos y columnas) aguas abajo en parsear_linea.
 #
 # FG1 — código con UN solo separador (guión o punto): 4.021201, 201.1205,
-# 1101-51. OCR puede fusionar varios grupos a cualquiera de sus lados.
-_PATRON_AUX_UNISEP = re.compile(r'^(\d{1,6}[-.]\d{2,8})\s+([A-Za-zÁÉÍÓÚÑáéíóúñ].+)')
+# 1101-51. OCR puede fusionar varios grupos a cualquiera de sus lados. La
+# glosa debe comenzar por letra, salvo el caso acotado ``1.V.A.``: Tesseract
+# suele confundir la I de IVA con 1. No se admite cualquier glosa numérica,
+# para no convertir metadatos de período en códigos de cuenta.
+_PATRON_AUX_UNISEP = re.compile(
+    r'^(\d{1,6}[-.]\d{2,8})\s+('
+    r'(?:[A-Za-zÁÉÍÓÚÑáéíóúñ].+)|'
+    r'(?:1[.\s]*V[.\s]*A[.\s]+[A-Za-zÁÉÍÓÚÑáéíóúñ].+)'
+    r')',
+    re.IGNORECASE,
+)
 # FG2 — código compacto concatenado al nombre sin espacio: 11090BANCO, 10423CTA.
 #    El lookahead `(?=[A-Z...])` parte en la frontera dígito → letra y exige que
 #    el código sea de 4 a 6 dígitos seguidos inmediatamente por una letra.
@@ -1776,7 +3247,9 @@ _PATRON_CODIGO_EMBEBIDO_OCR = re.compile(
     r"^[^\d\n]{1,3}(\d{1,2}(?:[.,/:]\d{1,2}){2,4})\s*[-–—−]?\s*(.+)$"
 )
 
-PATRON_MONTOS = re.compile(r'(-?\(?[\d.,]{1,18}\)?)')
+# Exige al menos un dígito: una coma o punto aislado puede ser ruido de la
+# grilla OCR, pero no representa un importe ni una celda monetaria observada.
+PATRON_MONTOS = re.compile(r'(-?\(?(?=[\d.,]*\d)[\d.,]{1,18}\)?)')
 _OCR_CERO = re.compile(r'^[oO]$')
 _OCR_CERO_EN_CELDA = re.compile(r'^(?:[oO]|[\]\[»«|!lI]{1,3}|[sS][eE][oO])$')
 
@@ -1787,18 +3260,92 @@ def _es_token_cero_ocr_en_celda(token: str) -> bool:
 
 
 def normalizar_token_ocr(token: str) -> str:
+    token = token.strip()
     if _OCR_CERO.match(token):
         return '0'
+    # La línea vertical de la grilla puede quedar adherida a un importe OCR
+    # (``3.108.206.983|`` o ``|478.724``). Se elimina únicamente cuando el
+    # resto del token ya satisface el formato monetario, sin tocar glosas como
+    # ``N*15807`` ni símbolos aislados.
+    sin_bordes = re.sub(r"^[|!]+|[|!]+$", "", token)
+    if sin_bordes != token and PATRON_MONTOS.fullmatch(sin_bordes):
+        token = sin_bordes
     # Los dos puntos aparecen como sustituto del punto de miles en escaneos
     # tenues (p. ej. ``3.732:989.407``). Se limita al contexto entre dígitos.
     return re.sub(r"(?<=\d):(?=\d)", ".", token)
 
 PATRON_TOTAL = re.compile(
-    r'^(?:total(?:es)?|sub-?total(?:es)?|sumas?(?: iguales)?)\b|'
-    r'^(?:resultado(?: del ejercicio| [\x22\x27]?(?:positivo|negativo))?|utilidad(?: neta| del ejercicio)?|'
-    r'perdida(?: o ganancia| neta| neto| del ejercicio)?)$',
+    r'^(?:total(?:es)?|sub[-\s]?total(?:es)?|sumas?(?: iguales)?)\b|'
+    r'^(?:de la p[aá]gina anterior|saldos? anteriores?)\b|'
+    r'^(?:resultado(?: del ejercicio| [\x22\x27]?(?:positivo|negativo))?|'
+    r'utilidad\s*(?:/|o)\s*perdida|perdida\s*(?:/|o)\s*utilidad|'
+    r'utilidad(?: neta| del ejercicio)?|'
+    r'perdida(?: o ganancia| neta| neto| del ejercicio)?|'
+    r'ganancia(?: neta|(?: del)? ejercicio)|'
+    r'(?:patrimonio(?: neto)?|equity) total)$',
     re.IGNORECASE
 )
+
+
+def _normalizar_etiqueta_control_ocr(
+    nombre: str,
+    celdas: list[Optional[dict[str, Any]]],
+) -> str:
+    """Canoniza rótulos de control OCR sólo con ocho celdas observadas.
+
+    No completa valores ni intenta corregir glosas de cuentas. Los casos
+    cubiertos son pérdidas de un único carácter al inicio de un control y
+    ruido de un carácter alrededor del rótulo. Los subtotales y cierres
+    requieren las ocho columnas físicas; el puente de utilidad admite celdas
+    vacías porque esos ceros suelen no estar impresos.
+    """
+    celdas_observadas = sum(celda is not None for celda in celdas)
+    if len(celdas) != len(RAW_MONETARY_COLUMNS):
+        return nombre
+    tokens = re.findall(r"[a-z]+", _sin_acentos(nombre).lower())
+    if not tokens:
+        return nombre
+    primero, resto = tokens[0], tokens[1:]
+    if (
+        celdas_observadas == len(RAW_MONETARY_COLUMNS)
+        and primero == "sub"
+        and resto
+        and resto[0] in {"total", "totales"}
+        and all(len(token) == 1 for token in resto[1:])
+    ):
+        return "SUBTOTAL"
+    if (
+        celdas_observadas == len(RAW_MONETARY_COLUMNS)
+        and primero == "otales"
+        and all(len(token) == 1 for token in resto)
+    ):
+        return "TOTALES"
+    # Los puentes de resultado suelen dejar ceros como celdas realmente
+    # vacías. Dos importes físicos complementarios más la pérdida de la ``u``
+    # inicial o un único glifo final espurio en "utilidad" bastan para
+    # reconocer el rótulo, sin asignar ni completar ninguno de los ceros
+    # ausentes.
+    if (
+        celdas_observadas >= 2
+        and primero in {"tilidad", "utilidad"}
+        and all(len(token) == 1 for token in resto)
+    ):
+        return "UTILIDAD DEL EJERCICIO"
+    return nombre
+
+
+def _es_control_final_ocho_columnas(
+    nombre: str,
+    celdas: list[Optional[dict[str, Any]]],
+) -> bool:
+    """Distingue un cierre final de un subtotal contable intermedio."""
+    if len(celdas) != len(RAW_MONETARY_COLUMNS) or not all(celdas):
+        return False
+    clave = re.sub(r"[^a-z0-9]+", "", _sin_acentos(nombre).lower())
+    return clave in {
+        "totales", "totalesiguales", "sumasiguales", "sumastotales",
+        "totalgeneral",
+    }
 
 # ── Filtro de líneas basura (FASE 24B.2) ─────────────────────────────────
 # Cada patrón matchea la línea COMPLETA para no filtrar substrings dentro
@@ -1827,6 +3374,11 @@ GARBAGE_PATTERNS: list[re.Pattern] = [
     # Notas al pie
     re.compile(r'^\s*(?:Notas?\s+\d+(?:\s*(?:a|l|y|al)\s*\d+)?|Ver\s+Notas?\s+\d+(?:\s*(?:a|l|y|al)\s*\d+)?)\s*$', re.I),
     re.compile(r'^\s*Art[ií]culo(?:\s+\d+)?\s+C[oó]digo\s+Tributario\b.*$', re.I),
+    re.compile(
+        r'^.*\bArt[ií]culo(?:\s+\d+)?\s+del\s+C[oó]digo\s+'
+        r'Tributario\b.*$',
+        re.I,
+    ),
     re.compile(r'^\s*con\s+los\s+antecedentes\s+aportados\s+por\s+el\s+Contribuyente\s*$', re.I),
     # Firmas / cargos
     re.compile(r'^\s*(?:Firma|Representante|Contador|Auditor|Revisor|Preparado)\b.*$', re.I),
@@ -1895,13 +3447,103 @@ def normalizar_linea_ocr_tabla(linea: str) -> str:
     de grilla y normaliza comas intercaladas en montos chilenos.
     """
     limpia = re.sub(r"[\[\]|¡]", " ", linea)
+    limpia = _normalizar_ruido_terminal_monetario(limpia)
     limpia = " ".join(
         _separar_token_montos_concatenados(token)
         for token in limpia.split()
     )
     limpia = re.sub(r"(?<=\d),(?=\d)", ".", limpia)
     limpia = re.sub(r"(?<=\d):(?=\d)", ".", limpia)
+    # Las filas de arrastre acumulado no son cuentas de detalle. En escaneos
+    # tenues, ``Anterior`` suele salir como ``Amerior`` o ``Anterlor``; se
+    # corrige sólo al inicio de la etiqueta completa, nunca dentro de una
+    # glosa ni de un importe.
+    limpia = re.sub(
+        r"^(de\s+la\s+p[aá]gina)\s+(?:anterior|amerior|anterlor)\b",
+        r"\1 Anterior",
+        limpia,
+        flags=re.IGNORECASE,
+    )
     return re.sub(r"\s+", " ", limpia).strip()
+
+
+_PATRON_PUENTE_RESULTADO = re.compile(
+    r"^\W*(?:utilidad\s*(?:/|o)\s*perdida|"
+    r"perdida\s*(?:/|o)\s*utilidad|"
+    r"utilidad(?:\s+del\s+ejercicio)?|"
+    r"ganancia(?:\s+neta|\s+(?:del\s+)?ejercicio)|"
+    r"perdida\s+o\s+ganancia|resultado(?:\s+del\s+ejercicio)?)\b",
+    re.I,
+)
+
+_PATRON_PUENTE_RESULTADO_REPETIDO = re.compile(
+    r"(?:utilidad\s*(?:/|o)\s*perdida|"
+    r"perdida\s*(?:/|o)\s*utilidad)"
+    r"(?:\s+(?:utilidad\s*(?:/|o)\s*perdida|"
+    r"perdida\s*(?:/|o)\s*utilidad))*",
+    re.I,
+)
+
+
+def _es_etiqueta_total(linea: str) -> bool:
+    """Reconoce controles aunque el extractor repita su rótulo lateral.
+
+    La repetición se limita al puente ``Utilidad/Pérdida`` sin código de
+    cuenta. No convierte una glosa codificada en control ni completa cifras.
+    """
+    normalizada = _sin_acentos(re.sub(r"\s+", " ", linea or "")).strip()
+    return bool(
+        PATRON_TOTAL.match(normalizada)
+        or _PATRON_PUENTE_RESULTADO_REPETIDO.fullmatch(normalizada)
+    )
+
+
+def _es_puente_resultado(linea: str) -> bool:
+    """Indica si una fila rotulada conecta subtotal y cierre del ejercicio."""
+    return bool(_PATRON_PUENTE_RESULTADO.match(
+        normalizar_linea_ocr_tabla(linea),
+    ))
+
+
+def _fila_subtotal_anonima(linea: str) -> Optional[str]:
+    """Devuelve ocho importes sólo para el subtotal sin texto anclado.
+
+    Una fila puramente numérica no se trata como cuenta. Sólo queda disponible
+    para un control cuando la fila siguiente identifica el resultado del
+    ejercicio. La función no rellena posiciones ausentes ni deriva importes.
+    """
+    normalizada = normalizar_linea_ocr_tabla(linea)
+    if not normalizada or re.search(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]", normalizada):
+        return None
+    tokens = normalizada.split()
+    if len(tokens) != len(RAW_MONETARY_COLUMNS):
+        return None
+    montos: list[str] = []
+    for token in tokens:
+        normalizado = normalizar_token_ocr(token).replace("$", "")
+        if normalizado == "-":
+            normalizado = "0"
+        if not PATRON_MONTOS.fullmatch(normalizado):
+            return None
+        montos.append(normalizado)
+    return " ".join(montos)
+
+
+def etiquetar_subtotales_anonimos(lineas: list[str]) -> list[str]:
+    """Conserva subtotales de ocho importes anclados por el cierre inmediato."""
+    etiquetadas: list[str] = []
+    for indice, linea in enumerate(lineas):
+        montos = _fila_subtotal_anonima(linea)
+        siguiente = ""
+        for candidata in lineas[indice + 1:]:
+            if str(candidata).strip():
+                siguiente = str(candidata)
+                break
+        if montos is not None and _es_puente_resultado(siguiente):
+            etiquetadas.append(f"SUBTOTAL SIN ETIQUETA {montos}")
+        else:
+            etiquetadas.append(linea)
+    return etiquetadas
 
 
 def normalizar_montos_fragmentados(linea: str) -> str:
@@ -1976,35 +3618,141 @@ def _ocr_requiere_alternativa(texto: str, es_ultima_pagina: bool) -> bool:
     return metricas["encabezados"] < 2 and metricas["filas_ocho_columnas"] == 0
 
 
+def _certificar_candidato_textual_ocr(texto: str) -> CertificacionExtraccion:
+    """Evalúa un candidato OCR lineal antes de permitir que reemplace otro.
+
+    La comparación de PSM 6 y PSM 4 no puede decidirse por cantidad de texto
+    ni por el número de importes detectados. Ambos pueden crecer cuando OCR
+    inventa una cifra. Esta función reproduce sólo el tramo pasivo de parseo
+    necesario para contrastar las identidades y el subtotal de ocho columnas;
+    no clasifica cuentas ni modifica el candidato recibido.
+
+    Es intencionalmente conservadora: una lectura sin controles suficientes
+    queda ``no_evaluable`` y no puede desplazar una lectura previa.
+    """
+    lineas = [
+        normalizar_codigo_ocr(normalizar_linea_ocr_tabla(linea))
+        for linea in (texto or "").splitlines()
+        if linea.strip()
+    ]
+    lineas = etiquetar_subtotales_anonimos(lineas)
+    primeros_tokens = [
+        linea.split()[0] if linea.split() else "" for linea in lineas[:60]
+    ]
+    formato = detectar_formato_codigo(primeros_tokens)
+    montos_muestra = [
+        monto for linea in lineas[:80] for monto in PATRON_MONTOS.findall(linea)
+    ]
+    separador = detectar_separador_miles(montos_muestra)
+    cuentas = [
+        cuenta
+        for indice, linea in enumerate(lineas)
+        if (
+            cuenta := parsear_linea(
+                linea, indice, formato, separador, confianza_base=0.75,
+            )
+        ) is not None
+    ]
+    cuentas, _ = fusionar_cuentas_partidas(cuentas)
+    cuentas, _ = fusionar_control_total_general_partido(cuentas)
+    return certificar_extraccion_columnas(
+        cuentas, metodo="ocr_text_candidate",
+    )
+
+
+def _candidato_ocr_mejora_certificacion(
+    base: CertificacionExtraccion,
+    candidato: CertificacionExtraccion,
+) -> bool:
+    """Acepta sólo una mejora certificable para la entrega o revisión.
+
+    Una alternativa que sigue ``fallida`` puede ser útil para diagnóstico,
+    pero no debe reemplazar datos extraídos. La mejora admitida debe elevar el
+    estado y terminar en una extracción certificada, o en una parcial cuyas
+    columnas finales sí fueron validadas de forma independiente.
+    """
+    niveles = {
+        "no_evaluable": 0,
+        "fallida": 1,
+        "parcial": 2,
+        "certificada": 3,
+    }
+    nivel_base = niveles.get(str(base.estado), -1)
+    nivel_candidato = niveles.get(str(candidato.estado), -1)
+    es_apta = (
+        candidato.estado == "certificada"
+        or (
+            candidato.estado == "parcial"
+            and candidato.columnas_finales_validadas is True
+        )
+    )
+    return bool(es_apta and nivel_candidato > nivel_base)
+
+
+def _candidato_geometrico_ocr_mejora_certificacion(
+    lineas_base: list[str], lineas_candidatas: list[str],
+) -> bool:
+    """Autoriza una segunda geometría OCR sólo a nivel documental.
+
+    PSM 6 y PSM 4 pueden repartir correctamente las mismas ocho columnas,
+    pero sólo una lectura completa permite validar los subtotales impresos.
+    Por eso no se reemplaza una página aislada ni se mezclan sus celdas: la
+    alternativa debe certificar el documento entero y mejorar el estado de la
+    lectura geométrica ya usada.
+    """
+    if not lineas_base or not lineas_candidatas:
+        return False
+    base = _certificar_candidato_textual_ocr("\n".join(lineas_base))
+    candidata = _certificar_candidato_textual_ocr("\n".join(lineas_candidatas))
+    return _candidato_ocr_mejora_certificacion(base, candidata)
+
+
 def _combinar_candidatos_ocr(texto_base: str, texto_alternativo: str) -> tuple[str, str]:
-    """Selecciona o fusiona lecturas OCR preservando filas y controles."""
+    """Selecciona una lectura OCR sólo cuando mejora su certificación.
+
+    Las métricas estructurales reducen las combinaciones que vale la pena
+    evaluar, pero no autorizan por sí solas una sustitución. La decisión final
+    requiere que el candidato supere la certificación del texto principal.
+    """
     if not texto_alternativo.strip():
         return texto_base, "principal"
-    score_base = _puntuar_texto_ocr_balance(texto_base)
-    score_alternativo = _puntuar_texto_ocr_balance(texto_alternativo)
-    metricas_base = _metricas_texto_ocr_balance(texto_base)
-    metricas_alt = _metricas_texto_ocr_balance(texto_alternativo)
-    if (
-        score_alternativo >= score_base + 10
-        and metricas_alt["filas_numericas"] >= metricas_base["filas_numericas"]
-    ):
-        return texto_alternativo, "tabla"
-
     controles_alt = []
     for linea in texto_alternativo.splitlines():
         limpia = normalizar_linea_ocr_tabla(linea)
-        if re.match(r"^(sumas?|subtotales?|resultado|utilidad|totales?)\b", limpia, re.I):
-            controles_alt.append(linea)
-    if not controles_alt:
-        return texto_base, "principal"
-    base_sin_controles = []
-    for linea in texto_base.splitlines():
-        limpia = normalizar_linea_ocr_tabla(linea)
-        if not re.match(
-            r"^(sumas?|subtotales?|resultado|utilidad|totales?)\b", limpia, re.I,
+        if re.match(
+            r"^(sumas?|subtotales?|resultado|utilidad|"
+            r"ganancia(?:\s+(?:del\s+)?ejercicio|\s+neta)|totales?)\b",
+            limpia,
+            re.I,
         ):
-            base_sin_controles.append(linea)
-    return "\n".join(base_sin_controles + controles_alt), "fusion"
+            controles_alt.append(linea)
+    # La alternativa siempre se certifica. Una variante mejor puede tener
+    # menos tokens numéricos porque descartó ruido OCR; filtrar por volumen
+    # antes de mirar los controles volvería a favorecer el texto más largo.
+    candidatos: list[tuple[str, str]] = [(texto_alternativo, "tabla")]
+    if controles_alt:
+        base_sin_controles = []
+        for linea in texto_base.splitlines():
+            limpia = normalizar_linea_ocr_tabla(linea)
+            if not re.match(
+                r"^(sumas?|subtotales?|resultado|utilidad|"
+                r"ganancia(?:\s+(?:del\s+)?ejercicio|\s+neta)|totales?)\b",
+                limpia,
+                re.I,
+            ):
+                base_sin_controles.append(linea)
+        candidatos.append(("\n".join(base_sin_controles + controles_alt), "fusion"))
+
+    if not candidatos:
+        return texto_base, "principal"
+    certificacion_base = _certificar_candidato_textual_ocr(texto_base)
+    for candidato, estrategia in candidatos:
+        certificacion_candidata = _certificar_candidato_textual_ocr(candidato)
+        if _candidato_ocr_mejora_certificacion(
+            certificacion_base, certificacion_candidata,
+        ):
+            return candidato, estrategia
+    return texto_base, "principal"
 
 
 def parsear_linea(
@@ -2018,7 +3766,7 @@ def parsear_linea(
     years: Optional[list[str]] = None,
     currencies: Optional[list[str]] = None,
 ) -> Optional[CuentaRaw]:
-    linea = linea.strip()
+    linea = _normalizar_ruido_terminal_monetario(linea).strip()
     if len(linea) < 4:
         return None
 
@@ -2038,7 +3786,7 @@ def parsear_linea(
 
     # Los totales impresos no llevan código. Evita interpretar su primer monto
     # (p. ej. 72.911.536.017) como un código de formato PUNTO.
-    if PATRON_TOTAL.match(linea_para_total):
+    if _es_etiqueta_total(linea_para_total):
         resto = linea_para_total
     elif formato_codigo != FormatoCodigo.SIN_CODIGO:
         patron = PATRONES_CODIGO_LINEA[formato_codigo]
@@ -2124,7 +3872,7 @@ def parsear_linea(
         return None
 
     nombre_para_total = re.sub(r"^[^\w]+", "", nombre).strip()
-    es_total = codigo is None and bool(PATRON_TOTAL.match(nombre_para_total))
+    es_total = codigo is None and _es_etiqueta_total(nombre_para_total)
 
     # Determinar orden de columnas: si ENABLE_DYNAMIC_LAYOUT está activo
     # y se proporcionó un column_order con confianza suficiente, usarlo.
@@ -2451,6 +4199,34 @@ def parsear_linea(
                 ):
                     montos_columnas["creditos"] = expected_credit
                     columnas_derivadas.append("creditos")
+
+        # En una fila OCR completa, Debe-Haber y el saldo pueden coincidir
+        # entre sí aunque la única copia de la columna final tenga un dígito
+        # errado. No se mueve el importe entre naturaleza de cuenta: sólo se
+        # corrige el valor de la misma celda final cuando su lado (deudor o
+        # acreedor) ya coincide con la evidencia independiente. La marca
+        # derivada mantiene el documento fuera de la entrega automática.
+        if (
+            confianza_base < 1.0
+            and movement_consistent
+            and not classification_consistent
+            and (debtor == 0) != (creditor == 0)
+        ):
+            final_columns = (
+                ("activo", "perdida") if debtor else ("pasivo", "ganancia")
+            )
+            populated = [
+                column for column in final_columns
+                if montos_columnas[column] != 0
+            ]
+            expected = debtor or creditor
+            if (
+                len(populated) == 1
+                and abs(montos_columnas[populated[0]] - expected) > 10
+            ):
+                target = populated[0]
+                montos_columnas[target] = expected
+                columnas_derivadas.append(target)
         if es_total and debit == credit and debit != 0:
             if debtor == 0 and creditor != 0:
                 montos_columnas["saldo_deudor"] = creditor
@@ -2479,6 +4255,13 @@ def parsear_linea(
             column, value = classified_values[0]
             origen = origin_by_column[column]
             monto_principal = value
+        elif not classified_values:
+            # Una fila con Debe y Haber iguales puede tener movimiento
+            # histórico, pero sin saldo final no representa una cifra vigente
+            # que deba entrar a la homologación. Esta evidencia de las ocho
+            # columnas prevalece sobre un año detectado en la cabecera.
+            monto_principal = 0.0
+            origen = OrigenColumna.DESCONOCIDO
     return CuentaRaw(
         linea=numero_linea,
         codigo=codigo,
@@ -2490,6 +4273,1238 @@ def parsear_linea(
         montos_columnas=montos_columnas,
         montos_periodos=montos_periodos,
         columnas_derivadas=columnas_derivadas,
+    )
+
+
+def _entero_monetario_focal(token: str) -> Optional[float]:
+    """Normaliza una lectura focal de una celda monetaria a entero.
+
+    Esta vía recibe sólo Tesseract con whitelist numérica. Se interpreta como
+    entero porque las ocho columnas tributarias expresan importes enteros y
+    porque la puntuación de miles puede variar entre dos lecturas del mismo
+    recorte (``206.182`` versus ``206,182``).
+    """
+    bruto = str(token or "").strip().replace("O", "0").replace("o", "0")
+    if not bruto:
+        return None
+    # En una celda monetaria aislada el guion es la convención impresa para
+    # cero. Se acepta sólo en esta relectura focal, que de todos modos necesita
+    # consenso OCR y mejora de identidades antes de modificar una fila.
+    if bruto in {"-", "—", "−"}:
+        return 0.0
+    negativo = bruto.startswith("-") or (
+        bruto.startswith("(") and bruto.endswith(")")
+    )
+    digitos = re.sub(r"\D", "", bruto)
+    if not digitos:
+        return None
+    valor = float(int(digitos))
+    return -valor if negativo else valor
+
+
+def _difiere_hasta_n_digitos_monetarios(
+    original: str, releido: float, max_edits: int,
+) -> bool:
+    """Mide una distancia de edición acotada entre dos lecturas monetarias."""
+    base = re.sub(r"\D", "", str(original or ""))
+    candidato = str(abs(int(round(float(releido)))))
+    if not base or max_edits < 1 or abs(len(base) - len(candidato)) > max_edits:
+        return False
+    anterior = list(range(len(candidato) + 1))
+    for indice_base, digito_base in enumerate(base, start=1):
+        actual = [indice_base]
+        for indice_candidato, digito_candidato in enumerate(candidato, start=1):
+            actual.append(min(
+                anterior[indice_candidato] + 1,
+                actual[indice_candidato - 1] + 1,
+                anterior[indice_candidato - 1]
+                + (digito_base != digito_candidato),
+            ))
+        if min(actual) > max_edits:
+            return False
+        anterior = actual
+    return anterior[-1] <= max_edits
+
+
+def _difiere_un_digito_monetario(original: str, releido: float) -> bool:
+    """Acepta un único error OCR de sustitución, inserción o eliminación."""
+    return _difiere_hasta_n_digitos_monetarios(original, releido, max_edits=1)
+
+
+def _formatear_entero_monetario_focal(valor: float, original: str) -> str:
+    """Conserva el estilo de separador de la línea canónica de origen."""
+    entero = int(round(abs(float(valor))))
+    if "." in original:
+        texto = f"{entero:,}".replace(",", ".")
+    elif "," in original:
+        texto = f"{entero:,}"
+    else:
+        texto = str(entero)
+    return f"-{texto}" if float(valor) < 0 else texto
+
+
+def _releer_celda_ocr_focal(
+    celda: dict[str, Any], cache_imagenes: dict[tuple[str, int], Image.Image],
+    *, preservar_escala: bool = False,
+) -> Optional[float]:
+    """Lee una celda OCR con varias binarizaciones y exige consenso exacto.
+
+    No retorna una cifra cuando no existe caja geométrica, el recorte no se
+    puede leer o las dos variantes no coinciden. Es una fuente de evidencia,
+    no una reconstrucción aritmética. ``preservar_escala`` se usa sólo como
+    segunda lectura: algunos 6/8 de impresión pequeña se degradan al ampliar
+    un recorte antes de binarizarlo.
+    """
+    bbox = celda.get("bbox")
+    image_path = celda.get("imagen")
+    rotacion = int(celda.get("rotacion", 0) or 0)
+    if not bbox or not image_path:
+        return None
+    key = (str(image_path), rotacion)
+    try:
+        if key not in cache_imagenes:
+            with Image.open(image_path) as original:
+                preparada = (
+                    original.rotate(rotacion, expand=True)
+                    if rotacion else original.copy()
+                )
+                cache_imagenes[key] = preparada.convert("L")
+        imagen = cache_imagenes[key]
+        x0, y0, x1, y1 = (float(valor) for valor in bbox)
+        izquierda = max(0, int(math.floor(x0)) - OCR_CELL_PADDING_PIXELS)
+        arriba = max(0, int(math.floor(y0)) - OCR_CELL_PADDING_PIXELS)
+        derecha = min(imagen.width, int(math.ceil(x1)) + OCR_CELL_PADDING_PIXELS)
+        abajo = min(imagen.height, int(math.ceil(y1)) + OCR_CELL_PADDING_PIXELS)
+        if derecha <= izquierda or abajo <= arriba:
+            return None
+        recorte = imagen.crop((izquierda, arriba, derecha, abajo))
+        if not preservar_escala and recorte.height < OCR_CELL_MIN_HEIGHT_PIXELS:
+            escala = min(
+                OCR_CELL_MAX_UPSCALE,
+                OCR_CELL_MIN_HEIGHT_PIXELS / max(recorte.height, 1),
+            )
+            recorte = recorte.resize(
+                (
+                    max(1, int(round(recorte.width * escala))),
+                    max(1, int(round(recorte.height * escala))),
+                ),
+                Image.Resampling.LANCZOS,
+            )
+    except (OSError, ValueError):
+        return None
+
+    lecturas: list[float] = []
+
+    def leer_umbral(umbral: int) -> Optional[float]:
+        binaria = recorte.point(lambda pixel, limite=umbral: 255 if pixel > limite else 0)
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as temporal:
+            binaria.save(temporal.name)
+            temporal_path = Path(temporal.name)
+        try:
+            resultado = _ejecutar_tesseract_imagen(
+                temporal_path,
+                "stdout",
+                [
+                    "-l", "spa", "--psm", "7", "-c",
+                    "tessedit_char_whitelist=0123456789.,()-",
+                ],
+                timeout=OCR_CELL_TIMEOUT_SECONDS,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        finally:
+            temporal_path.unlink(missing_ok=True)
+        if resultado.returncode != 0:
+            return None
+        return _entero_monetario_focal(resultado.stdout)
+
+    for umbral in OCR_CELL_THRESHOLDS:
+        valor = leer_umbral(umbral)
+        if valor is not None:
+            lecturas.append(valor)
+    if len(lecturas) == len(OCR_CELL_THRESHOLDS) and len(set(lecturas)) == 1:
+        return lecturas[0]
+
+    # Si los dos umbrales bajos no vieron ningún trazo, 140/180 suele repetir
+    # el vacío de una celda tenue. Se prueba directamente un par alto. Cuando
+    # sí existe una lectura primaria, se conserva el desempate intermedio.
+    sin_lecturas_primarias = not lecturas
+    umbrales_rescate = (
+        OCR_CELL_EMPTY_PRIMARY_THRESHOLDS
+        if sin_lecturas_primarias
+        else OCR_CELL_TIEBREAK_THRESHOLDS
+    )
+    # Un desempate se permite sólo cuando dos umbrales independientes
+    # convergen exactamente; nunca se elige el valor de un único umbral ni se
+    # reconstruye desde un control.
+    for umbral in umbrales_rescate:
+        valor = leer_umbral(umbral)
+        if valor is not None:
+            lecturas.append(valor)
+    # Una celda muy tenue puede leerse como 6 con 200 y como 0 con 220. El
+    # umbral central no escoge entre ellos por sí solo: sólo añade evidencia
+    # cuando reproduce exactamente una de las dos lecturas de rescate.
+    if (
+        sin_lecturas_primarias
+        and lecturas
+        and max(Counter(lecturas).values()) < 2
+    ):
+        valor = leer_umbral(OCR_CELL_EMPTY_PRIMARY_TIEBREAK_THRESHOLD)
+        if valor is not None:
+            lecturas.append(valor)
+    coincidencias = Counter(lecturas)
+    if not coincidencias:
+        return None
+    valor, repeticiones = coincidencias.most_common(1)[0]
+    if repeticiones < 2 or sum(
+        cantidad == repeticiones for cantidad in coincidencias.values()
+    ) > 1:
+        return None
+    return valor
+
+
+def _lecturas_importe_clasificado_ocr(
+    evidencia: Optional[dict[str, Any]],
+    cache_imagenes: dict[tuple[str, int], Image.Image],
+) -> set[float]:
+    """Devuelve lecturas focales consensuadas para un importe clasificado.
+
+    La salida TSV y el OCR lineal pueden discrepar incluso con el mismo PSM.
+    Se prueba primero la escala nativa, luego el recorte ampliado habitual y,
+    si la caja OCR cortó un borde de un dígito, un margen horizontal adicional
+    de ocho píxeles. Cada valor devuelto ya superó el consenso interno de
+    ``_releer_celda_ocr_focal``. Esta función no escoge entre alternativas.
+    """
+    if not evidencia or not evidencia.get("bbox"):
+        return set()
+
+    lecturas: set[float] = set()
+
+    def registrar(celda: dict[str, Any], *, preservar_escala: bool) -> None:
+        lectura = _releer_celda_ocr_focal(
+            celda, cache_imagenes, preservar_escala=preservar_escala,
+        )
+        if lectura is not None:
+            lecturas.add(float(lectura))
+
+    registrar(evidencia, preservar_escala=True)
+    registrar(evidencia, preservar_escala=False)
+
+    try:
+        x0, y0, x1, y1 = (
+            float(value) for value in evidencia["bbox"]
+        )
+    except (TypeError, ValueError):
+        return lecturas
+    ampliada = dict(evidencia)
+    ampliada["bbox"] = (
+        max(0.0, x0 - OCR_CELL_PADDING_PIXELS), y0,
+        x1 + OCR_CELL_PADDING_PIXELS, y1,
+    )
+    registrar(ampliada, preservar_escala=False)
+    return lecturas
+
+
+def _importe_clasificado_focal_unico(
+    evidencia: Optional[dict[str, Any]],
+    monto_actual: float,
+    cache_imagenes: dict[tuple[str, int], Image.Image],
+) -> Optional[float]:
+    """Acepta sólo una alternativa focal no ambigua al importe geométrico."""
+    alternativas = {
+        lectura for lectura in _lecturas_importe_clasificado_ocr(
+            evidencia, cache_imagenes,
+        )
+        if abs(float(lectura) - float(monto_actual)) > 0.01
+        and _difiere_un_digito_monetario(
+            str(int(round(float(monto_actual)))), lectura,
+        )
+    }
+    if len(alternativas) != 1:
+        return None
+    return next(iter(alternativas))
+
+
+def _confirmar_importe_clasificado_ocr(
+    evidencia: Optional[dict[str, Any]], candidato: float,
+    cache_imagenes: dict[tuple[str, int], Image.Image],
+) -> bool:
+    """Confirma una alternativa textual con la primera lectura focal sólida.
+
+    La escala nativa tiene prioridad porque evita artefactos de reescalado. Si
+    no entrega una lectura consensuada, se prueba el recorte ampliado y luego
+    un margen horizontal corto. Una lectura sólida que contradiga al OCR
+    textual bloquea la sustitución de inmediato.
+    """
+    if not evidencia or not evidencia.get("bbox"):
+        return False
+
+    def coincide(celda: dict[str, Any], *, preservar_escala: bool) -> Optional[bool]:
+        lectura = _releer_celda_ocr_focal(
+            celda, cache_imagenes, preservar_escala=preservar_escala,
+        )
+        if lectura is None:
+            return None
+        return abs(float(lectura) - float(candidato)) <= 0.01
+
+    nativa = coincide(evidencia, preservar_escala=True)
+    if nativa is not None:
+        return nativa
+    escalada = coincide(evidencia, preservar_escala=False)
+    if escalada is not None:
+        return escalada
+    try:
+        x0, y0, x1, y1 = (
+            float(value) for value in evidencia["bbox"]
+        )
+    except (TypeError, ValueError):
+        return False
+    ampliada = dict(evidencia)
+    ampliada["bbox"] = (
+        max(0.0, x0 - OCR_CELL_PADDING_PIXELS), y0,
+        x1 + OCR_CELL_PADDING_PIXELS, y1,
+    )
+    ampliada_escalada = coincide(ampliada, preservar_escala=False)
+    return bool(ampliada_escalada)
+
+
+def _parsear_lineas_ocho_columnas_focales(
+    lineas: list[str],
+) -> tuple[dict[int, CuentaRaw], FormatoCodigo, str]:
+    """Replica sólo el contexto mínimo necesario para validar una relectura."""
+    primeros = [linea.split()[0] if linea.split() else "" for linea in lineas[:60]]
+    formato = detectar_formato_codigo(primeros)
+    muestra: list[str] = []
+    for linea in lineas[:80]:
+        muestra.extend(PATRON_MONTOS.findall(linea))
+    separador = detectar_separador_miles(muestra)
+    cuentas: dict[int, CuentaRaw] = {}
+    for indice, linea in enumerate(lineas):
+        cuenta = parsear_linea(
+            linea, indice, formato, separador, confianza_base=0.75,
+        )
+        if cuenta is not None and set(RAW_MONETARY_COLUMNS).issubset(
+            cuenta.montos_columnas
+        ):
+            cuentas[indice] = cuenta
+    return cuentas, formato, separador
+
+
+def _error_identidades_ocho_columnas(cuenta: CuentaRaw) -> float:
+    valores = cuenta.montos_columnas
+    movimiento = valores["debitos"] - valores["creditos"]
+    saldo = valores["saldo_deudor"] - valores["saldo_acreedor"]
+    clasificado = sum(
+        valores[columna] for columna in ("activo", "pasivo", "perdida", "ganancia")
+    )
+    return abs(movimiento - saldo) + abs(
+        valores["saldo_deudor"] + valores["saldo_acreedor"] - clasificado
+    )
+
+
+def _columnas_posibles_para_correccion_focal(
+    cuenta: CuentaRaw, tolerancia: float = 10.0,
+) -> set[str]:
+    """Acota la relectura a celdas que podrían reparar una sola fila.
+
+    Una corrección focal de detalle admite una sola celda y debe dejar la suma
+    de los errores de las dos identidades dentro de ``tolerancia``. Cada
+    columna conserva una combinación distinta de esos errores. Si esa
+    combinación ya excede la tolerancia, ninguna relectura de esa celda puede
+    ser aceptada después. Este filtro no infiere cifras: evita OCR adicional
+    sobre celdas que las identidades ya descartan.
+    """
+    valores = cuenta.montos_columnas
+    movimiento = (
+        float(valores["debitos"]) - float(valores["creditos"])
+        - float(valores["saldo_deudor"]) + float(valores["saldo_acreedor"])
+    )
+    clasificado = (
+        float(valores["saldo_deudor"]) + float(valores["saldo_acreedor"])
+        - float(valores["activo"]) - float(valores["pasivo"])
+        - float(valores["perdida"]) - float(valores["ganancia"])
+    )
+    posibles: set[str] = set()
+    if abs(clasificado) <= tolerancia:
+        posibles.update({"debitos", "creditos"})
+    if abs(movimiento) <= tolerancia:
+        posibles.update({"activo", "pasivo", "perdida", "ganancia"})
+    # Al variar saldo_deudor se conserva movimiento + clasificado; al variar
+    # saldo_acreedor se conserva movimiento - clasificado. Cualquier candidato
+    # que alcance el umbral final debe respetar estos invariantes.
+    if abs(movimiento + clasificado) <= tolerancia:
+        posibles.add("saldo_deudor")
+    if abs(movimiento - clasificado) <= tolerancia:
+        posibles.add("saldo_acreedor")
+    return posibles
+
+
+def _sustituir_celdas_ocho_columnas(
+    linea: str, reemplazos: dict[str, float],
+) -> str:
+    tokens = linea.split()
+    if len(tokens) < len(RAW_MONETARY_COLUMNS):
+        return linea
+    inicio = len(tokens) - len(RAW_MONETARY_COLUMNS)
+    for desplazamiento, columna in enumerate(RAW_MONETARY_COLUMNS):
+        if columna not in reemplazos:
+            continue
+        posicion = inicio + desplazamiento
+        tokens[posicion] = _formatear_entero_monetario_focal(
+            reemplazos[columna], tokens[posicion],
+        )
+    return " ".join(tokens)
+
+
+def _candidatos_focales_de_linea(
+    linea: str,
+    evidencia: Optional[dict[str, Any]],
+    releer_celda: Any,
+    columnas_permitidas: Optional[set[str]] = None,
+    max_edits: int = 1,
+) -> dict[str, float]:
+    if not evidencia:
+        return {}
+    celdas = evidencia.get("celdas") or []
+    tokens = linea.split()
+    if len(celdas) != len(RAW_MONETARY_COLUMNS) or len(tokens) < len(celdas):
+        return {}
+    inicio = len(tokens) - len(RAW_MONETARY_COLUMNS)
+    candidatos: dict[str, float] = {}
+    for desplazamiento, columna in enumerate(RAW_MONETARY_COLUMNS):
+        if columnas_permitidas is not None and columna not in columnas_permitidas:
+            continue
+        celda = celdas[desplazamiento]
+        original = tokens[inicio + desplazamiento]
+        valor_original = _entero_monetario_focal(original)
+        if celda is None or valor_original in (None, 0):
+            continue
+        releido = releer_celda(celda)
+        if releido is None or abs(releido - valor_original) < 0.01:
+            continue
+        difiere_acotado = _difiere_hasta_n_digitos_monetarios(
+            original, releido, max_edits=max_edits,
+        )
+        # Una celda que el OCR leyó como uno o dos dígitos puede ser un cero
+        # impreso. Sólo habilita el candidato si la relectura focal leyó cero
+        # con consenso; la identidad de la fila y la mejora global siguen
+        # siendo condiciones obligatorias más abajo.
+        cero_espurio = (
+            releido == 0
+            and 0 < len(re.sub(r"\D", "", original)) <= 2
+        )
+        if difiere_acotado or cero_espurio:
+            candidatos[columna] = releido
+    return candidatos
+
+
+def _filas_textuales_ocr_con_montos_agrupados(
+    texto: str,
+) -> list[tuple[str, list[float]]]:
+    """Extrae una glosa y sus importes agrupados de una lectura OCR lineal.
+
+    Esta evidencia se usa solamente para contrastar una fila que ya tiene sus
+    ocho columnas físicas identificadas por TSV. No pretende reconstruir una
+    tabla desde texto lineal: los ceros y las columnas de destino provienen de
+    la geometría, y la lectura alternativa aporta sólo dígitos de celdas que
+    ya estaban impresas como importes distintos de cero.
+    """
+    filas: list[tuple[str, list[float]]] = []
+    for linea in texto.splitlines():
+        normalizada = normalizar_linea_ocr_tabla(linea)
+        coincidencias = list(_MONTO_AGRUPADO_OCR.finditer(normalizada))
+        if not coincidencias:
+            continue
+        nombre = normalizada[:coincidencias[0].start()].strip(" .,:;|-–—−")
+        if not re.search(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]", nombre):
+            continue
+        montos: list[float] = []
+        for coincidencia in coincidencias:
+            monto = _entero_monetario_focal(coincidencia.group(0))
+            if monto is None or monto == 0:
+                montos = []
+                break
+            montos.append(monto)
+        if montos:
+            filas.append((nombre, montos))
+    return filas
+
+
+def _candidato_textual_unico_para_fila_sin_codigo(
+    nombre: str,
+    texto_alternativo: str,
+) -> Optional[list[float]]:
+    """Devuelve una única lectura textual compatible con la glosa observada.
+
+    Las glosas parciales no bastan para sustituir importes. Se conserva la
+    misma regla de coincidencia fuerte que protege la recuperación de balances
+    clasificados y se descartan empates materiales entre dos filas posibles.
+    """
+    candidatos: list[tuple[float, list[float]]] = []
+    for nombre_alternativo, montos in _filas_textuales_ocr_con_montos_agrupados(
+        texto_alternativo,
+    ):
+        if not _nombres_ocr_fuertemente_compatibles(nombre, nombre_alternativo):
+            continue
+        candidatos.append((
+            _puntaje_nombres_ocr_fuerte(nombre, nombre_alternativo), montos,
+        ))
+    if not candidatos:
+        return None
+    candidatos.sort(key=lambda item: item[0], reverse=True)
+    if len(candidatos) > 1 and candidatos[0][0] - candidatos[1][0] < 0.05:
+        return None
+    return candidatos[0][1]
+
+
+def _indices_no_cero_observados_en_fila_geometrica(
+    evidencia: Optional[dict[str, Any]],
+) -> list[int]:
+    """Ubica sólo los importes físicos no nulos de una fila TSV.
+
+    Un guion o un cero impreso no aparece de forma confiable en el OCR lineal.
+    Por eso el orden de los importes de contraste sólo puede mapearse contra
+    las celdas que TSV observó con una cifra distinta de cero.
+    """
+    if not evidencia:
+        return []
+    celdas = evidencia.get("celdas") or []
+    if len(celdas) != len(RAW_MONETARY_COLUMNS):
+        return []
+    indices: list[int] = []
+    for indice, celda in enumerate(celdas):
+        if celda is None:
+            continue
+        valor = _entero_monetario_focal(str(celda.get("token", "")))
+        if valor not in (None, 0):
+            indices.append(indice)
+    return indices
+
+
+def recuperar_celdas_sin_codigo_por_lectura_cruzada(
+    lineas: list[str],
+    evidencias: list[Optional[dict[str, Any]]],
+) -> tuple[list[str], list[bool], list[dict[str, Any]]]:
+    """Recupera un dígito OCR en filas sin código con dos lecturas independientes.
+
+    La fila geométrica determina las ocho posiciones. La lectura lineal OCR
+    sólo se acepta si identifica de forma única la misma glosa, conserva el
+    número de celdas físicas no nulas y cada reemplazo difiere en no más de un
+    dígito. La fila resultante debe cumplir ambas identidades contables. No se
+    derivan cifras desde subtotales ni desde la cuadratura del documento.
+    """
+    if len(lineas) != len(evidencias) or not lineas:
+        return list(lineas), [False] * len(lineas), []
+    cuentas, formato, separador = _parsear_lineas_ocho_columnas_focales(lineas)
+    resultado = list(lineas)
+    recuperadas = [False] * len(lineas)
+    cambios: list[dict[str, Any]] = []
+    for indice, cuenta in cuentas.items():
+        if (
+            cuenta.codigo
+            or cuenta.es_total
+            or _error_identidades_ocho_columnas(cuenta) <= 10
+        ):
+            continue
+        evidencia = evidencias[indice]
+        if not evidencia:
+            continue
+        texto_alternativo = str(evidencia.get("lectura_cruzada", "") or "")
+        if not texto_alternativo:
+            continue
+        montos_alternativos = _candidato_textual_unico_para_fila_sin_codigo(
+            cuenta.nombre, texto_alternativo,
+        )
+        indices_observados = _indices_no_cero_observados_en_fila_geometrica(
+            evidencia,
+        )
+        if (
+            montos_alternativos is None
+            or len(montos_alternativos) != len(indices_observados)
+        ):
+            continue
+        tokens = resultado[indice].split()
+        if len(tokens) < len(RAW_MONETARY_COLUMNS):
+            continue
+        inicio = len(tokens) - len(RAW_MONETARY_COLUMNS)
+        reemplazos: dict[str, float] = {}
+        seguro = True
+        for posicion, monto_alternativo in zip(
+            indices_observados, montos_alternativos,
+        ):
+            original = tokens[inicio + posicion]
+            valor_original = _entero_monetario_focal(original)
+            if valor_original is None:
+                seguro = False
+                break
+            if abs(valor_original - monto_alternativo) <= 0.01:
+                continue
+            if not _difiere_un_digito_monetario(original, monto_alternativo):
+                seguro = False
+                break
+            reemplazos[RAW_MONETARY_COLUMNS[posicion]] = monto_alternativo
+        if not seguro or not reemplazos:
+            continue
+        candidata_linea = _sustituir_celdas_ocho_columnas(
+            resultado[indice], reemplazos,
+        )
+        candidata = parsear_linea(
+            candidata_linea, indice, formato, separador, confianza_base=0.75,
+        )
+        if (
+            candidata is None
+            or candidata.codigo
+            or _error_identidades_ocho_columnas(candidata) > 10
+        ):
+            continue
+        resultado[indice] = candidata_linea
+        recuperadas[indice] = True
+        cambios.append({
+            "linea": indice,
+            "columnas": sorted(reemplazos),
+            "origen": "lectura_textual_cruzada",
+        })
+    return resultado, recuperadas, cambios
+
+
+def _nombre_control_focal(cuenta: CuentaRaw) -> str:
+    return re.sub(r"\s+", " ", _sin_acentos(cuenta.nombre).lower()).strip()
+
+
+def _esperados_controles_focales(
+    cuentas: dict[int, CuentaRaw],
+) -> dict[int, dict[str, float]]:
+    """Obtiene expectativas de los controles usados por la certificación.
+
+    El valor esperado nunca se infiere desde el propio control: siempre es la
+    suma independiente de filas de detalle, más el puente observado para el
+    cierre. Esto permite relecturas focales de etiquetas como SUBTOTAL y
+    TOTALES sin ampliar el alcance de una corrección numérica.
+    """
+    ordenadas = [cuentas[indice] for indice in sorted(cuentas)]
+    def clave(cuenta: CuentaRaw) -> str:
+        return re.sub(r"[^a-z0-9]+", "", _nombre_control_focal(cuenta))
+
+    subtotales = [
+        cuenta for cuenta in ordenadas
+        if cuenta.es_total and (
+            clave(cuenta) in {"suma", "sumas", "subtotal", "total"}
+            or clave(cuenta).startswith("totalacumulado")
+        )
+    ]
+    if not subtotales:
+        return {}
+    # Coincide con el subtotal de referencia de certificar_extraccion_columnas:
+    # el último control acumulado, o el último subtotal disponible.
+    acumulados = [
+        cuenta for cuenta in subtotales
+        if clave(cuenta).startswith("totalacumulado")
+    ]
+    subtotal = acumulados[-1] if acumulados else subtotales[-1]
+    esperado_sumas = {
+        columna: round(sum(
+            float(cuenta.montos_columnas.get(columna, 0.0) or 0.0)
+            for cuenta in ordenadas if not cuenta.es_total
+        ), 2)
+        for columna in RAW_MONETARY_COLUMNS
+    }
+    esperados = {subtotal.linea: esperado_sumas}
+    indice_sumas = subtotal.linea
+    puente = next(
+        (
+            cuenta for cuenta in ordenadas
+            if cuenta.linea > indice_sumas
+            and cuenta.es_total
+            and re.match(
+                r"^(?:perdida o ganancia|ganancia(?: neta|(?: del)? ejercicio)|"
+                r"resultado|utilidad)",
+                _nombre_control_focal(cuenta),
+            )
+        ),
+        None,
+    )
+    for cuenta in ordenadas:
+        if cuenta.linea <= indice_sumas or not cuenta.es_total:
+            continue
+        if clave(cuenta) not in {
+            "sumasiguales", "totalesiguales", "totales", "sumastotales",
+            "totalgeneral",
+        } or puente is None:
+            continue
+        esperados[cuenta.linea] = {
+            columna: round(
+                esperado_sumas[columna]
+                + float(puente.montos_columnas.get(columna, 0.0) or 0.0),
+                2,
+            )
+            for columna in RAW_MONETARY_COLUMNS
+        }
+    return esperados
+
+
+def _recuperar_subtotal_ocr_desde_cierre_observado(
+    lineas: list[str],
+    evidencias: list[Optional[dict[str, Any]]],
+    releer_celda: Any,
+) -> tuple[list[str], list[dict[str, Any]], bool]:
+    """Relee un subtotal sólo cuando el cierre observado lo comprueba.
+
+    Esta pasada trata un caso distinto a la suma de detalle: un subtotal puede
+    contener un dígito OCR equivocado aunque la fila final y el puente de
+    resultado impresos sean internamente consistentes. No se sustituye una
+    cifra por aritmética: el valor esperado desde ``final - puente`` sólo
+    habilita una relectura focal, que debe devolver exactamente ese importe y
+    diferir en un solo dígito. La corrección puede dejar diferencias con el
+    detalle, por lo que nunca certifica por sí misma la extracción.
+    """
+    if len(lineas) != len(evidencias) or not lineas:
+        return list(lineas), [], False
+    cuentas, _, _ = _parsear_lineas_ocho_columnas_focales(lineas)
+    if not cuentas:
+        return list(lineas), [], False
+    base = certificar_extraccion_columnas(
+        list(cuentas.values()), metodo="ocr_coordinates_8_amounts",
+    )
+    if (
+        base.totales_finales_validos is not True
+        or base.ecuacion_contable_fuente_valida is not False
+    ):
+        return list(lineas), [], False
+
+    ordenadas = [cuentas[indice] for indice in sorted(cuentas)]
+
+    def clave(cuenta: CuentaRaw) -> str:
+        return re.sub(r"[^a-z0-9]+", "", _nombre_control_focal(cuenta))
+
+    def es_puente(cuenta: CuentaRaw) -> bool:
+        return bool(
+            cuenta.es_total and re.match(
+                r"^(?:perdida o ganancia|ganancia(?: neta|(?: del)? ejercicio)|"
+                r"resultado|utilidad|perdida net[ao]|total perdida)\b",
+                _nombre_control_focal(cuenta),
+            )
+        )
+
+    finales = [
+        cuenta for cuenta in ordenadas
+        if cuenta.es_total and (
+            "totales iguales" in _nombre_control_focal(cuenta)
+            or "sumas iguales" in _nombre_control_focal(cuenta)
+            or clave(cuenta) in {"totales", "totalgeneral", "sumastotales"}
+        )
+    ]
+    if not finales:
+        return list(lineas), [], False
+    final = finales[-1]
+    subtotales = [
+        cuenta for cuenta in ordenadas
+        if (
+            cuenta.es_total
+            and cuenta.linea < final.linea
+            and (
+                "subtotal" in clave(cuenta)
+                or clave(cuenta) in {"suma", "sumas"}
+                or clave(cuenta).startswith("totalacumulado")
+            )
+        )
+    ]
+    if not subtotales:
+        return list(lineas), [], False
+    acumulados = [
+        cuenta for cuenta in subtotales
+        if clave(cuenta).startswith("totalacumulado")
+    ]
+    subtotal = acumulados[-1] if acumulados else subtotales[-1]
+    puentes = [
+        cuenta for cuenta in ordenadas
+        if subtotal.linea < cuenta.linea < final.linea and es_puente(cuenta)
+    ]
+    if not puentes:
+        return list(lineas), [], False
+    puente = puentes[-1]
+    esperados = {
+        columna: round(
+            float(final.montos_columnas.get(columna, 0.0) or 0.0)
+            - float(puente.montos_columnas.get(columna, 0.0) or 0.0),
+            2,
+        )
+        for columna in RAW_MONETARY_COLUMNS
+    }
+    discrepantes = {
+        columna for columna in RAW_MONETARY_COLUMNS
+        if abs(
+            float(subtotal.montos_columnas.get(columna, 0.0) or 0.0)
+            - esperados[columna]
+        ) > 0.01
+    }
+    # Un único desacuerdo evita corregir una fila de control que podría tener
+    # más de una celda OCR defectuosa o pertenecer a otra estructura.
+    if len(discrepantes) != 1:
+        return list(lineas), [], False
+    columna = next(iter(discrepantes))
+    candidatos = _candidatos_focales_de_linea(
+        lineas[subtotal.linea], evidencias[subtotal.linea], releer_celda,
+        columnas_permitidas={columna},
+    )
+    if (
+        len(candidatos) != 1
+        or abs(float(candidatos.get(columna, 0.0)) - esperados[columna]) > 0.01
+    ):
+        return list(lineas), [], False
+    resultado = list(lineas)
+    resultado[subtotal.linea] = _sustituir_celdas_ocho_columnas(
+        resultado[subtotal.linea], candidatos,
+    )
+    cuentas_corregidas, _, _ = _parsear_lineas_ocho_columnas_focales(resultado)
+    candidata = certificar_extraccion_columnas(
+        list(cuentas_corregidas.values()), metodo="ocr_coordinates_8_amounts",
+    )
+    if (
+        candidata.totales_finales_validos is not True
+        or candidata.ecuacion_contable_fuente_valida is not True
+    ):
+        return list(lineas), [], False
+    return resultado, [{
+        "linea": subtotal.linea,
+        "columnas": [columna],
+        "origen": "relectura_focal_de_control_estructural",
+    }], True
+
+
+def _mejora_certificacion_focal(
+    base: CertificacionExtraccion,
+    candidata: CertificacionExtraccion,
+) -> bool:
+    """Acepta sólo evidencia focal que mejore la extracción verificable.
+
+    Una fila que ya pasa ambas identidades tras dos lecturas OCR concordantes
+    es evidencia local independiente. Si el total final ya estaba impreso de
+    forma inconsistente, su diferencia agregada no puede invalidar esa fila:
+    la certificación global continúa fallida y bloquea la entrega. Cuando los
+    controles finales eran válidos, se conserva la regla estricta de no
+    empeorar ninguna diferencia conocida.
+    """
+    if len(candidata.filas_inconsistentes) > len(base.filas_inconsistentes):
+        return False
+    if base.totales_finales_validos is True and candidata.totales_finales_validos is False:
+        return False
+    redujo_filas = len(candidata.filas_inconsistentes) < len(
+        base.filas_inconsistentes
+    )
+    if redujo_filas and base.totales_finales_validos is False:
+        return True
+    for columna in set(base.diferencias) | set(candidata.diferencias):
+        antes = abs(float(base.diferencias.get(columna, 0.0) or 0.0))
+        despues = abs(float(candidata.diferencias.get(columna, 0.0) or 0.0))
+        if despues > antes + 0.01:
+            return False
+    return (
+        any(
+            abs(float(candidata.diferencias.get(columna, 0.0) or 0.0))
+            < abs(float(base.diferencias.get(columna, 0.0) or 0.0)) - 0.01
+            for columna in set(base.diferencias) | set(candidata.diferencias)
+        )
+        or redujo_filas
+        or (
+            base.totales_finales_validos is False
+            and candidata.totales_finales_validos is True
+        )
+    )
+
+
+def _error_agregado_controles_focales(
+    certificacion: CertificacionExtraccion,
+) -> float:
+    """Resume sólo el error observado entre detalle y controles impresos."""
+    return sum(
+        abs(float(diferencia or 0.0))
+        for diferencia in certificacion.diferencias.values()
+    )
+
+
+def recuperar_celdas_ocr_por_residuo_de_control(
+    lineas: list[str],
+    evidencias: list[Optional[dict[str, Any]]],
+    releer_celda_nativa: Any,
+) -> tuple[list[str], list[dict[str, Any]]]:
+    """Corrige un residuo mínimo sólo si una lectura nativa lo explica sola.
+
+    Algunas celdas espurias de uno o dos dígitos preservan las dos identidades
+    de la fila y, por ello, no entran al reparador de detalle. Esta última
+    pasada sólo se habilita cuando no queda ninguna fila inconsistente, la fila
+    final sigue cuadrada y los controles difieren por una cantidad muy pequeña.
+    Cada propuesta requiere OCR nativo con consenso, identidad local exacta y
+    una mejora global estricta sin empeorar ninguna columna. Los empates se
+    rechazan: un control nunca decide entre dos lecturas visuales posibles.
+    """
+    if len(lineas) != len(evidencias) or not lineas:
+        return list(lineas), []
+    cuentas, formato, separador = _parsear_lineas_ocho_columnas_focales(lineas)
+    if not cuentas:
+        return list(lineas), []
+    base = certificar_extraccion_columnas(
+        list(cuentas.values()), metodo="ocr_coordinates_8_amounts",
+    )
+    if (
+        base.filas_inconsistentes
+        or base.totales_finales_validos is not True
+        or not base.diferencias
+        or not any(abs(float(valor or 0.0)) > 10.0 for valor in base.diferencias.values())
+        or max(abs(float(valor or 0.0)) for valor in base.diferencias.values())
+        > OCR_CONTROL_RESIDUAL_MAX_ABSOLUTE
+    ):
+        return list(lineas), []
+    error_base = _error_agregado_controles_focales(base)
+    propuestas: list[tuple[float, int, list[str], list[str]]] = []
+    for indice, cuenta in cuentas.items():
+        if cuenta.es_total or _error_identidades_ocho_columnas(cuenta) > 10:
+            continue
+        candidatos = _candidatos_focales_de_linea(
+            lineas[indice], evidencias[indice], releer_celda_nativa,
+        )
+        if not candidatos:
+            continue
+        candidata_linea = _sustituir_celdas_ocho_columnas(
+            lineas[indice], candidatos,
+        )
+        candidata_fila = parsear_linea(
+            candidata_linea, indice, formato, separador, confianza_base=0.75,
+        )
+        if (
+            candidata_fila is None
+            or _error_identidades_ocho_columnas(candidata_fila) > 10
+        ):
+            continue
+        candidata_lineas = list(lineas)
+        candidata_lineas[indice] = candidata_linea
+        cuentas_candidatas, _, _ = _parsear_lineas_ocho_columnas_focales(
+            candidata_lineas,
+        )
+        certificacion_candidata = certificar_extraccion_columnas(
+            list(cuentas_candidatas.values()), metodo="ocr_coordinates_8_amounts",
+        )
+        if (
+            certificacion_candidata.filas_inconsistentes
+            or certificacion_candidata.totales_finales_validos is not True
+        ):
+            continue
+        columnas = set(base.diferencias) | set(certificacion_candidata.diferencias)
+        if any(
+            abs(float(certificacion_candidata.diferencias.get(columna, 0.0) or 0.0))
+            > abs(float(base.diferencias.get(columna, 0.0) or 0.0)) + 0.01
+            for columna in columnas
+        ):
+            continue
+        error_candidato = _error_agregado_controles_focales(
+            certificacion_candidata,
+        )
+        if error_candidato >= error_base - 0.01:
+            continue
+        propuestas.append((
+            error_candidato,
+            indice,
+            candidata_lineas,
+            sorted(candidatos),
+        ))
+    if not propuestas:
+        return list(lineas), []
+    propuestas.sort(key=lambda propuesta: (propuesta[0], propuesta[1]))
+    mejor_error, indice, mejor_lineas, columnas = propuestas[0]
+    if sum(
+        abs(error - mejor_error) <= 0.01
+        for error, *_resto in propuestas
+    ) != 1:
+        return list(lineas), []
+    return mejor_lineas, [{
+        "linea": indice,
+        "columnas": columnas,
+        "origen": "relectura_nativa_por_residuo_de_control",
+    }]
+
+
+def recuperar_celdas_ocr_focales(
+    lineas: list[str],
+    evidencias: list[Optional[dict[str, Any]]],
+    *,
+    releer_celda: Optional[Any] = None,
+    releer_celda_nativa: Optional[Any] = None,
+) -> tuple[list[str], list[bool], list[dict[str, Any]]]:
+    """Repara dígitos OCR sólo con evidencia visual y controles contables.
+
+    Antes de releer una celda se permite una lectura OCR lineal cruzada para
+    filas sin código, siempre que conserve sus columnas físicas y deje la
+    identidad local exacta. La relectura focal posterior se limita a una sola
+    sustitución por celda. Los controles SUMAS y SUMAS IGUALES sólo cambian
+    cuando la lectura focal coincide con su total independiente. Las filas
+    resultantes quedan obligatoriamente en revisión.
+    """
+    if len(evidencias) != len(lineas) or not lineas:
+        return list(lineas), [False] * len(lineas), []
+    cuentas, formato, separador = _parsear_lineas_ocho_columnas_focales(lineas)
+    if not cuentas:
+        return list(lineas), [False] * len(lineas), []
+    base = certificar_extraccion_columnas(
+        list(cuentas.values()), metodo="ocr_coordinates_8_amounts",
+    )
+    resultado, filas_cruzadas, cambios_cruzados = (
+        recuperar_celdas_sin_codigo_por_lectura_cruzada(lineas, evidencias)
+    )
+    # La evidencia TSV original ya no representa una fila modificada por la
+    # lectura lineal. No se usa para una segunda reparación focal de la misma
+    # fila: se prefiere descartar esa posibilidad antes que mezclar fuentes.
+    evidencias_focales = [
+        None if recuperada else evidencia
+        for evidencia, recuperada in zip(evidencias, filas_cruzadas)
+    ]
+    cuentas, formato, separador = _parsear_lineas_ocho_columnas_focales(
+        resultado,
+    )
+    if not cuentas:
+        return list(lineas), [False] * len(lineas), []
+    cache_imagenes: dict[tuple[str, int], Image.Image] = {}
+    lector_base = releer_celda or (
+        lambda celda: _releer_celda_ocr_focal(celda, cache_imagenes)
+    )
+    lector_nativo_base = releer_celda_nativa or (
+        lambda celda: _releer_celda_ocr_focal(
+            celda, cache_imagenes, preservar_escala=True,
+        )
+    )
+    lecturas_celdas: dict[int, Optional[float]] = {}
+    lecturas_celdas_nativas: dict[int, Optional[float]] = {}
+
+    def lector(celda: dict[str, Any]) -> Optional[float]:
+        # Una segunda pasada de candidatos no debe repetir Tesseract sobre el
+        # mismo recorte. La lectura permanece como evidencia observada, no se
+        # usa para inferir ni completar otra cifra.
+        clave = id(celda)
+        if clave not in lecturas_celdas:
+            lecturas_celdas[clave] = lector_base(celda)
+        return lecturas_celdas[clave]
+
+    def lector_nativo(celda: dict[str, Any]) -> Optional[float]:
+        # La segunda lectura conserva los píxeles originales del recorte. Se
+        # usa sólo si la variante ampliada no consiguió reparar la fila y se
+        # mantiene en su propio caché para no mezclar ambas evidencias.
+        clave = id(celda)
+        if clave not in lecturas_celdas_nativas:
+            lecturas_celdas_nativas[clave] = lector_nativo_base(celda)
+        return lecturas_celdas_nativas[clave]
+
+    cambios: list[dict[str, Any]] = list(cambios_cruzados)
+
+    # Primero se corrigen filas de detalle que fallan ambas redundancias. La
+    # suma de importes por sí sola nunca basta para mover un dígito interno.
+    for indice, cuenta in cuentas.items():
+        if cuenta.es_total or _error_identidades_ocho_columnas(cuenta) <= 10:
+            continue
+        columnas_posibles = _columnas_posibles_para_correccion_focal(cuenta)
+        # Primero se prueban las celdas que una sola edición podría llevar al
+        # umbral de identidad. Si no bastan, se conserva el fallback histórico
+        # de varias celdas: hay documentos donde dos errores independientes
+        # requieren evidencia focal en más de una columna.
+        estrategias = [columnas_posibles]
+        todas_las_columnas = set(RAW_MONETARY_COLUMNS)
+        if columnas_posibles != todas_las_columnas:
+            estrategias.append(None)
+        corregida = False
+        for lector_actual, origen in (
+            (lector, None),
+            (lector_nativo, "relectura_nativa_sin_escalar"),
+        ):
+            for columnas_permitidas in estrategias:
+                candidatos = _candidatos_focales_de_linea(
+                    resultado[indice], evidencias_focales[indice], lector_actual,
+                    columnas_permitidas=columnas_permitidas,
+                )
+                if not candidatos:
+                    continue
+                candidata_linea = _sustituir_celdas_ocho_columnas(
+                    resultado[indice], candidatos,
+                )
+                candidata = parsear_linea(
+                    candidata_linea, indice, formato, separador,
+                    confianza_base=0.75,
+                )
+                if (
+                    candidata is None
+                    or _error_identidades_ocho_columnas(candidata) > 10
+                    or _error_identidades_ocho_columnas(candidata)
+                    >= _error_identidades_ocho_columnas(cuenta)
+                ):
+                    continue
+                resultado[indice] = candidata_linea
+                cambio = {"linea": indice, "columnas": sorted(candidatos)}
+                if origen:
+                    cambio["origen"] = origen
+                cambios.append(cambio)
+                corregida = True
+                break
+            if corregida:
+                break
+
+    # Después de corregir detalle, una lectura focal de un control sólo se
+    # acepta cuando coincide exactamente con su suma independiente.
+    cuentas_corregidas, _, _ = _parsear_lineas_ocho_columnas_focales(resultado)
+    cambios_estructurales: list[dict[str, Any]] = []
+    ecuacion_reparada = False
+    # La corrección estructural tiene una regla de aceptación distinta de las
+    # correcciones de detalle: restituye un control fuente observado aunque el
+    # detalle siga sin conciliar. No se combina con otra mutación en la misma
+    # pasada, pues esa combinación podría ocultar un empeoramiento agregado.
+    if not cambios:
+        resultado_estructural, cambios_estructurales, ecuacion_reparada = (
+            _recuperar_subtotal_ocr_desde_cierre_observado(
+                resultado, evidencias_focales, lector,
+            )
+        )
+    if cambios_estructurales:
+        resultado = resultado_estructural
+        cambios.extend(cambios_estructurales)
+        cuentas_corregidas, _, _ = _parsear_lineas_ocho_columnas_focales(
+            resultado,
+        )
+    if not ecuacion_reparada:
+        for indice, esperado in _esperados_controles_focales(cuentas_corregidas).items():
+            control = cuentas_corregidas.get(indice)
+            if control is None:
+                continue
+            discrepantes = {
+                columna for columna in RAW_MONETARY_COLUMNS
+                if abs(
+                    float(control.montos_columnas.get(columna, 0.0) or 0.0)
+                    - float(esperado.get(columna, 0.0) or 0.0)
+                ) > 0.01
+            }
+            if not discrepantes:
+                continue
+            candidatos = _candidatos_focales_de_linea(
+                resultado[indice], evidencias_focales[indice], lector, discrepantes,
+                # Un control final sólo puede aceptar hasta dos ediciones porque
+                # su valor releído debe igualar exactamente la suma independiente
+                # de detalles y el puente observado. Las cuentas detalle conservan
+                # el límite de una edición anterior.
+                max_edits=2,
+            )
+            aceptados = {
+                columna: valor
+                for columna, valor in candidatos.items()
+                if abs(valor - float(esperado.get(columna, 0.0))) <= 0.01
+            }
+            if not aceptados:
+                continue
+            resultado[indice] = _sustituir_celdas_ocho_columnas(
+                resultado[indice], aceptados,
+            )
+            cambios.append({"linea": indice, "columnas": sorted(aceptados)})
+
+        # Al final se revisan sólo residuos mínimos que quedaron invisibles para
+        # la identidad local porque una misma cifra OCR espuria afectó dos o tres
+        # columnas de la fila. Esta función nunca deduce un importe del subtotal.
+        resultado_por_residuo, cambios_por_residuo = (
+            recuperar_celdas_ocr_por_residuo_de_control(
+                resultado, evidencias_focales, lector_nativo,
+            )
+        )
+        if cambios_por_residuo:
+            resultado = resultado_por_residuo
+            cambios.extend(cambios_por_residuo)
+
+    if not cambios:
+        return list(lineas), [False] * len(lineas), []
+    cuentas_finales, _, _ = _parsear_lineas_ocho_columnas_focales(resultado)
+    candidata = certificar_extraccion_columnas(
+        list(cuentas_finales.values()), metodo="ocr_coordinates_8_amounts",
+    )
+    mejora_verificable = _mejora_certificacion_focal(base, candidata)
+    control_estructural_confirmado = (
+        ecuacion_reparada
+        and candidata.totales_finales_validos is True
+        and candidata.ecuacion_contable_fuente_valida is True
+    )
+    if not mejora_verificable and not control_estructural_confirmado:
+        return list(lineas), [False] * len(lineas), []
+    filas_recuperadas = [False] * len(lineas)
+    for cambio in cambios:
+        filas_recuperadas[int(cambio["linea"])] = True
+    return resultado, filas_recuperadas, cambios
+
+
+def _separar_linea_lateral_con_evidencia(
+    linea: str,
+    numero_linea: int,
+    formato_codigo: FormatoCodigo,
+    separador_miles: str,
+    confianza_base: float,
+) -> tuple[list[str], bool]:
+    """Devuelve un corte lateral sólo si ambos fragmentos prueban su código.
+
+    El segundo booleano indica una ambigüedad que debe impedir entrega
+    automática: una fila sin códigos puede parecer dos tablas o una sola
+    glosa con número. En esa situación se conserva la fila completa para no
+    inventar dos cuentas y se exige revisión humana.
+    """
+    candidatos = split_side_by_side(
+        linea, permitir_corte_con_ocho_columnas=True,
+    )
+    if len(candidatos) != 2:
+        return candidatos, False
+
+    # Los cortes que no dependen de ocho celdas terminales conservan la
+    # heurística histórica. La ambigüedad tratada aquí sólo existe cuando el
+    # nuevo resguardo conservador cambió el resultado por defecto.
+    if split_side_by_side(linea) == candidatos:
+        return candidatos, False
+
+    cuentas_candidatas = [
+        parsear_linea(
+            fragmento, numero_linea, formato_codigo, separador_miles,
+            confianza_base,
+        )
+        for fragmento in candidatos
+    ]
+    if all(cuenta is not None and cuenta.codigo for cuenta in cuentas_candidatas):
+        return candidatos, False
+    return [linea], True
+
+
+def parsear_linea_clasificada_observada(
+    linea: str,
+    numero_linea: int,
+    separador_miles: str,
+    confianza_base: float = 1.0,
+) -> Optional[CuentaRaw]:
+    """Parsea una celda geométrica de balance clasificado sin reinterpretarla.
+
+    El extractor especializado ya separó la glosa y observó que el último
+    token es su importe. Aplicar la heurística universal a esa celda puede
+    confundir un dígito legítimo de la glosa, por ejemplo ``CUENTA BCO.
+    ESTADO 1``, con el saldo. Se conserva literalmente el nombre y se usa
+    sólo ese importe observado.
+
+    No se infieren códigos en esta ruta: si no se cumple el contrato de
+    ``glosa + importe`` el llamador deja que opere el fallback universal.
+    """
+    partes = linea.strip().rsplit(maxsplit=1)
+    if len(partes) != 2:
+        return None
+    nombre, token_monto = partes
+    token_normalizado = normalizar_token_ocr(token_monto).replace("$", "")
+    if not PATRON_MONTOS.fullmatch(token_normalizado):
+        return None
+    monto = parsear_monto(token_normalizado, separador_miles)
+    nombre = nombre.strip(" .-–—−")
+    if monto is None or len(nombre) < 3:
+        return None
+    nombre_para_total = re.sub(r"^[^\w]+", "", nombre).strip()
+    return CuentaRaw(
+        linea=numero_linea,
+        codigo=None,
+        nombre=nombre,
+        monto=monto,
+        origen_columna=OrigenColumna.DESCONOCIDO,
+        es_total=_es_etiqueta_total(nombre_para_total),
+        confianza_extraccion=confianza_base,
     )
 
 
@@ -2560,7 +5575,34 @@ def _cuenta_desde_candidato_ocr(
     """Obtiene la variante consistente de una fila OCR con 6 a 8 importes."""
     normalized = normalizar_codigo_ocr(normalizar_linea_ocr_tabla(linea))
     candidates: list[CuentaRaw] = []
-    for suffix in ("", " 0", " 0 0"):
+    original = parsear_linea(
+        normalized,
+        numero_linea,
+        FormatoCodigo.SIN_CODIGO,
+        ".",
+        0.75,
+    )
+    original_has_full_row = bool(
+        original is not None
+        and set(original.montos_columnas) == set(RAW_MONETARY_COLUMNS)
+    )
+    if (
+        original is not None
+        and original.codigo
+        and original.montos_columnas
+        and (
+            not exigir_consistencia
+            or _error_identidades_cuenta(original) <= 10
+        )
+    ):
+        candidates.append(original)
+
+    # Sólo se agregan ceros cuando la línea original no entrega las ocho
+    # posiciones. Antes se probaban siempre: una fila completa pero
+    # inconsistente podía parecer correcta al desplazar sus primeros importes
+    # al nombre y completar el final con ceros.
+    suffixes = () if original_has_full_row else (" 0", " 0 0")
+    for suffix in suffixes:
         candidate = parsear_linea(
             normalized + suffix,
             numero_linea,
@@ -2615,6 +5657,499 @@ def _nombres_ocr_compatibles(left: str, right: str) -> bool:
     return len(left_tokens & right_tokens) / max(
         len(left_tokens), len(right_tokens),
     ) >= 0.6
+
+
+def _nombres_ocr_fuertemente_compatibles(left: str, right: str) -> bool:
+    """Exige una coincidencia de glosa apta para sustituir una cifra.
+
+    ``POR PAGAR`` es una coincidencia útil para una sugerencia, pero no para
+    reemplazar un importe: por ejemplo, no identifica de forma única si son
+    letras, documentos u otra obligación. La recuperación de importes sólo
+    acepta identidad normalizada o una cobertura léxica alta.
+    """
+    left_normalized = re.sub(r"\s+", " ", _sin_acentos(left).lower()).strip()
+    right_normalized = re.sub(r"\s+", " ", _sin_acentos(right).lower()).strip()
+    if left_normalized == right_normalized:
+        return True
+
+    def tokens(value: str) -> set[str]:
+        return {
+            token for token in re.findall(r"[a-z0-9]+", value)
+            if len(token) >= 3
+        }
+
+    left_tokens, right_tokens = tokens(left_normalized), tokens(right_normalized)
+    if not left_tokens or not right_tokens:
+        return False
+    return len(left_tokens & right_tokens) / max(
+        len(left_tokens), len(right_tokens),
+    ) >= 0.8
+
+
+def _puntaje_nombres_ocr_fuerte(left: str, right: str) -> float:
+    """Puntaje conservador para asignar una alternativa a una única fila."""
+    left_normalized = re.sub(r"[^a-z0-9]+", " ", _sin_acentos(left).lower())
+    right_normalized = re.sub(r"[^a-z0-9]+", " ", _sin_acentos(right).lower())
+    left_normalized = re.sub(r"\s+", " ", left_normalized).strip()
+    right_normalized = re.sub(r"\s+", " ", right_normalized).strip()
+    if not left_normalized or not right_normalized:
+        return 0.0
+    if left_normalized == right_normalized:
+        return 1.0
+    left_tokens = {
+        token for token in left_normalized.split() if len(token) >= 3
+    }
+    right_tokens = {
+        token for token in right_normalized.split() if len(token) >= 3
+    }
+    if not left_tokens or not right_tokens:
+        return 0.0
+    return len(left_tokens & right_tokens) / max(
+        len(left_tokens), len(right_tokens),
+    )
+
+
+_PATRON_IMPORTE_CLASIFICADO = re.compile(
+    r"(?<![\d.,])-?\d{1,3}(?:[.,]\d{3})+(?![\d.,])"
+)
+
+
+def _importe_clasificado_ocr(token: str) -> Optional[float]:
+    """Convierte un importe de una mitad clasificada sin inferir dígitos.
+
+    Las dos lecturas OCR suelen discrepar en el separador, no necesariamente
+    en el valor. Se reutiliza la normalización monetaria del parser para que
+    ``1.687.786,170`` y ``1,687,786.170`` se interpreten igual. Si el token no
+    es un importe agrupado completo, no se usa como evidencia alternativa.
+    """
+    normalized = normalizar_linea_ocr_tabla(token)
+    if not _PATRON_IMPORTE_CLASIFICADO.fullmatch(normalized):
+        return None
+    value = parsear_monto(normalized, ".")
+    return float(value) if value is not None else None
+
+
+def _candidatos_textuales_balance_clasificado(
+    texto_alternativo: str,
+) -> list[tuple[str, float, OrigenColumna]]:
+    """Extrae pares ``ACTIVO | PASIVO`` de una lectura OCR textual.
+
+    No intenta adivinar columnas a partir de un bloque de texto general. Sólo
+    acepta renglones que contengan exactamente dos importes agrupados y los
+    asocia con su mitad física por orden visual. Es la evidencia complementaria
+    para una tabla ya reconocida geométricamente como balance clasificado.
+    """
+    candidates: list[tuple[str, float, OrigenColumna]] = []
+    for raw_line in texto_alternativo.splitlines():
+        line = normalizar_linea_ocr_tabla(raw_line)
+        matches = list(_PATRON_IMPORTE_CLASIFICADO.finditer(line))
+        if len(matches) != 2:
+            continue
+        left_match, right_match = matches
+        left_name = line[:left_match.start()].strip(" .,:;|-–—")
+        right_name = line[left_match.end():right_match.start()].strip(
+            " .,:;|-–—"
+        )
+        left_amount = _importe_clasificado_ocr(left_match.group(0))
+        right_amount = _importe_clasificado_ocr(right_match.group(0))
+        if left_amount is not None and re.search(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]", left_name):
+            candidates.append((left_name, left_amount, OrigenColumna.ACTIVO))
+        if right_amount is not None and re.search(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]", right_name):
+            candidates.append((right_name, right_amount, OrigenColumna.PASIVO))
+    return candidates
+
+
+def _cuentas_desde_lineas_clasificadas(
+    lineas: list[tuple],
+) -> list[CuentaRaw]:
+    """Construye una vista mínima para contrastar subtotales por lado."""
+    cuentas: list[CuentaRaw] = []
+    for index, item in enumerate(lineas):
+        line, origin = item[:2]
+        cuenta = parsear_linea_clasificada_observada(
+            normalizar_linea_ocr_tabla(str(line)), index, ".", 0.75,
+        )
+        if cuenta is None or cuenta.monto is None:
+            continue
+        cuenta.origen_columna = origin
+        cuentas.append(cuenta)
+    return cuentas
+
+
+def recuperar_importes_balance_clasificado_ocr(
+    lineas_coordenadas: list[tuple], texto_alternativo: str,
+    *, tolerancia_absoluta: float = 10.0,
+    confirmar_importe: Optional[Any] = None,
+) -> tuple[list[tuple], list[bool], int]:
+    """Recupera importes geométricos sólo con evidencia cruzada y subtotal.
+
+    La geometría preserva la columna física; el OCR textual a veces conserva
+    mejor los dígitos de un importe largo. Una sustitución exige: misma mitad,
+    glosa compatible, importe textual completo y una reducción estricta de la
+    diferencia de subtotales. Para aceptar una mejora pequeña en un documento
+    que todavía tenga otro control fallido, ``confirmar_importe`` debe validar
+    el mismo importe sobre su recorte OCR. No cambia controles impresos ni
+    inventa cifras. Cada fila aceptada queda marcada para revisión humana.
+    """
+    candidates = _candidatos_textuales_balance_clasificado(texto_alternativo)
+    if not candidates or not lineas_coordenadas:
+        return list(lineas_coordenadas), [False] * len(lineas_coordenadas), 0
+
+    recovered = list(lineas_coordenadas)
+    recovered_flags = [False] * len(recovered)
+
+    def errores_subtotales(items: list[tuple]) -> dict[str, float]:
+        differences = _diferencias_subtotales_fisicos_clasificados(
+            _cuentas_desde_lineas_clasificadas(items),
+        )
+        return {
+            nombre: abs(float(diferencia))
+            for nombre, diferencia in differences.items()
+        }
+
+    def mejora_local_de_control(
+        antes: dict[str, float], despues: dict[str, float],
+    ) -> tuple[bool, float]:
+        """Exige que una lectura independiente mejore un subtotal físico.
+
+        Un documento puede contener más de un importe OCR defectuoso. Medir
+        una propuesta contra el error agregado hacía que una corrección válida
+        pero pequeña quedara bloqueada por otro subtotal ajeno y mucho mayor.
+        La aceptación sigue siendo conservadora: ningún subtotal conocido
+        puede empeorar y al menos uno debe mejorar más allá de la tolerancia.
+        """
+        nombres = set(antes) | set(despues)
+        if any(
+            despues.get(nombre, 0.0)
+            > antes.get(nombre, 0.0) + tolerancia_absoluta
+            for nombre in nombres
+        ):
+            return False, 0.0
+        mejora = sum(
+            antes.get(nombre, 0.0) - despues.get(nombre, 0.0)
+            for nombre in nombres
+        )
+        return mejora > tolerancia_absoluta, mejora
+
+    def error_agregado(errores: dict[str, float]) -> float:
+        return sum(
+            diferencia for diferencia in errores.values()
+            if diferencia > tolerancia_absoluta
+        )
+
+    errores_antes = errores_subtotales(recovered)
+    error_agregado_antes = error_agregado(errores_antes)
+    if not any(
+        diferencia > tolerancia_absoluta
+        for diferencia in errores_antes.values()
+    ):
+        return recovered, recovered_flags, 0
+
+    # Una alternativa textual se asigna primero a la única glosa geométrica
+    # que más se le parece. Sin esta regla, ``CTA ESPECIAL ...`` podía ocupar
+    # la fila vecina ``CTA ESPECIAL ... 2`` por compartir casi todas las
+    # palabras, desplazando una cifra correcta. Los empates se dejan intactos.
+    target_by_candidate: dict[int, int] = {}
+    for candidate_index, (candidate_name, _amount, candidate_origin) in enumerate(candidates):
+        scored = []
+        for current_index, item in enumerate(recovered):
+            line, current_origin = item[:2]
+            if current_origin is not candidate_origin:
+                continue
+            current = parsear_linea_clasificada_observada(
+                normalizar_linea_ocr_tabla(str(line)), current_index, ".", 0.75,
+            )
+            if current is None:
+                continue
+            if current.es_total:
+                continue
+            score = _puntaje_nombres_ocr_fuerte(current.nombre, candidate_name)
+            if score >= 0.8:
+                scored.append((score, current_index))
+        if not scored:
+            continue
+        scored.sort(key=lambda item: (-item[0], item[1]))
+        if len(scored) > 1 and scored[0][0] - scored[1][0] < 0.05:
+            continue
+        target_by_candidate[candidate_index] = scored[0][1]
+
+    replacements = 0
+    used_candidates: set[int] = set()
+    # El algoritmo es codicioso deliberadamente: cada cambio debe mejorar el
+    # control completo por sí mismo, por lo que una lectura alternativa mala
+    # no puede compensarse con otra cifra inventada.
+    for index, item in enumerate(recovered):
+        line, origin = item[:2]
+        current = parsear_linea_clasificada_observada(
+            normalizar_linea_ocr_tabla(str(line)), index, ".", 0.75,
+        )
+        if current is None or current.monto is None:
+            continue
+        current_amount = float(current.monto)
+        current_name = current.nombre
+        if current.es_total:
+            continue
+
+        best: Optional[tuple[float, int, str, dict[str, float]]] = None
+        for candidate_index, (candidate_name, candidate_amount, candidate_origin) in enumerate(candidates):
+            if (
+                candidate_index in used_candidates
+                or candidate_origin is not origin
+                or target_by_candidate.get(candidate_index) != index
+            ):
+                continue
+            if abs(candidate_amount - current_amount) <= tolerancia_absoluta:
+                continue
+            if not _nombres_ocr_fuertemente_compatibles(
+                current_name, candidate_name,
+            ):
+                continue
+            replacement_amount = f"{int(round(candidate_amount)):,}".replace(
+                ",", ".",
+            )
+            replacement_line = f"{current_name} {replacement_amount}"
+            tentative = list(recovered)
+            tentative[index] = (replacement_line, *item[1:])
+            errores_despues = errores_subtotales(tentative)
+            mejora, puntaje = mejora_local_de_control(
+                errores_antes, errores_despues,
+            )
+            if not mejora:
+                continue
+            if confirmar_importe is None:
+                # Sin un recorte focal que confirme la alternativa, se
+                # conserva el umbral histórico de mejora material sobre el
+                # documento completo. Esto evita que un desacuerdo minúsculo
+                # entre dos pasadas de OCR sustituya una cifra ya legible.
+                error_agregado_despues = error_agregado(errores_despues)
+                mejora_minima = max(100_000.0, error_agregado_antes * 0.01)
+                if (
+                    error_agregado_despues
+                    > error_agregado_antes - mejora_minima
+                ):
+                    continue
+            elif not confirmar_importe(index, candidate_amount):
+                continue
+            if best is None or puntaje > best[0]:
+                best = (
+                    puntaje, candidate_index, replacement_line,
+                    errores_despues,
+                )
+        if best is None:
+            continue
+        _, candidate_index, replacement_line, errores_antes = best
+        error_agregado_antes = error_agregado(errores_antes)
+        recovered[index] = (replacement_line, *item[1:])
+        recovered_flags[index] = True
+        used_candidates.add(candidate_index)
+        replacements += 1
+
+    return recovered, recovered_flags, replacements
+
+
+def recuperar_importes_balance_clasificado_por_control_focal(
+    lineas_coordenadas: list[tuple],
+    evidencias_importes: list[Optional[dict[str, Any]]],
+    *, tolerancia_absoluta: float = 10.0,
+    releer_importe: Optional[Any] = None,
+) -> tuple[list[tuple], list[bool], list[dict[str, Any]]]:
+    """Repara un dígito de detalle con OCR focal y su subtotal impreso.
+
+    Esta vía cubre un caso que la lectura OCR lineal no puede proponer: ambas
+    pasadas generales pueden repetir el mismo dígito equivocado. El residuo
+    de un subtotal sólo selecciona las celdas cuyo cambio de un dígito lo
+    resolvería por sí solo; la cifra se acepta únicamente si la lectura focal
+    independiente coincide. Conserva la ecuación final cuando ésta ya era
+    válida. Los subtotales impresos nunca se cambian.
+    """
+    if (
+        not lineas_coordenadas
+        or len(lineas_coordenadas) != len(evidencias_importes)
+    ):
+        return list(lineas_coordenadas), [False] * len(lineas_coordenadas), []
+
+    def errores_subtotales(items: list[tuple]) -> dict[str, float]:
+        return {
+            nombre: abs(float(diferencia))
+            for nombre, diferencia in _diferencias_subtotales_fisicos_clasificados(
+                _cuentas_desde_lineas_clasificadas(items),
+            ).items()
+        }
+
+    def mejora_local(
+        antes: dict[str, float], despues: dict[str, float],
+    ) -> tuple[bool, float]:
+        nombres = set(antes) | set(despues)
+        if any(
+            despues.get(nombre, 0.0)
+            > antes.get(nombre, 0.0) + tolerancia_absoluta
+            for nombre in nombres
+        ):
+            return False, 0.0
+        mejora = sum(
+            antes.get(nombre, 0.0) - despues.get(nombre, 0.0)
+            for nombre in nombres
+        )
+        return mejora > tolerancia_absoluta, mejora
+
+    def candidatos_exactos_por_residuo(
+        items: list[tuple],
+    ) -> dict[int, set[float]]:
+        """Ubica qué detalle podría resolver por sí solo un subtotal fallido.
+
+        El cálculo no constituye evidencia de la nueva cifra: sólo evita
+        releer todas las celdas de una página. La relectura focal posterior
+        debe observar exactamente el valor propuesto y pasar los controles.
+        """
+        candidatos: dict[int, set[float]] = {}
+        cuentas = _cuentas_desde_lineas_clasificadas(items)
+        for origen in (OrigenColumna.ACTIVO, OrigenColumna.PASIVO):
+            detalles: list[CuentaRaw] = []
+            suma_detalles = 0.0
+            for cuenta in (
+                cuenta for cuenta in cuentas if cuenta.origen_columna is origen
+            ):
+                if cuenta.monto is None:
+                    continue
+                if _es_subtotal_fisico_clasificado(cuenta.nombre, origen):
+                    diferencia = suma_detalles - float(cuenta.monto)
+                    if abs(diferencia) > tolerancia_absoluta:
+                        for detalle in detalles:
+                            candidato = round(
+                                float(detalle.monto) - diferencia, 2,
+                            )
+                            candidatos.setdefault(detalle.linea, set()).add(
+                                candidato,
+                            )
+                    detalles = []
+                    suma_detalles = 0.0
+                    continue
+                if cuenta.es_total:
+                    continue
+                detalles.append(cuenta)
+                suma_detalles += float(cuenta.monto)
+        return candidatos
+
+    recovered = list(lineas_coordenadas)
+    recovered_flags = [False] * len(recovered)
+    cambios: list[dict[str, Any]] = []
+    cache_imagenes: dict[tuple[str, int], Image.Image] = {}
+    lector = releer_importe or (
+        lambda evidencia, monto_actual: _importe_clasificado_focal_unico(
+            evidencia, monto_actual, cache_imagenes,
+        )
+    )
+
+    # Cada vuelta modifica una sola fila comprobada. Se vuelve a calcular la
+    # base antes de proponer la siguiente para impedir que dos candidatos se
+    # compensen mutuamente sin mejorar el control que los habilita.
+    for _ in range(len(recovered)):
+        errores_antes = errores_subtotales(recovered)
+        if not any(
+            diferencia > tolerancia_absoluta
+            for diferencia in errores_antes.values()
+        ):
+            break
+        candidatos_por_residuo = candidatos_exactos_por_residuo(recovered)
+        if not candidatos_por_residuo:
+            break
+        cuentas_antes = _cuentas_desde_lineas_clasificadas(recovered)
+        certificacion_antes = certificar_totales_clasificados(
+            cuentas_antes, metodo="ocr_classified_two_columns",
+        )
+        propuestas: list[tuple[float, int, str, dict[str, float]]] = []
+        for indice, montos_esperados in candidatos_por_residuo.items():
+            item = recovered[indice]
+            linea, _origen = item[:2]
+            cuenta = parsear_linea_clasificada_observada(
+                normalizar_linea_ocr_tabla(str(linea)), indice, ".", 0.75,
+            )
+            if (
+                cuenta is None
+                or cuenta.monto is None
+                or cuenta.es_total
+                or evidencias_importes[indice] is None
+            ):
+                continue
+            monto_actual = float(cuenta.monto)
+            monto_focal = lector(evidencias_importes[indice], monto_actual)
+            if (
+                monto_focal is None
+                or abs(float(monto_focal) - monto_actual) <= tolerancia_absoluta
+                or not any(
+                    abs(float(monto_focal) - monto_esperado)
+                    <= tolerancia_absoluta
+                    for monto_esperado in montos_esperados
+                )
+            ):
+                continue
+            token_original = str(linea).split()[-1] if str(linea).split() else ""
+            if not _difiere_un_digito_monetario(token_original, monto_focal):
+                continue
+            monto_texto = _formatear_entero_monetario_focal(
+                monto_focal, token_original,
+            )
+            candidata_linea = f"{cuenta.nombre} {monto_texto}"
+            tentativa = list(recovered)
+            tentativa[indice] = (candidata_linea, *item[1:])
+            errores_despues = errores_subtotales(tentativa)
+            mejora, puntaje = mejora_local(errores_antes, errores_despues)
+            if not mejora:
+                continue
+            certificacion_despues = certificar_totales_clasificados(
+                _cuentas_desde_lineas_clasificadas(tentativa),
+                metodo="ocr_classified_two_columns",
+            )
+            if (
+                certificacion_antes.totales_finales_validos is True
+                and certificacion_despues.totales_finales_validos is not True
+            ):
+                continue
+            propuestas.append((puntaje, indice, candidata_linea, errores_despues))
+        if not propuestas:
+            break
+        propuestas.sort(key=lambda propuesta: (-propuesta[0], propuesta[1]))
+        mejor_puntaje, indice, candidata_linea, errores_despues = propuestas[0]
+        if sum(
+            abs(puntaje - mejor_puntaje) <= 0.01
+            for puntaje, _indice, _linea, _errores in propuestas
+        ) != 1:
+            break
+        recovered[indice] = (candidata_linea, *recovered[indice][1:])
+        recovered_flags[indice] = True
+        cambios.append({
+            "linea": indice,
+            "origen": "relectura_focal_por_subtotal_clasificado",
+            "subtotal_error_despues": errores_despues,
+        })
+    return recovered, recovered_flags, cambios
+
+
+def _conservar_evidencia_celdas_no_reemplazada(
+    lineas_originales: list[str],
+    evidencias_originales: list[Optional[dict[str, Any]]],
+    lineas_recuperadas: list[str],
+) -> list[Optional[dict[str, Any]]]:
+    """Conserva evidencia focal sólo para filas que no cambió la recuperación.
+
+    La reconciliación con una lectura OCR alternativa puede corregir una o
+    pocas filas de una tabla por coordenadas. El recorte de esas filas ya no
+    representa el texto final y debe descartarse, pero eliminar la evidencia
+    de toda la página impedía releer de forma focal las demás celdas, que
+    siguen ancladas a la misma imagen. Si se agregaron o quitaron filas no
+    existe una correspondencia posicional segura y se descarta el conjunto.
+    """
+    if (
+        len(lineas_originales) != len(evidencias_originales)
+        or len(lineas_originales) != len(lineas_recuperadas)
+    ):
+        return [None] * len(lineas_recuperadas)
+    return [
+        evidencia if original == recuperada else None
+        for original, evidencia, recuperada in zip(
+            lineas_originales, evidencias_originales, lineas_recuperadas,
+        )
+    ]
 
 
 def recuperar_filas_tabla_ocr(
@@ -2801,6 +6336,172 @@ def recuperar_filas_tabla_ocr(
     return recovered, replacements
 
 
+_PATRON_CONTROL_OCHO_COLUMNAS = re.compile(
+    r"^\W*(?:sumas?|sub[-\s]?totales?|total(?:es)?|"
+    r"perdida\s+o\s+ganancia|resultado|utilidad|"
+    r"ganancia(?:\s+(?:del\s+)?ejercicio|\s+neta))\b",
+    re.I,
+)
+
+
+def _cuenta_ocho_columnas_nativa_valida(
+    linea: str, numero_linea: int,
+) -> Optional[CuentaRaw]:
+    """Lee una fila nativa de ocho columnas sin aplicar reparaciones OCR.
+
+    La lectura textual nativa puede conservar mejor las celdas vacías que una
+    reconstrucción geométrica. Sólo se admite como evidencia alternativa si
+    mantiene las ocho columnas y las dos identidades por fila son exactas.
+    """
+    normalizada = normalizar_codigo_ocr(normalizar_linea_ocr_tabla(linea))
+    cuenta = parsear_linea(
+        normalizada,
+        numero_linea,
+        FormatoCodigo.SIN_CODIGO,
+        ".",
+        1.0,
+    )
+    if (
+        cuenta is None
+        or not cuenta.codigo
+        or set(cuenta.montos_columnas) != set(RAW_MONETARY_COLUMNS)
+        or _error_identidades_cuenta(cuenta) > 10
+    ):
+        return None
+    return cuenta
+
+
+def _control_ocho_columnas_nativo_valido(
+    linea: str, numero_linea: int,
+) -> Optional[CuentaRaw]:
+    """Devuelve un control nativo sólo cuando su identidad es verificable."""
+    normalizada = normalizar_codigo_ocr(normalizar_linea_ocr_tabla(linea))
+    if not _PATRON_CONTROL_OCHO_COLUMNAS.match(normalizada):
+        return None
+    cuenta = parsear_linea(
+        normalizada,
+        numero_linea,
+        FormatoCodigo.SIN_CODIGO,
+        ".",
+        1.0,
+    )
+    if (
+        cuenta is None
+        or not cuenta.es_total
+        or set(cuenta.montos_columnas) != set(RAW_MONETARY_COLUMNS)
+        or _error_identidades_cuenta(cuenta) > 10
+    ):
+        return None
+    return cuenta
+
+
+def _clave_control_ocho_columnas(cuenta: CuentaRaw) -> str:
+    return re.sub(
+        r"[^a-z0-9]+", "", _sin_acentos(cuenta.nombre).lower(),
+    )
+
+
+def preparar_candidato_texto_nativo_ocho_columnas(
+    lineas_coordenadas: list[str], texto_nativo: str,
+) -> Optional[dict[str, Any]]:
+    """Prepara una lectura nativa alternativa de una tabla geométrica.
+
+    No selecciona todavía la alternativa. Reúne únicamente filas que ya son
+    autoconsistentes y métricas de coincidencia de códigos para que el
+    llamador pueda preferirla sólo a nivel de documento, nunca por una fila
+    aislada.
+    """
+    cuentas_coordenadas = [
+        cuenta
+        for indice, linea in enumerate(lineas_coordenadas)
+        if (
+            cuenta := _cuenta_ocho_columnas_nativa_valida(linea, indice)
+        ) is not None
+    ]
+    lineas_nativas: list[str] = []
+    cuentas_nativas: list[CuentaRaw] = []
+    controles_nativos: list[CuentaRaw] = []
+    for indice, linea in enumerate(texto_nativo.splitlines()):
+        cuenta = _cuenta_ocho_columnas_nativa_valida(linea, indice)
+        if cuenta is not None:
+            lineas_nativas.append(linea)
+            cuentas_nativas.append(cuenta)
+            continue
+        control = _control_ocho_columnas_nativo_valido(linea, indice)
+        if control is not None:
+            lineas_nativas.append(linea)
+            controles_nativos.append(control)
+
+    if not lineas_nativas or not cuentas_coordenadas or not cuentas_nativas:
+        return None
+
+    codigos_coordenadas = {
+        _codigo_contable_canonico(cuenta.codigo)
+        for cuenta in cuentas_coordenadas
+    } - {""}
+    codigos_nativos = {
+        _codigo_contable_canonico(cuenta.codigo)
+        for cuenta in cuentas_nativas
+    } - {""}
+    if not codigos_coordenadas or not codigos_nativos:
+        return None
+    controles_certificables = sum(
+        1
+        for cuenta in controles_nativos
+        if (
+            "subtotal" in _clave_control_ocho_columnas(cuenta)
+            or _clave_control_ocho_columnas(cuenta) == "sumas"
+            or _clave_control_ocho_columnas(cuenta).startswith("totalacumulado")
+        )
+    )
+    return {
+        "lineas": lineas_nativas,
+        "cuentas_coordenadas": len(cuentas_coordenadas),
+        "cuentas_nativas": len(cuentas_nativas),
+        "codigos_coordenadas": codigos_coordenadas,
+        "codigos_nativos": codigos_nativos,
+        "controles_certificables": controles_certificables,
+    }
+
+
+def debe_preferirse_texto_nativo_ocho_columnas(
+    candidatos: list[dict[str, Any]], paginas_coordenadas: int,
+) -> bool:
+    """Decide si una tabla nativa supera a la reconstrucción geométrica.
+
+    La preferencia exige cobertura casi total de los mismos códigos, al menos
+    un subtotal compatible con la certificación existente y más filas válidas
+    que la alternativa geométrica. Si cualquier página de la tabla no aporta
+    el contraste, se mantiene el extractor anterior.
+    """
+    if not candidatos or len(candidatos) != paginas_coordenadas:
+        return False
+    cuentas_coordenadas = sum(
+        int(candidato["cuentas_coordenadas"]) for candidato in candidatos
+    )
+    cuentas_nativas = sum(
+        int(candidato["cuentas_nativas"]) for candidato in candidatos
+    )
+    if (
+        cuentas_coordenadas < 8
+        or cuentas_nativas < 8
+        or cuentas_nativas <= cuentas_coordenadas
+        or not any(candidato["controles_certificables"] for candidato in candidatos)
+    ):
+        return False
+    codigos_coordenadas = set().union(
+        *(candidato["codigos_coordenadas"] for candidato in candidatos)
+    )
+    codigos_nativos = set().union(
+        *(candidato["codigos_nativos"] for candidato in candidatos)
+    )
+    comparables = min(len(codigos_coordenadas), len(codigos_nativos))
+    if comparables < 8:
+        return False
+    coincidencia = len(codigos_coordenadas & codigos_nativos) / comparables
+    return coincidencia >= 0.95
+
+
 def _tabla_ocr_necesita_recuperacion(lineas: list[str]) -> bool:
     for index, line in enumerate(lineas):
         normalized = normalizar_linea_ocr_tabla(line)
@@ -2875,9 +6576,56 @@ def _celda_clasificada_ocr(
         if token and re.search(r"[A-Za-z0-9ÁÉÍÓÚÜÑáéíóúüñ]", token):
             name_tokens.append(token)
     name = " ".join(name_tokens).strip()
+    # En filas paralelas puede ocurrir que el importe ``0`` del extremo
+    # izquierdo quede apenas a la derecha del corte geométrico y anteceda al
+    # total derecho. Es un artefacto de la separación, no parte de la glosa:
+    # sólo se elimina ante el patrón inequívoco ``importe + TOTAL ...``.
+    name = re.sub(
+        r"^(?:[-+]?\d{1,3}(?:[.,]\d{3})*|[-+]?\d+)\s+(?=TOTAL\b)",
+        "",
+        name,
+        flags=re.I,
+    ).strip()
     if not re.search(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]", name):
         return None
     return name, amount
+
+
+def _evidencia_importe_clasificado_ocr(
+    words: list[dict], *, amount_min_x: float,
+) -> Optional[dict[str, Any]]:
+    """Conserva la caja del importe que originó una celda clasificada.
+
+    La extracción geométrica de dos columnas usa una sola cifra por mitad.
+    Guardar su caja permite contrastar más tarde un desacuerdo con una lectura
+    OCR focal sobre el mismo píxel, sin deducir importes desde subtotales.
+    """
+    try:
+        ordered = sorted(words, key=lambda word: float(word["x0"]))
+        for word in reversed(ordered):
+            token = str(word.get("text", "")).strip()
+            xmid = (float(word["x0"]) + float(word["x1"])) / 2
+            normalized = normalizar_token_ocr(token).replace("$", "")
+            if not (
+                xmid >= amount_min_x
+                and re.search(r"\d", normalized)
+                and PATRON_MONTOS.fullmatch(normalized)
+            ):
+                continue
+            top = float(word.get("image_top", word["top"]))
+            bottom = float(word.get("image_bottom", word["top"]))
+            if bottom <= top:
+                bottom = top + 1.0
+            return {
+                "bbox": (
+                    float(word["x0"]), top,
+                    float(word["x1"]), bottom,
+                ),
+                "token": token,
+            }
+    except (KeyError, TypeError, ValueError):
+        return None
+    return None
 
 
 def _es_total_final_activo(nombre: str) -> bool:
@@ -2893,9 +6641,52 @@ def _es_total_final_activo(nombre: str) -> bool:
     )
 
 
+def _seccion_contable_doble_columna(
+    texto: str, origen: OrigenColumna,
+) -> Optional[str]:
+    """Reconoce una cabecera sin importe dentro de un balance clasificado.
+
+    ``origen`` describe el lado físico de la hoja. La sección devuelve la
+    naturaleza contable explícitamente rotulada dentro de ese lado. En
+    particular, un mismo lado derecho puede pasar de PASIVO a PATRIMONIO.
+    No se aplica a filas con importe, porque allí una glosa similar a una
+    cabecera puede ser una cuenta real.
+    """
+    normalizado = re.sub(
+        r"\s+", " ", _sin_acentos(texto).upper(),
+    ).strip(" :$.-")
+    if not normalizado:
+        return None
+    if origen is OrigenColumna.ACTIVO:
+        if re.fullmatch(
+            r"ACTIVOS?(?: (?:CORRIENTES?|NO CORRIENTES?|CIRCULANTES?|FIJOS?))?"
+            r"|(?:CURRENT|NON CURRENT) ASSETS?|ASSETS?",
+            normalizado,
+        ):
+            return "activo"
+        return None
+    if origen is OrigenColumna.PASIVO:
+        if re.match(
+            r"^(?:PATRIMONIO(?: NETO)?(?:\b| )|EQUITY(?:\b| )|"
+            r"CAPITAL(?: Y RESERVAS?)?$)",
+            normalizado,
+        ):
+            return "patrimonio"
+        if re.fullmatch(
+            r"PASIVOS?(?: (?:CORRIENTES?|NO CORRIENTES?|CIRCULANTES?|"
+            r"A LARGO PLAZO))?|(?:CURRENT|NON CURRENT) LIABILITIES|LIABILITIES",
+            normalizado,
+        ):
+            return "pasivo"
+    return None
+
+
 def _extraer_balance_clasificado_doble_columna_por_coordenadas(
     page, *, permitir_continuacion: bool = False,
-) -> list[tuple[str, OrigenColumna]]:
+    incluir_seccion_contable: bool = False,
+    incluir_evidencia_importes: bool = False,
+    secciones_iniciales: Optional[dict[OrigenColumna, Optional[str]]] = None,
+) -> Any:
     """Extrae un balance OCR ACTIVO | PASIVO preservando su lado físico.
 
     No es un fallback textual genérico: sólo se activa tras observar una
@@ -2903,20 +6694,45 @@ def _extraer_balance_clasificado_doble_columna_por_coordenadas(
     en ambas mitades. En páginas posteriores del mismo documento se permite
     continuidad si mantienen al menos ocho filas paralelas. Así una tabla de
     ocho columnas o dos bloques de texto normales siguen por el flujo usual.
+
+    Con ``incluir_seccion_contable`` agrega una tercera posición por fila con
+    la sección observada. Es metadato audit-able y no sustituye el lado físico.
+    Con ``incluir_evidencia_importes`` devuelve también una evidencia por fila
+    con la caja OCR del importe observado.
+    El parámetro por defecto conserva la interfaz histórica de pares
+    ``(texto, origen)`` usada por los tests y por consumidores externos.
     """
+    def resultado(
+        filas: list[tuple], evidencias: list[Optional[dict[str, Any]]],
+    ) -> Any:
+        if incluir_evidencia_importes:
+            return filas, evidencias
+        return filas
+
     try:
         words = page.extract_words(use_text_flow=False, keep_blank_chars=False) or []
         groups = _agrupar_palabras_por_linea(words)
         page_width = max(float(word["x1"]) for word in words)
-    except (KeyError, TypeError, ValueError):
-        return []
+    except (AttributeError, KeyError, TypeError, ValueError):
+        return resultado([], [])
     if page_width < 200 or not groups:
-        return []
+        return resultado([], [])
 
     split_x = page_width / 2
     left_amount_min_x = split_x * 0.72
     right_amount_min_x = split_x + ((page_width - split_x) * 0.58)
-    candidates: list[tuple[Optional[tuple[str, str]], Optional[tuple[str, str]]]] = []
+    candidates: list[tuple[
+        Optional[tuple[str, str]], Optional[tuple[str, str]],
+        Optional[dict[str, Any]], Optional[dict[str, Any]],
+    ]] = []
+    secciones = {
+        OrigenColumna.ACTIVO: None,
+        OrigenColumna.PASIVO: None,
+    }
+    if secciones_iniciales:
+        for origen in secciones:
+            secciones[origen] = secciones_iniciales.get(origen)
+    contextos: list[tuple[Optional[str], Optional[str]]] = []
     header_detected = False
 
     for group in groups:
@@ -2936,6 +6752,34 @@ def _extraer_balance_clasificado_doble_columna_por_coordenadas(
         right_cell = _celda_clasificada_ocr(
             right_words, amount_min_x=right_amount_min_x,
         )
+        left_evidence = (
+            _evidencia_importe_clasificado_ocr(
+                left_words, amount_min_x=left_amount_min_x,
+            )
+            if left_cell is not None else None
+        )
+        right_evidence = (
+            _evidencia_importe_clasificado_ocr(
+                right_words, amount_min_x=right_amount_min_x,
+            )
+            if right_cell is not None else None
+        )
+        # Las cabeceras de sección no tienen importe y por tanto no se emiten
+        # como cuentas. Se leen antes de asignar contexto a las filas de la
+        # misma página. Esto permite que el lado físico PASIVO siga intacto y
+        # que una sección PATRIMONIO dentro de él se haga explícita.
+        if left_cell is None:
+            seccion_izquierda = _seccion_contable_doble_columna(
+                left_text, OrigenColumna.ACTIVO,
+            )
+            if seccion_izquierda:
+                secciones[OrigenColumna.ACTIVO] = seccion_izquierda
+        if right_cell is None:
+            seccion_derecha = _seccion_contable_doble_columna(
+                right_text, OrigenColumna.PASIVO,
+            )
+            if seccion_derecha:
+                secciones[OrigenColumna.PASIVO] = seccion_derecha
         if (
             left_cell is None
             and right_cell is None
@@ -2943,18 +6787,40 @@ def _extraer_balance_clasificado_doble_columna_por_coordenadas(
             and re.search(r"\b(?:PASIVOS?|PATRIMONIO)\b", right_text)
         ):
             header_detected = True
-        candidates.append((left_cell, right_cell))
+        candidates.append((
+            left_cell, right_cell, left_evidence, right_evidence,
+        ))
+        contextos.append((
+            secciones[OrigenColumna.ACTIVO],
+            secciones[OrigenColumna.PASIVO],
+        ))
 
     paired_rows = sum(
-        left is not None and right is not None for left, right in candidates
+        left is not None and right is not None
+        for left, right, _left_evidence, _right_evidence in candidates
     )
     if not header_detected and not (permitir_continuacion and paired_rows >= 8):
-        return []
+        return resultado([], [])
     if paired_rows < 5:
-        return []
+        return resultado([], [])
 
-    extracted: list[tuple[str, OrigenColumna]] = []
-    for left, right in candidates:
+    extracted: list[tuple] = []
+    evidencias_importes: list[Optional[dict[str, Any]]] = []
+    for (
+        left, right, left_evidence, right_evidence,
+    ), (seccion_izquierda, seccion_derecha) in zip(
+        candidates, contextos,
+    ):
+        def agregar(
+            nombre: str, monto: str, origen: OrigenColumna,
+            seccion: Optional[str], evidencia_importe: Optional[dict[str, Any]],
+        ) -> None:
+            fila = (f"{nombre} {monto}", origen)
+            if incluir_seccion_contable:
+                fila = (*fila, seccion)
+            extracted.append(fila)
+            evidencias_importes.append(evidencia_importe)
+
         if left is not None and right is not None:
             left_name, left_amount = left
             right_name, right_amount = right
@@ -2968,15 +6834,29 @@ def _extraer_balance_clasificado_doble_columna_por_coordenadas(
                     right_name = "TOTAL PASIVOS Y PATRIMONIO"
                 elif "PASIV" in right_normalized:
                     right_name = "TOTAL PASIVOS"
-            extracted.append((f"{left_name} {left_amount}", OrigenColumna.ACTIVO))
-            extracted.append((f"{right_name} {right_amount}", OrigenColumna.PASIVO))
+            agregar(
+                left_name, left_amount, OrigenColumna.ACTIVO,
+                seccion_izquierda, left_evidence,
+            )
+            agregar(
+                right_name, right_amount, OrigenColumna.PASIVO,
+                seccion_derecha, right_evidence,
+            )
         elif left is not None:
             name, amount = left
-            extracted.append((f"{name} {amount}", OrigenColumna.ACTIVO))
+            agregar(
+                name, amount, OrigenColumna.ACTIVO, seccion_izquierda,
+                left_evidence,
+            )
         elif right is not None:
             name, amount = right
-            extracted.append((f"{name} {amount}", OrigenColumna.PASIVO))
-    return extracted
+            agregar(
+                name, amount, OrigenColumna.PASIVO, seccion_derecha,
+                right_evidence,
+            )
+    if secciones_iniciales is not None:
+        secciones_iniciales.update(secciones)
+    return resultado(extracted, evidencias_importes)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -3024,6 +6904,16 @@ class ParserPDF:
         # extracción geométrica de balance clasificado observó el lado físico
         # de cada importe; el flujo textual conserva ``None``.
         self._origenes_lineas_ocr: list[Optional[OrigenColumna]] = []
+        # Paralelo a ``_origenes_lineas_ocr``: sección contable explícita
+        # observada en un encabezado del documento. No reemplaza la columna
+        # física y queda vacía cuando el extractor no la pudo observar.
+        self._secciones_lineas_ocr: list[Optional[str]] = []
+        # Paralelo a las líneas extraídas: una marca sólo se activa cuando un
+        # importe geométrico fue confirmado por el OCR textual y mejoró un
+        # subtotal. La salida conserva esa condición para revisión humana.
+        self._importes_recuperados_ocr: list[bool] = []
+        self._ocr_orientation_evidence: list[dict[str, Any]] = []
+        self._ocr_orientation_certified = True
         lineas, requirio_ocr, rotacion = self._extraer_lineas(path, context)
 
         if not lineas:
@@ -3036,6 +6926,10 @@ class ParserPDF:
                     + ["No se pudo extraer texto (ni nativo ni OCR)"]
                 ),
                 document_context=documento_ctx,
+                orientacion_certificada=(
+                    self._ocr_orientation_certified if requirio_ocr else None
+                ),
+                orientaciones_paginas=list(self._ocr_orientation_evidence),
             )
 
         if requirio_ocr:
@@ -3043,15 +6937,30 @@ class ParserPDF:
         elif self._extraction_method not in {
             "coordinates_8_amounts",
             "native_table_8_columns",
+            "native_text_8_columns_validated",
+            "native_layout_8_columns",
+            "native_classified_two_columns",
         }:
             lineas = [normalizar_montos_fragmentados(l) for l in lineas]
         lineas = [normalizar_codigo_ocr(l) for l in lineas]
+        lineas = etiquetar_subtotales_anonimos(lineas)
         origenes_lineas = list(self._origenes_lineas_ocr)
+        secciones_lineas = list(self._secciones_lineas_ocr)
+        importes_recuperados = list(self._importes_recuperados_ocr)
         if len(origenes_lineas) != len(lineas):
             # Una implementación de extractor nunca debe desalinear los
             # metadatos de su texto. Si ocurriera, se prefiere no usar la
             # señal adicional antes que atribuir una columna equivocada.
             origenes_lineas = [None] * len(lineas)
+        if len(secciones_lineas) != len(lineas):
+            # La sección sólo es útil si apunta exactamente a la misma fila
+            # que su lado físico. Ante desalineación se descarta, no se
+            # propaga por proximidad.
+            secciones_lineas = [None] * len(lineas)
+        if len(importes_recuperados) != len(lineas):
+            # La auditoría nunca se desplaza entre filas: si los metadatos no
+            # calzan, se descarta la marca antes que atribuirla a otra cuenta.
+            importes_recuperados = [False] * len(lineas)
 
         primer_tokens = [l.split()[0] if l.split() else '' for l in lineas[:60]]
         formato_codigo = detectar_formato_codigo(primer_tokens)
@@ -3206,16 +7115,44 @@ class ParserPDF:
         cuentas = []
         for i, l in enumerate(lineas):
             origen_observado = origenes_lineas[i]
-            sub_lines = [l] if origen_observado is not None else split_side_by_side(l)
+            seccion_observada = secciones_lineas[i]
+            importe_recuperado = importes_recuperados[i]
+            corte_lateral_ambiguo = False
+            if origen_observado is not None:
+                sub_lines = [l]
+            else:
+                sub_lines, corte_lateral_ambiguo = (
+                    _separar_linea_lateral_con_evidencia(
+                        l, i, formato_codigo, separador, confianza,
+                    )
+                )
+                if corte_lateral_ambiguo:
+                    advertencias.append(
+                        f"Fila {i + 1}: posible tabla lateral sin dos códigos "
+                        "contables; se conservó completa para revisión."
+                    )
             for sub_l in sub_lines:
-                c = parsear_linea(sub_l, i, formato_codigo, separador, confianza,
-                                  column_order=column_order,
-                                  periodo_comparativo=periodo_comparativo,
-                                  years=years,
-                                  currencies=currencies)
+                if origen_observado is not None:
+                    c = parsear_linea_clasificada_observada(
+                        sub_l, i, separador, confianza,
+                    )
+                else:
+                    c = parsear_linea(
+                        sub_l, i, formato_codigo, separador, confianza,
+                        column_order=column_order,
+                        periodo_comparativo=periodo_comparativo,
+                        years=years,
+                        currencies=currencies,
+                    )
                 if c:
+                    if corte_lateral_ambiguo:
+                        c.columnas_derivadas = [
+                            *c.columnas_derivadas,
+                            "corte_lateral_ambiguo_sin_dos_codigos",
+                        ]
                     if origen_observado is not None and c.monto is not None:
                         c.origen_columna = origen_observado
+                        c.seccion_contable = seccion_observada
                         # No son ocho columnas reconstruidas: es la columna
                         # física observada en el OCR. Mantenerla evita que el
                         # anotador de secciones sobrescriba ACTIVO/PASIVO con
@@ -3223,9 +7160,15 @@ class ParserPDF:
                         c.montos_columnas = {
                             origen_observado.value: float(c.monto),
                         }
+                    if importe_recuperado:
+                        c.columnas_derivadas = [
+                            *c.columnas_derivadas,
+                            "importe_recuperado_ocr",
+                        ]
                     cuentas.append(c)
 
         cuentas, cuentas_partidas = fusionar_cuentas_partidas(cuentas)
+        cuentas, controles_finales_partidos = fusionar_control_total_general_partido(cuentas)
         jerarquicos = marcar_subtotales_jerarquicos(cuentas)
         if jerarquicos:
             advertencias.append(
@@ -3237,12 +7180,23 @@ class ParserPDF:
                 f"Se reconstruyeron {cuentas_partidas} cuentas partidas entre "
                 "su código, glosa e importes."
             )
+        if controles_finales_partidos:
+            advertencias.append(
+                f"Se reconstruyeron {controles_finales_partidos} control(es) "
+                "TOTAL GENERAL partidos en dos columnas físicas."
+            )
 
         secciones_anotadas = anotar_secciones_balance_clasificado(cuentas)
         if secciones_anotadas:
             advertencias.append(
                 f"Se recuperó la sección contable de {secciones_anotadas} cuentas "
                 "desde encabezados del balance clasificado."
+            )
+        estados_anotados = anotar_estado_financiero(cuentas)
+        if estados_anotados:
+            advertencias.append(
+                f"Se identificó el estado financiero de {estados_anotados} filas "
+                "desde encabezados explícitos del documento."
             )
 
         # NOTA (Fase A): la resolución de tipo_cuenta se eliminó de ParserPDF.
@@ -3266,10 +7220,29 @@ class ParserPDF:
         certificacion = certificar_extraccion_columnas(
             cuentas, metodo=self._extraction_method,
         )
+        if requirio_ocr:
+            certificacion = _anotar_certificacion_orientacion(
+                certificacion, self._ocr_orientation_evidence,
+            )
         if certificacion.estado == "no_evaluable":
-            certificacion_clasificada = certificar_totales_clasificados(cuentas)
+            certificacion_clasificada = certificar_totales_clasificados(
+                cuentas, metodo=self._extraction_method,
+            )
             if certificacion_clasificada.estado != "no_evaluable":
                 certificacion = certificacion_clasificada
+                if requirio_ocr:
+                    certificacion = _anotar_certificacion_orientacion(
+                        certificacion, self._ocr_orientation_evidence,
+                    )
+
+        if requirio_ocr:
+            # ResultadoParseo mantiene este atributo histórico en paralelo a
+            # CertificacionExtraccion. La segunda lectura tabular o el
+            # consenso documental pueden haber recuperado una página que la
+            # sonda inicial había dejado ambigua.
+            self._ocr_orientation_certified = bool(
+                certificacion.orientacion_certificada
+            )
 
         resultado = ResultadoParseo(
             archivo=path.name,
@@ -3281,6 +7254,10 @@ class ParserPDF:
             advertencias=advertencias,
             document_context=documento_ctx,
             certificacion_extraccion=certificacion,
+            orientacion_certificada=(
+                self._ocr_orientation_certified if requirio_ocr else None
+            ),
+            orientaciones_paginas=list(self._ocr_orientation_evidence),
         )
         if resultado.certificacion_extraccion.estado == "fallida":
             resultado.advertencias.extend(resultado.certificacion_extraccion.razones)
@@ -3348,12 +7325,32 @@ class ParserPDF:
                 return lineas, False, 0
 
         lineas: list[str] = []
+        # Los metadatos no son exclusivos de OCR: un PDF con texto nativo
+        # puede tener el mismo layout ACTIVO | PASIVO. Se conservan en las
+        # listas históricas para que el parseo posterior trate ambos orígenes
+        # de forma idéntica y nunca vuelva a inferir el lado por posición.
+        origenes_lineas: list[Optional[OrigenColumna]] = []
+        secciones_lineas: list[Optional[str]] = []
         # Conserva el layout monetario detectado entre paginas nativas. Debe
         # existir incluso cuando la primera pagina no contiene una tabla de
         # ocho columnas; de lo contrario el fallback por coordenadas intentaba
         # leer una variable local aun no inicializada.
         coordinate_centers: Optional[list[float]] = None
         formulario_tributario_activo = False
+        balance_tributario_ocho_columnas_detectado = False
+        anexo_clasificado_activo = False
+        clasificado_doble_detectado = False
+        secciones_clasificadas: dict[OrigenColumna, Optional[str]] = {
+            OrigenColumna.ACTIVO: None,
+            OrigenColumna.PASIVO: None,
+        }
+        # Las coordenadas son el respaldo habitual para tablas nativas de
+        # ocho columnas. En ciertos PDF, sin embargo, los ceros impresos en
+        # celdas estrechas se asignan a la columna vecina. Se registra una
+        # alternativa textual, pero sólo se preferirá al terminar el documento
+        # si todas las páginas de esa tabla pasan sus salvaguardas conjuntas.
+        reemplazos_texto_nativo: list[dict[str, Any]] = []
+        paginas_tabla_coordenadas = 0
 
         n_paginas = 0
         try:
@@ -3374,6 +7371,57 @@ class ParserPDF:
                             "adjunto al balance."
                         )
                         continue
+                    if _es_balance_clasificado_suplementario(
+                        texto,
+                        balance_tributario_ocho_columnas_detectado,
+                    ):
+                        anexo_clasificado_activo = True
+                        self._ocr_advertencias.append(
+                            f"Página {numero_pagina}: se omitió un BALANCE "
+                            "CLASIFICADO suplementario porque el BALANCE "
+                            "TRIBUTARIO de ocho columnas ya fue extraído."
+                        )
+                        continue
+                    if anexo_clasificado_activo and _es_estado_resultado(texto):
+                        self._ocr_advertencias.append(
+                            f"Página {numero_pagina}: se omitió un ESTADO DE "
+                            "RESULTADO suplementario del BALANCE CLASIFICADO."
+                        )
+                        continue
+                    if (
+                        clasificado_doble_detectado
+                        and _es_estado_resultado(texto)
+                    ):
+                        # Un estado de resultados puede tener dos bloques
+                        # paralelos, pero no es continuación física de
+                        # ACTIVO|PASIVO. Se vuelve a exigir cabecera antes de
+                        # usar el extractor clasificado en esta página.
+                        clasificado_doble_detectado = False
+                        secciones_clasificadas = {
+                            OrigenColumna.ACTIVO: None,
+                            OrigenColumna.PASIVO: None,
+                        }
+
+                    clasificado = (
+                        _extraer_balance_clasificado_doble_columna_por_coordenadas(
+                            page,
+                            permitir_continuacion=clasificado_doble_detectado,
+                            incluir_seccion_contable=True,
+                            secciones_iniciales=secciones_clasificadas,
+                        )
+                    )
+                    if clasificado:
+                        lineas_pagina = [linea for linea, _, _ in clasificado]
+                        lineas.extend(lineas_pagina)
+                        origenes_lineas.extend(
+                            origen for _, origen, _ in clasificado
+                        )
+                        secciones_lineas.extend(
+                            seccion for _, _, seccion in clasificado
+                        )
+                        self._extraction_method = "native_classified_two_columns"
+                        clasificado_doble_detectado = True
+                        continue
                     # Sprint F — doble columna: si la página parece tener dos
                     # columnas de cuenta (pre-filtro barato sobre el texto plano),
                     # intentar la separación estructural por coordenadas (x0).
@@ -3393,12 +7441,14 @@ class ParserPDF:
                             "universal.", exc,
                         )
                     if page_lineas:
-                        lineas.extend(l for l in page_lineas if l.strip())
+                        lineas_pagina = [l for l in page_lineas if l.strip()]
                     else:
                         tabla_8_columnas = _extraer_tabla_balance_8_columnas(page)
                         if tabla_8_columnas:
                             self._extraction_method = "native_table_8_columns"
-                            lineas.extend(tabla_8_columnas)
+                            lineas_pagina = tabla_8_columnas
+                            if _es_balance_tributario(texto):
+                                balance_tributario_ocho_columnas_detectado = True
                         else:
                             tabla_coordenadas, detected_centers = (
                                 _extraer_tabla_balance_por_coordenadas(
@@ -3408,17 +7458,90 @@ class ParserPDF:
                             coordinate_centers = detected_centers
                             if tabla_coordenadas:
                                 self._extraction_method = "coordinates_8_amounts"
-                                lineas.extend(tabla_coordenadas)
+                                lineas_pagina = tabla_coordenadas
+                                paginas_tabla_coordenadas += 1
+                                candidato_nativo = (
+                                    preparar_candidato_texto_nativo_ocho_columnas(
+                                        tabla_coordenadas, texto,
+                                    )
+                                )
+                                if candidato_nativo is not None:
+                                    candidato_nativo["inicio"] = len(lineas)
+                                    candidato_nativo["fin"] = (
+                                        len(lineas) + len(lineas_pagina)
+                                    )
+                                    reemplazos_texto_nativo.append(
+                                        candidato_nativo
+                                    )
+                                if _es_balance_tributario(texto):
+                                    balance_tributario_ocho_columnas_detectado = True
                             else:
-                                lineas.extend(texto.split('\n'))
+                                lineas_pagina = texto.split('\n')
+                    lineas.extend(lineas_pagina)
+                    origenes_lineas.extend([None] * len(lineas_pagina))
+                    secciones_lineas.extend([None] * len(lineas_pagina))
         except Exception as exc:  # noqa: BLE001 — OCR es el respaldo seguro
             logger.warning(
                 "No se pudo abrir %s con pdfplumber; se intentará OCR: %s",
                 path.name, exc,
             )
 
+        if debe_preferirse_texto_nativo_ocho_columnas(
+            reemplazos_texto_nativo, paginas_tabla_coordenadas,
+        ):
+            lineas_reemplazadas: list[str] = []
+            origenes_reemplazados: list[Optional[OrigenColumna]] = []
+            secciones_reemplazadas: list[Optional[str]] = []
+            cursor = 0
+            for candidato in reemplazos_texto_nativo:
+                inicio = int(candidato["inicio"])
+                fin = int(candidato["fin"])
+                lineas_reemplazadas.extend(lineas[cursor:inicio])
+                origenes_reemplazados.extend(origenes_lineas[cursor:inicio])
+                secciones_reemplazadas.extend(secciones_lineas[cursor:inicio])
+                lineas_candidato = list(candidato["lineas"])
+                lineas_reemplazadas.extend(lineas_candidato)
+                origenes_reemplazados.extend([None] * len(lineas_candidato))
+                secciones_reemplazadas.extend([None] * len(lineas_candidato))
+                cursor = fin
+            lineas_reemplazadas.extend(lineas[cursor:])
+            origenes_reemplazados.extend(origenes_lineas[cursor:])
+            secciones_reemplazadas.extend(secciones_lineas[cursor:])
+            lineas = lineas_reemplazadas
+            origenes_lineas = origenes_reemplazados
+            secciones_lineas = secciones_reemplazadas
+            self._extraction_method = "native_text_8_columns_validated"
+            self._ocr_advertencias.append(
+                "Se priorizó la lectura textual nativa de la tabla de ocho "
+                "columnas: conserva más filas autoconsistentes que la "
+                "reconstrucción geométrica y coincide en sus códigos."
+            )
+
         if lineas:
-            if self._debe_corregir_rotacion(context):
+            texto_lateral_recompuesto = False
+            if _texto_nativo_parece_lateral(lineas):
+                lineas_layout = _extraer_texto_nativo_layout(path)
+                if lineas_layout:
+                    lineas = lineas_layout
+                    # Poppler recompone el orden visual de la tabla. No hay
+                    # evidencia geométrica fila a fila para conservar aquí,
+                    # por lo que se descartan los metadatos de la lectura
+                    # lateral antes que asociarlos a otra cuenta.
+                    origenes_lineas = [None] * len(lineas)
+                    secciones_lineas = [None] * len(lineas)
+                    self._extraction_method = "native_layout_8_columns"
+                    texto_lateral_recompuesto = True
+                    self._ocr_advertencias.append(
+                        "El texto nativo contenía encabezados laterales "
+                        "invertidos; se recompuso la tabla con el layout "
+                        "nativo y se exigirán sus controles impresos."
+                    )
+            self._origenes_lineas_ocr = origenes_lineas
+            self._secciones_lineas_ocr = secciones_lineas
+            if (
+                not texto_lateral_recompuesto
+                and self._debe_corregir_rotacion(context)
+            ):
                 lineas = [ParserPDF._reverse_line(l) for l in lineas]
                 return lineas, False, 180
             return lineas, False, 0
@@ -3472,10 +7595,29 @@ class ParserPDF:
 
     def _ocr_documento(self, path: Path, n_paginas: int) -> tuple[list[str], bool, int]:
         lineas: list[str] = []
+        # ``text`` significaba históricamente tanto texto nativo como la
+        # salida lineal de Tesseract. El método debe conservar el origen real
+        # para que un diagnóstico no atribuya erróneamente el fallo al lector
+        # nativo cuando ya se usó OCR.
+        self._extraction_method = "ocr_text"
         origenes_lineas: list[Optional[OrigenColumna]] = []
-        rotacion_global: Optional[int] = None
+        secciones_lineas: list[Optional[str]] = []
+        importes_recuperados: list[bool] = []
+        evidencias_celdas_ocr: list[Optional[dict[str, Any]]] = []
+        rotaciones_paginas: list[int] = []
+        # Segmentos de tablas de ocho columnas reconstruidas con PSM 6. Se
+        # conservan para poder contrastar, al terminar el documento, una
+        # segunda geometría PSM 4 sin sustituir filas de manera aislada.
+        paginas_geometricas: list[dict[str, Any]] = []
         coordinate_centers: Optional[list[float]] = None
         clasificado_doble_detectado = False
+        # Estado explícito observado en una página anterior de un balance
+        # clasificado. Sólo se usa si una página de continuación vuelve a
+        # superar las salvaguardas geométricas del extractor especializado.
+        secciones_clasificadas: dict[OrigenColumna, Optional[str]] = {
+            OrigenColumna.ACTIVO: None,
+            OrigenColumna.PASIVO: None,
+        }
         formulario_tributario_activo = False
 
         pdftoppm_bin = shutil.which('pdftoppm') or 'pdftoppm'
@@ -3497,6 +7639,11 @@ class ParserPDF:
                         f"Página {pagina}: no pudo rasterizarse dentro de "
                         f"{OCR_PAGE_TIMEOUT_SECONDS} segundos y fue omitida."
                     )
+                    self._ocr_orientation_evidence.append({
+                        "pagina": pagina, "certificada": False,
+                        "motivo": "rasterizacion_timeout", "candidatos": [],
+                    })
+                    self._ocr_orientation_certified = False
                     logger.warning(
                         "Rasterización OCR omitida por timeout en página %d de %s",
                         pagina,
@@ -3513,19 +7660,27 @@ class ParserPDF:
                         path.name,
                         raster.returncode,
                     )
+                    self._ocr_orientation_evidence.append({
+                        "pagina": pagina, "certificada": False,
+                        "motivo": "rasterizacion_fallida", "candidatos": [],
+                    })
+                    self._ocr_orientation_certified = False
                     continue
                 imgs = list(tmpdir_path.glob(f'pg{pagina}*.png'))
                 if not imgs:
+                    self._ocr_orientation_evidence.append({
+                        "pagina": pagina, "certificada": False,
+                        "motivo": "imagen_raster_no_encontrada", "candidatos": [],
+                    })
+                    self._ocr_orientation_certified = False
                     continue
                 img_path = imgs[0]
 
-                if rotacion_global is None:
-                    rot = detectar_rotacion_osd(img_path)
-                    if rot is None:
-                        rot = detectar_rotacion_heuristica(img_path)
-                    rotacion_global = rot
+                evidencia_orientacion = _seleccionar_orientacion_ocr(img_path)
+                evidencia_orientacion["pagina"] = pagina
+                rotacion = int(evidencia_orientacion["rotacion"])
 
-                texto = ocr_pagina(img_path, rotacion_global)
+                texto = ocr_pagina(img_path, rotacion)
                 texto_principal = texto
                 omitir, formulario_tributario_activo = (
                     _debe_omitir_pagina_formulario_tributario(
@@ -3533,11 +7688,52 @@ class ParserPDF:
                     )
                 )
                 if omitir:
+                    evidencia_orientacion["utilizada_en_extraccion"] = False
+                    self._ocr_orientation_evidence.append(evidencia_orientacion)
                     self._ocr_advertencias.append(
                         f"Página {pagina}: se omitió un Formulario 22 adjunto "
                         "al balance."
                     )
                     continue
+                texto_tabular, rotacion_tabular, evidencia_tabular = (
+                    _recuperar_orientacion_por_tabla_ocr(
+                        img_path, evidencia_orientacion,
+                    )
+                )
+                if texto_tabular is not None:
+                    texto = texto_tabular
+                    texto_principal = texto_tabular
+                    rotacion = rotacion_tabular
+                    evidencia_orientacion = evidencia_tabular
+                    # La lectura estructural puede volver legible la marca de
+                    # un Formulario 22 que el OCR reducido no reconoció.
+                    omitir_tabular, formulario_tributario_activo = (
+                        _debe_omitir_pagina_formulario_tributario(
+                            texto_principal, formulario_tributario_activo,
+                        )
+                    )
+                    if omitir_tabular:
+                        evidencia_orientacion["utilizada_en_extraccion"] = False
+                        self._ocr_orientation_evidence.append(
+                            evidencia_orientacion
+                        )
+                        self._ocr_advertencias.append(
+                            f"Página {pagina}: se omitió un Formulario 22 "
+                            "adjunto al balance."
+                        )
+                        continue
+                elif evidencia_tabular is not evidencia_orientacion:
+                    evidencia_orientacion = evidencia_tabular
+                evidencia_orientacion["utilizada_en_extraccion"] = True
+                self._ocr_orientation_evidence.append(evidencia_orientacion)
+                rotaciones_paginas.append(rotacion)
+                if not evidencia_orientacion["certificada"]:
+                    self._ocr_orientation_certified = False
+                    self._ocr_advertencias.append(
+                        f"Página {pagina}: la orientación OCR quedó sin certificar "
+                        f"(rotación elegida={rotacion}°, margen="
+                        f"{evidencia_orientacion['margen']:.1f})."
+                    )
                 if (
                     clasificado_doble_detectado
                     and re.search(
@@ -3550,13 +7746,33 @@ class ParserPDF:
                     # continuación física ACTIVO|PASIVO del balance previo.
                     clasificado_doble_detectado = False
                     coordinate_centers = None
-                words_tsv = ocr_pagina_tsv(img_path, rotacion_global)
+                    secciones_clasificadas = {
+                        OrigenColumna.ACTIVO: None,
+                        OrigenColumna.PASIVO: None,
+                    }
+                words_tsv = ocr_pagina_tsv(img_path, rotacion)
                 tabla_coordenadas_usada = False
                 clasificado_doble_usado = False
                 origenes_pagina: Optional[list[OrigenColumna]] = None
+                secciones_pagina: Optional[list[Optional[str]]] = None
+                importes_recuperados_pagina: Optional[list[bool]] = None
+                evidencia_celdas_pagina: list[dict[str, Any]] = []
+                evidencias_importes_clasificados_pagina: list[
+                    Optional[dict[str, Any]]
+                ] = []
+                # La lectura lineal conserva una segmentación independiente
+                # del TSV. Sólo se adjunta como evidencia para una posible
+                # corrección posterior de una fila sin código; nunca cambia
+                # por sí sola la tabla geométrica.
+                lectura_cruzada_pagina = texto_principal
                 if words_tsv:
-                    tabla_ocr, detected_centers = _extraer_tabla_balance_por_coordenadas(
+                    (
+                        tabla_ocr,
+                        detected_centers,
+                        evidencia_celdas_pagina,
+                    ) = _extraer_tabla_balance_por_coordenadas(
                         _OCRWordsPage(words_tsv), coordinate_centers,
+                        incluir_evidencia_celdas=True,
                     )
                     if len(tabla_ocr) >= 3 and detected_centers:
                         coordinate_centers = detected_centers
@@ -3564,22 +7780,105 @@ class ParserPDF:
                         self._extraction_method = "ocr_coordinates_8_amounts"
                         tabla_coordenadas_usada = True
                     if not tabla_coordenadas_usada:
-                        clasificado = _extraer_balance_clasificado_doble_columna_por_coordenadas(
+                        (
+                            clasificado,
+                            evidencias_importes_clasificados_pagina,
+                        ) = _extraer_balance_clasificado_doble_columna_por_coordenadas(
                             _OCRWordsPage(words_tsv),
                             permitir_continuacion=clasificado_doble_detectado,
+                            incluir_seccion_contable=True,
+                            incluir_evidencia_importes=True,
+                            secciones_iniciales=secciones_clasificadas,
                         )
                         if clasificado:
-                            texto = "\n".join(linea for linea, _ in clasificado)
-                            origenes_pagina = [origen for _, origen in clasificado]
+                            for evidencia_importe in (
+                                evidencias_importes_clasificados_pagina
+                            ):
+                                if evidencia_importe is None:
+                                    continue
+                                evidencia_importe["imagen"] = str(img_path)
+                                evidencia_importe["rotacion"] = rotacion
+                            cache_importes_clasificados: dict[
+                                tuple[str, int], Image.Image
+                            ] = {}
+
+                            def confirmar_importe_clasificado(
+                                indice: int, monto: float,
+                            ) -> bool:
+                                if not (
+                                    0 <= indice
+                                    < len(evidencias_importes_clasificados_pagina)
+                                ):
+                                    return False
+                                return _confirmar_importe_clasificado_ocr(
+                                    evidencias_importes_clasificados_pagina[indice],
+                                    monto, cache_importes_clasificados,
+                                )
+
+                            (
+                                clasificado,
+                                importes_recuperados_pagina,
+                                replacements,
+                            ) = recuperar_importes_balance_clasificado_ocr(
+                                clasificado, texto_principal,
+                                confirmar_importe=confirmar_importe_clasificado,
+                            )
+                            if replacements:
+                                self._ocr_advertencias.append(
+                                    f"Página {pagina}: se recuperaron "
+                                    f"{replacements} importe(s) de balance "
+                                    "clasificado al contrastar geometría, OCR "
+                                    "textual y lectura focal; requieren revisión "
+                                    "humana."
+                                )
+                            (
+                                clasificado,
+                                importes_releidos_focales,
+                                cambios_focales_clasificados,
+                            ) = recuperar_importes_balance_clasificado_por_control_focal(
+                                clasificado,
+                                evidencias_importes_clasificados_pagina,
+                            )
+                            if cambios_focales_clasificados:
+                                importes_recuperados_pagina = [
+                                    previo or releido
+                                    for previo, releido in zip(
+                                        importes_recuperados_pagina,
+                                        importes_releidos_focales,
+                                    )
+                                ]
+                                self._ocr_advertencias.append(
+                                    f"Página {pagina}: se releyeron "
+                                    f"{len(cambios_focales_clasificados)} "
+                                    "importe(s) con OCR focal y subtotales "
+                                    "impresos; requieren revisión humana."
+                                )
+                            texto = "\n".join(
+                                linea for linea, _, _ in clasificado
+                            )
+                            origenes_pagina = [
+                                origen for _, origen, _ in clasificado
+                            ]
+                            secciones_pagina = [
+                                seccion for _, _, seccion in clasificado
+                            ]
                             self._extraction_method = "ocr_classified_two_columns"
                             clasificado_doble_usado = True
                             clasificado_doble_detectado = True
                 if tabla_coordenadas_usada and texto_principal.strip():
+                    lineas_antes_recuperacion = texto.splitlines()
                     recovered, replacements = recuperar_filas_tabla_ocr(
-                        texto.splitlines(), texto_principal,
+                        lineas_antes_recuperacion, texto_principal,
                     )
                     if replacements:
                         texto = "\n".join(recovered)
+                        evidencia_celdas_pagina = (
+                            _conservar_evidencia_celdas_no_reemplazada(
+                                lineas_antes_recuperacion,
+                                evidencia_celdas_pagina,
+                                recovered,
+                            )
+                        )
                         self._ocr_advertencias.append(
                             f"Página {pagina}: se recuperaron {replacements} filas "
                             "al contrastar la geometría con la lectura textual OCR."
@@ -3587,12 +7886,22 @@ class ParserPDF:
                 if tabla_coordenadas_usada and _tabla_ocr_necesita_recuperacion(
                     texto.splitlines(),
                 ):
-                    texto_tabla = ocr_pagina(img_path, rotacion_global, psm=4)
+                    texto_tabla = ocr_pagina(img_path, rotacion, psm=4)
+                    if texto_tabla.strip():
+                        lectura_cruzada_pagina = texto_tabla
+                    lineas_antes_recuperacion = texto.splitlines()
                     recovered, replacements = recuperar_filas_tabla_ocr(
-                        texto.splitlines(), texto_tabla,
+                        lineas_antes_recuperacion, texto_tabla,
                     )
                     if replacements:
                         texto = "\n".join(recovered)
+                        evidencia_celdas_pagina = (
+                            _conservar_evidencia_celdas_no_reemplazada(
+                                lineas_antes_recuperacion,
+                                evidencia_celdas_pagina,
+                                recovered,
+                            )
+                        )
                         self._ocr_advertencias.append(
                             f"Página {pagina}: se recuperaron {replacements} filas "
                             "por verificación cruzada de dos lecturas OCR."
@@ -3604,7 +7913,7 @@ class ParserPDF:
                     and not clasificado_doble_usado
                     and _ocr_requiere_alternativa(texto, pagina == n_paginas)
                 ):
-                    texto_tabla = ocr_pagina(img_path, rotacion_global, psm=4)
+                    texto_tabla = ocr_pagina(img_path, rotacion, psm=4)
                     recovered, replacements = recuperar_filas_tabla_ocr(
                         texto.splitlines(), texto_tabla,
                     )
@@ -3621,22 +7930,235 @@ class ParserPDF:
                         if estrategia != "principal":
                             self._ocr_advertencias.append(
                                 f"Página {pagina}: OCR de tabla seleccionado por "
-                                f"mayor calidad estructural ({estrategia})."
+                                f"mejor certificación contable ({estrategia})."
                             )
                 if not texto.strip():
                     self._ocr_advertencias.append(
                         f"Página {pagina}: OCR sin texto utilizable; revise que el "
                         "documento procesado esté completo."
                     )
+                inicio_lineas_pagina = len(lineas)
                 lineas_pagina = texto.split('\n')
                 lineas.extend(lineas_pagina)
                 if origenes_pagina is not None and len(origenes_pagina) == len(lineas_pagina):
                     origenes_lineas.extend(origenes_pagina)
                 else:
                     origenes_lineas.extend([None] * len(lineas_pagina))
+                if secciones_pagina is not None and len(secciones_pagina) == len(lineas_pagina):
+                    secciones_lineas.extend(secciones_pagina)
+                else:
+                    secciones_lineas.extend([None] * len(lineas_pagina))
+                if (
+                    importes_recuperados_pagina is not None
+                    and len(importes_recuperados_pagina) == len(lineas_pagina)
+                ):
+                    importes_recuperados.extend(importes_recuperados_pagina)
+                else:
+                    importes_recuperados.extend([False] * len(lineas_pagina))
+                if (
+                    tabla_coordenadas_usada
+                    and len(evidencia_celdas_pagina) == len(lineas_pagina)
+                ):
+                    for evidencia in evidencia_celdas_pagina:
+                        if evidencia is None:
+                            # Una fila reconciliada con otra lectura ya no
+                            # conserva una caja TSV válida. Se mantiene el
+                            # hueco para no desplazar la evidencia de las
+                            # demás filas de la página.
+                            evidencias_celdas_ocr.append(None)
+                            continue
+                        enriquecida = dict(evidencia)
+                        enriquecida["imagen"] = str(img_path)
+                        enriquecida["rotacion"] = rotacion
+                        enriquecida["pagina"] = pagina
+                        enriquecida["lectura_cruzada"] = lectura_cruzada_pagina
+                        enriquecida["celdas"] = [
+                            (
+                                {
+                                    **celda,
+                                    "imagen": str(img_path),
+                                    "rotacion": rotacion,
+                                }
+                                if celda is not None else None
+                            )
+                            for celda in evidencia.get("celdas", [])
+                        ]
+                        evidencias_celdas_ocr.append(enriquecida)
+                else:
+                    evidencias_celdas_ocr.extend([None] * len(lineas_pagina))
 
+                if tabla_coordenadas_usada:
+                    paginas_geometricas.append({
+                        "inicio": inicio_lineas_pagina,
+                        "fin": inicio_lineas_pagina + len(lineas_pagina),
+                        "imagen": img_path,
+                        "rotacion": rotacion,
+                    })
+
+            # La geometría primaria puede conservar ocho columnas en cada
+            # fila y aun así desplazar una celda. Se prueba PSM 4 sólo contra
+            # el documento completo, y sólo cuando no existe una columna
+            # física de un balance clasificado que requeriría metadatos por
+            # fila. La alternativa debe cubrir cada página geométrica; una
+            # mezcla parcial no es evidencia independiente suficiente.
+            if (
+                paginas_geometricas
+                and not any(origen is not None for origen in origenes_lineas)
+                and _certificar_candidato_textual_ocr(
+                    "\n".join(lineas),
+                ).estado != "certificada"
+            ):
+                centros_alternativos: Optional[list[float]] = None
+                reemplazos_geometricos: list[tuple[int, int, list[str]]] = []
+                for pagina_geometrica in paginas_geometricas:
+                    palabras_alternativas = ocr_pagina_tsv(
+                        pagina_geometrica["imagen"],
+                        int(pagina_geometrica["rotacion"]),
+                        psm=4,
+                    )
+                    tabla_alternativa, centros_alternativos = (
+                        _extraer_tabla_balance_por_coordenadas(
+                            _OCRWordsPage(palabras_alternativas),
+                            centros_alternativos,
+                        )
+                    )
+                    if len(tabla_alternativa) < 3 or not centros_alternativos:
+                        reemplazos_geometricos = []
+                        break
+                    reemplazos_geometricos.append((
+                        int(pagina_geometrica["inicio"]),
+                        int(pagina_geometrica["fin"]),
+                        tabla_alternativa,
+                    ))
+                if len(reemplazos_geometricos) == len(paginas_geometricas):
+                    candidatas: list[str] = []
+                    cursor = 0
+                    for inicio, fin, tabla_alternativa in reemplazos_geometricos:
+                        candidatas.extend(lineas[cursor:inicio])
+                        candidatas.extend(tabla_alternativa)
+                        cursor = fin
+                    candidatas.extend(lineas[cursor:])
+                    if _candidato_geometrico_ocr_mejora_certificacion(
+                        lineas, candidatas,
+                    ):
+                        lineas = candidatas
+                        # Las cajas TSV de PSM 6 dejan de representar las
+                        # filas seleccionadas. Se descartan antes que aplicar
+                        # una relectura focal sobre una evidencia desplazada.
+                        origenes_lineas = [None] * len(lineas)
+                        secciones_lineas = [None] * len(lineas)
+                        importes_recuperados = [False] * len(lineas)
+                        evidencias_celdas_ocr = [None] * len(lineas)
+                        self._ocr_advertencias.append(
+                            "Se seleccionó la geometría OCR alternativa PSM 4 "
+                            "porque certificó el documento completo mejor que "
+                            "la lectura primaria PSM 6."
+                        )
+
+            if any(evidencia is not None for evidencia in evidencias_celdas_ocr):
+                # La validación focal debe ver la misma representación que el
+                # parseo final: con ceros OCR normalizados y códigos
+                # normalizados. Sin esto, una coma de miles podía hacer que
+                # el contraste interno interpretara una cifra como decimal y
+                # rechazara incluso una relectura visual correcta.
+                lineas = [
+                    normalizar_codigo_ocr(normalizar_linea_ocr_tabla(linea))
+                    for linea in lineas
+                ]
+                lineas_releidas, filas_releidas, cambios_focales = (
+                    recuperar_celdas_ocr_focales(
+                        lineas, evidencias_celdas_ocr,
+                    )
+                )
+                if cambios_focales:
+                    lineas = lineas_releidas
+                    importes_recuperados = [
+                        previo or releido
+                        for previo, releido in zip(
+                            importes_recuperados, filas_releidas,
+                        )
+                    ]
+                    cambios_cruzados = [
+                        cambio for cambio in cambios_focales
+                        if cambio.get("origen") == "lectura_textual_cruzada"
+                    ]
+                    cambios_nativos = [
+                        cambio for cambio in cambios_focales
+                        if cambio.get("origen") == "relectura_nativa_sin_escalar"
+                    ]
+                    cambios_por_residuo = [
+                        cambio for cambio in cambios_focales
+                        if cambio.get("origen")
+                        == "relectura_nativa_por_residuo_de_control"
+                    ]
+                    cambios_focales_visuales = [
+                        cambio for cambio in cambios_focales
+                        if cambio.get("origen") not in {
+                            "lectura_textual_cruzada",
+                            "relectura_nativa_sin_escalar",
+                            "relectura_nativa_por_residuo_de_control",
+                        }
+                    ]
+                    if cambios_cruzados:
+                        celdas_cruzadas = sum(
+                            len(cambio["columnas"])
+                            for cambio in cambios_cruzados
+                        )
+                        self._ocr_advertencias.append(
+                            "Se recuperaron "
+                            f"{celdas_cruzadas} celda(s) sin código al "
+                            "contrastar dos lecturas OCR y la identidad de "
+                            "la fila; requieren revisión humana."
+                        )
+                    if cambios_nativos:
+                        celdas_nativas = sum(
+                            len(cambio["columnas"])
+                            for cambio in cambios_nativos
+                        )
+                        self._ocr_advertencias.append(
+                            "Se releyeron "
+                            f"{celdas_nativas} celda(s) OCR sin reescalar "
+                            "el recorte y con controles contables; requieren "
+                            "revisión humana."
+                        )
+                    if cambios_por_residuo:
+                        celdas_por_residuo = sum(
+                            len(cambio["columnas"])
+                            for cambio in cambios_por_residuo
+                        )
+                        self._ocr_advertencias.append(
+                            "Se releyeron "
+                            f"{celdas_por_residuo} celda(s) OCR nativas para "
+                            "reducir un residuo de control único; requieren "
+                            "revisión humana."
+                        )
+                    if cambios_focales_visuales:
+                        celdas_focales = sum(
+                            len(cambio["columnas"])
+                            for cambio in cambios_focales_visuales
+                        )
+                        self._ocr_advertencias.append(
+                            "Se releyeron "
+                            f"{celdas_focales} celda(s) OCR con evidencia "
+                            "visual y controles contables; requieren revisión "
+                            "humana."
+                        )
+
+        self._ocr_orientation_evidence = _certificar_consenso_documental_orientacion(
+            self._ocr_orientation_evidence,
+        )
+        evidencias_relevantes = [
+            evidencia for evidencia in self._ocr_orientation_evidence
+            if evidencia.get("utilizada_en_extraccion", True)
+        ]
+        self._ocr_orientation_certified = bool(evidencias_relevantes) and all(
+            bool(evidencia.get("certificada"))
+            for evidencia in evidencias_relevantes
+        )
         self._origenes_lineas_ocr = origenes_lineas
-        return lineas, True, rotacion_global or 0
+        self._secciones_lineas_ocr = secciones_lineas
+        self._importes_recuperados_ocr = importes_recuperados
+        return lineas, True, _resumir_rotaciones_paginas(rotaciones_paginas)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -3722,7 +8244,7 @@ def parsear_excel(file) -> list[CuentaRaw]:
             accounts.append(CuentaRaw(
                 linea=row_idx, codigo=code, nombre=name, monto=amount,
                 origen_columna=origin,
-                es_total=code is None and bool(PATRON_TOTAL.match(name)),
+                es_total=code is None and _es_etiqueta_total(name),
                 confianza_extraccion=1.0,
                 montos_columnas=amounts,
             ))

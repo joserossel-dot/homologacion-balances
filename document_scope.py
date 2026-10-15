@@ -5,6 +5,76 @@ import re
 import pypdfium2 as pdfium
 
 
+_PERIODO_BALANCE = re.compile(
+    r"\bdesde\s*:?\s*(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})\s+"
+    r"hasta\s*:?\s*(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})\b",
+    re.IGNORECASE,
+)
+_PIE_PAGINA_SOLO = re.compile(
+    r"p[aá]gina\s+\d+\s+de\s+\d+", re.IGNORECASE,
+)
+
+
+def _extraer_textos_paginas(content: bytes) -> list[str]:
+    """Lee el texto nativo por página sólo para sugerir alcance al usuario."""
+    textos: list[str] = []
+    try:
+        with pdfium.PdfDocument(content) as doc:
+            for page in doc:
+                try:
+                    textpage = page.get_textpage()
+                    try:
+                        textos.append(textpage.get_text_range() or "")
+                    finally:
+                        textpage.close()
+                finally:
+                    page.close()
+    except Exception:
+        return []
+    return textos
+
+
+def _es_pie_aislado(texto: str) -> bool:
+    normalizado = re.sub(r"\s+", " ", texto or "").strip()
+    return not normalizado or bool(
+        len(normalizado) <= 80 and _PIE_PAGINA_SOLO.fullmatch(normalizado)
+    )
+
+
+def sugerir_periodos_balance(content: bytes) -> list[dict[str, object]]:
+    """Sugiere grupos de páginas para períodos distintos sin aplicarlos.
+
+    Sólo devuelve una sugerencia cuando el texto nativo expone al menos dos
+    encabezados ``Desde ... hasta ...`` diferentes. La selección sigue siendo
+    explícita: el analista debe elegirla y confirmar el formulario.
+    """
+    textos = _extraer_textos_paginas(content)
+    encabezados: list[tuple[int, str]] = []
+    for numero, texto in enumerate(textos, start=1):
+        match = _PERIODO_BALANCE.search(texto)
+        if match is None:
+            continue
+        etiqueta = f"{match.group(1)} a {match.group(2)}"
+        if not encabezados or encabezados[-1][1] != etiqueta:
+            encabezados.append((numero, etiqueta))
+    if len(encabezados) < 2 or len({etiqueta for _, etiqueta in encabezados}) < 2:
+        return []
+
+    sugerencias: list[dict[str, object]] = []
+    for indice, (inicio, etiqueta) in enumerate(encabezados):
+        siguiente_inicio = (
+            encabezados[indice + 1][0]
+            if indice + 1 < len(encabezados) else len(textos) + 1
+        )
+        paginas = [
+            pagina for pagina in range(inicio, siguiente_inicio)
+            if not _es_pie_aislado(textos[pagina - 1])
+        ]
+        if paginas:
+            sugerencias.append({"periodo": etiqueta, "paginas": paginas})
+    return sugerencias
+
+
 def page_count(content: bytes) -> int:
     with pdfium.PdfDocument(content) as doc:
         return len(doc)

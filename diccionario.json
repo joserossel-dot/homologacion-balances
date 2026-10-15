@@ -3011,7 +3011,7 @@
   },
   {
     "cuenta_original": "(-) capital por enterar",
-    "codigo_estandar": "PAT.01",
+    "codigo_estandar": "PAT.07",
     "fuente": "vaciador_crediticio"
   },
   {
@@ -4702,6 +4702,346 @@
   {
     "cuenta_original": "Ingresos Por Arriendos Mac Don",
     "codigo_estandar": "ER.17",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "PPM VENTAS",
+    "codigo_estandar": "AC.07",
+    "fuente": "piloto_corpus_certificado"
+  },
+  {
+    "cuenta_original": "PROV.IMPTO RENTA",
+    "codigo_estandar": "PC.05",
+    "fuente": "piloto_corpus_certificado"
+  },
+  {
+    "cuenta_original": "VENTAS AFECTAS",
+    "codigo_estandar": "ER.01",
+    "fuente": "piloto_corpus_certificado"
+  },
+  {
+    "cuenta_original": "VENTAS EXENTAS",
+    "codigo_estandar": "ER.01",
+    "fuente": "piloto_corpus_certificado"
+  },
+  {
+    "cuenta_original": "ASESORIA CONTABLE",
+    "codigo_estandar": "ER.04",
+    "fuente": "piloto_corpus_certificado"
+  },
+  {
+    "cuenta_original": "PPM",
+    "codigo_estandar": "AC.07",
+    "fuente": "piloto_corpus_certificado"
+  },
+  {
+    "cuenta_original": "PRESTAMOS BANCARIOS",
+    "codigo_estandar": "PC.02",
+    "fuente": "piloto_corpus_certificado"
+  },
+  {
+    "cuenta_original": "DISPONIBLE",
+    "codigo_estandar": "AC.01",
+    "fuente": "piloto_corpus_certificado_revision_contable"
+  },
+  {
+    "cuenta_original": "BANCO",
+    "codigo_estandar": "AC.01",
+    "fuente": "piloto_corpus_certificado_revision_contable"
+  },
+  {
+    "cuenta_original": "BANCO ESTADO CUENTA",
+    "codigo_estandar": "AC.01",
+    "fuente": "piloto_corpus_certificado_revision_contable"
+  },
+  {
+    "cuenta_original": "IVA D.F",
+    "codigo_estandar": "PC.05",
+    "fuente": "piloto_corpus_certificado_revision_contable"
+  },
+  {
+    "cuenta_original": "IMPTO 2A CATEGORIA",
+    "codigo_estandar": "PC.05",
+    "fuente": "piloto_corpus_certificado_revision_contable"
+  },
+  {
+    "cuenta_original": "UTILIDADES RETENIDAS",
+    "codigo_estandar": "PAT.03",
+    "fuente": "piloto_corpus_certificado_revision_contable"
+  },
+  {
+    "cuenta_original": "INGRESOS DE EXPLOTACION",
+    "codigo_estandar": "ER.01",
+    "fuente": "piloto_corpus_certificado_revision_contable"
+  },
+  {
+    "cuenta_original": "CUENTAS POR PAGAR",
+    "codigo_estandar": "PC.01",
+    "fuente": "piloto_corpus_certificado_revision_contable"
+  },
+  {
+    "cuenta_original": "PRESTAMOS TRABAJADOR",
+    "codigo_estandar": "AC.07",
+    "fuente": "piloto_corpus_certificado_revision_contable"
+  },
+  {
+    "cuenta_original": "A.F.P. CAPITAL",
+    "codigo_estandar": "PC.06",
+    "fuente": "piloto_corpus_certificado_revision_contable"
+  },
+  {
+    "cuenta_original": "A.F.P. HABITAT",
+    "codigo_estandar": "PC.06",
+    "fuente": "piloto_corpus_certificado_revision_contable"
+  },
+  {
+    "cuenta_original": "A.F.P. MODELO",
+    "codigo_estandar": "PC.06",
+    "fuente": "piloto_corpus_certificado_revision_contable"
+  },
+  {
+    "cuenta_original": "A.F.P. PROVIDA",
+    "codigo_estandar": "PC.06",
+    "fuente": "piloto_corpus_certificado_revision_contable"
+  },
+  {
+    "cuenta_original": "ISAPRE COLMENA",
+    "codigo_estandar": "PC.06",
+    "fuente": "piloto_corpus_certificado_revision_contable"
+  },
+  {
+    "cuenta_original": "ISAPRE VIDA TRES",
+    "codigo_estandar": "PC.06",
+    "fuente": "piloto_corpus_certificado_revision_contable"
+  },
+  {
+    "cuenta_original": "ISAPRE NUEVA MASVIDA",
+    "codigo_estandar": "PC.06",
+    "fuente": "piloto_corpus_certificado_revision_contable"
+  },
+  {
+    "cuenta_original": "I.P.S",
+    "codigo_estandar": "PC.06",
+    "fuente": "piloto_corpus_certificado_revision_contable"
+  },
+  {
+    "cuenta_original": "FONASA",
+    "codigo_estandar": "PC.06",
+    "fuente": "piloto_corpus_certificado_revision_contable"
+  },
+  {
+    "cuenta_original": "RETENCION 2°CATEGORI",
+    "codigo_estandar": "PC.05",
+    "fuente": "piloto_corpus_certificado_revision_contable"
+  },
+  {
+    "cuenta_original": "ACREEDORES POR PAGAR",
+    "codigo_estandar": "PC.01",
+    "fuente": "piloto_corpus_certificado_revision_contable"
+  },
+  {
+    "cuenta_original": "REVALORIZAC. CAPITAL",
+    "codigo_estandar": "PAT.01",
+    "fuente": "piloto_corpus_certificado_revision_contable"
+  },
+  {
+    "cuenta_original": "FDO.REV.CAPITAL PROPIO",
+    "codigo_estandar": "PAT.01",
+    "fuente": "piloto_corpus_certificado_revision_contable"
+  },
+  {
+    "cuenta_original": "RETENCIONES",
+    "codigo_estandar": "PC.05",
+    "fuente": "piloto_corpus_certificado_revision_contable"
+  },
+  {
+    "cuenta_original": "GASTOS EN PERSONAL",
+    "codigo_estandar": "ER.04",
+    "fuente": "piloto_corpus_certificado_revision_contable"
+  },
+  {
+    "cuenta_original": "GASTOS DE BIENES Y SERVICIOS VINCULADOS",
+    "codigo_estandar": "ER.04",
+    "fuente": "piloto_corpus_certificado_revision_contable"
+  },
+  {
+    "cuenta_original": "AJUSTE POR TIPO DE CAMBIO EN PESOS",
+    "codigo_estandar": "ER.15",
+    "fuente": "piloto_corpus_con_cuadratura_verificada"
+  },
+  {
+    "cuenta_original": "PATENTES",
+    "codigo_estandar": "ER.04",
+    "fuente": "piloto_corpus_con_cuadratura_verificada"
+  },
+  {
+    "cuenta_original": "SEGUROS VARIOS",
+    "codigo_estandar": "ER.04",
+    "fuente": "piloto_corpus_con_cuadratura_verificada"
+  },
+  {
+    "cuenta_original": "COSTO DE VENTA ACCION",
+    "codigo_estandar": "ER.02",
+    "fuente": "piloto_corpus_con_cuadratura_verificada"
+  },
+  {
+    "cuenta_original": "RESULTADO ACUMULADO",
+    "codigo_estandar": "PAT.03",
+    "fuente": "piloto_corpus_con_cuadratura_verificada"
+  },
+  {
+    "cuenta_original": "CONTRIBUCIONES BIENES RACIES",
+    "codigo_estandar": "ER.04",
+    "fuente": "piloto_corpus_con_cuadratura_verificada"
+  },
+  {
+    "cuenta_original": "CAPITAL POR ENTERAR",
+    "codigo_estandar": "PAT.07",
+    "fuente": "catalogo_maestro_pat07"
+  },
+  {
+    "cuenta_original": "OBLIGACIONES C/P BANCO E INST",
+    "codigo_estandar": "PC.02",
+    "fuente": "piloto_corpus_regla_contable"
+  },
+  {
+    "cuenta_original": "OBLIGACIONES L/P BANCO E INST",
+    "codigo_estandar": "PNC.01",
+    "fuente": "piloto_corpus_regla_contable"
+  },
+  {
+    "cuenta_original": "OBLIG .CON BCO E INST. FINANCIERA C/P",
+    "codigo_estandar": "PC.02",
+    "fuente": "piloto_corpus_regla_contable"
+  },
+  {
+    "cuenta_original": "IMPUESTOS FINANCIEROS",
+    "codigo_estandar": "ER.09",
+    "fuente": "piloto_corpus_regla_contable"
+  },
+  {
+    "cuenta_original": "COMISIONES FINANCIERAS",
+    "codigo_estandar": "ER.09",
+    "fuente": "piloto_corpus_regla_contable"
+  },
+  {
+    "cuenta_original": "HONORARIOS FINANCIEROS",
+    "codigo_estandar": "ER.09",
+    "fuente": "piloto_corpus_regla_contable"
+  },
+  {
+    "cuenta_original": "DEP.MUEBLES",
+    "codigo_estandar": "ANC.01.01",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "DEP. EQUIP COMUNICACIONES",
+    "codigo_estandar": "ANC.01.01",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "DEP.VEHICULOS",
+    "codigo_estandar": "ANC.01.01",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "DEP. EQUIPOS COMPUTACION",
+    "codigo_estandar": "ANC.01.01",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "DEP. ACTIVOS EN LEASING",
+    "codigo_estandar": "ANC.01.01",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "DEP DEL EJER MAQ. Y EQUIP",
+    "codigo_estandar": "ANC.01.01",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "DEP. DEL EJERC. HERRAMIEN",
+    "codigo_estandar": "ANC.01.01",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "DEP. DEL EJERC. MUEBLES",
+    "codigo_estandar": "ANC.01.01",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "DEP. DEL EJERC, UT. Y ENS",
+    "codigo_estandar": "ANC.01.01",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "DEP DEL EJER EQUI DE COM",
+    "codigo_estandar": "ANC.01.01",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "DEP. DEL EJERC. VEHICULOS",
+    "codigo_estandar": "ANC.01.01",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "DEP. ACT. EJ. ACT LEASING",
+    "codigo_estandar": "ANC.01.01",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "DEP. AC. EJ. EQ. ENERGIA",
+    "codigo_estandar": "ANC.01.01",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "DE. DEL EJERC EQ. COMPUTA",
+    "codigo_estandar": "ANC.01.01",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "FONDOS FIJOS",
+    "codigo_estandar": "AC.01",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "CHEQUES PROTESTADOS CLI",
+    "codigo_estandar": "AC.08",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "DEP.CONSTRUCCIONES",
+    "codigo_estandar": "ANC.01.01",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "DEP.MAQUINARIAS Y EQUIPOS",
+    "codigo_estandar": "ANC.01.01",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "DEP.HERRAMIENTAS",
+    "codigo_estandar": "ANC.01.01",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "DEP.UTILES Y ENSERES",
+    "codigo_estandar": "ANC.01.01",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "DEP. EQUIPOS DE ENERGIA",
+    "codigo_estandar": "ANC.01.01",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "DEP. DEL EJERC. CONSTRUC",
+    "codigo_estandar": "ANC.01.01",
+    "fuente": "validacion_humana"
+  },
+  {
+    "cuenta_original": "PROVISIONES",
+    "codigo_estandar": "AC.08",
     "fuente": "validacion_humana"
   }
 ]

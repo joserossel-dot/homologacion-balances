@@ -110,6 +110,101 @@ def test_no_usa_reconstruccion_como_respaldo_independiente(row, columns):
     assert not parser.certificar_extraccion_columnas(cuentas).columnas_finales_validadas
 
 
+def _cuentas_con_reconstruccion_final(indices_reconstruidos):
+    cuentas = []
+    for indice in range(10):
+        cuentas.append(parser.CuentaRaw(
+            linea=indice + 1,
+            codigo=f"1101{indice:02d}",
+            nombre=f"Activo {indice}",
+            monto=100,
+            origen_columna=parser.OrigenColumna.ACTIVO,
+            montos_columnas=dict(zip(
+                parser.RAW_MONETARY_COLUMNS,
+                (100, 0, 100, 0, 100, 0, 0, 0),
+            )),
+        ))
+    for indice in range(9):
+        cuentas.append(parser.CuentaRaw(
+            linea=indice + 11,
+            codigo=f"2101{indice:02d}",
+            nombre=f"Pasivo {indice}",
+            monto=100,
+            origen_columna=parser.OrigenColumna.PASIVO,
+            montos_columnas=dict(zip(
+                parser.RAW_MONETARY_COLUMNS,
+                (0, 100, 0, 100, 0, 100, 0, 0),
+            )),
+        ))
+    cuentas.append(parser.CuentaRaw(
+        linea=20,
+        codigo="410101",
+        nombre="Ganancia observada",
+        monto=100,
+        origen_columna=parser.OrigenColumna.GANANCIA,
+        montos_columnas=dict(zip(
+            parser.RAW_MONETARY_COLUMNS,
+            (0, 100, 0, 100, 0, 0, 0, 100),
+        )),
+    ))
+    for indice in indices_reconstruidos:
+        cuentas[indice].columnas_derivadas = ["activo"]
+    control = dict(zip(
+        parser.RAW_MONETARY_COLUMNS,
+        (1000, 1000, 1000, 1000, 1000, 900, 0, 100),
+    ))
+    cuentas.extend([
+        parser.CuentaRaw(
+            linea=21, codigo=None, nombre="SUMAS", monto=0,
+            es_total=True, montos_columnas=dict(control),
+        ),
+        parser.CuentaRaw(
+            linea=22, codigo=None, nombre="PÉRDIDA O GANANCIA", monto=0,
+            es_total=True,
+            montos_columnas=dict(zip(
+                parser.RAW_MONETARY_COLUMNS,
+                (0, 0, 0, 0, 0, 100, 100, 0),
+            )),
+        ),
+        parser.CuentaRaw(
+            linea=23, codigo=None, nombre="SUMAS IGUALES", monto=0,
+            es_total=True,
+            montos_columnas=dict(zip(
+                parser.RAW_MONETARY_COLUMNS,
+                (1000, 1000, 1000, 1000, 1000, 1000, 100, 100),
+            )),
+        ),
+    ])
+    return cuentas
+
+
+def test_reconstruccion_final_acotada_solo_habilita_paquete_de_cotejo():
+    cert = parser.certificar_extraccion_columnas(
+        _cuentas_con_reconstruccion_final([0]),
+    )
+
+    assert cert.estado == "parcial"
+    assert cert.columnas_finales_validadas is False
+    assert cert.reconstruccion_final_revisable is True
+    assert cert.proporcion_finales_reconstruidos == 0.05
+    assert cert.reconstrucciones_finales == [{
+        "linea": 1,
+        "cuenta": "Activo 0",
+        "columnas": ["activo"],
+        "importe": 100.0,
+    }]
+
+
+def test_reconstruccion_final_no_es_revisable_si_supera_el_tope():
+    cert = parser.certificar_extraccion_columnas(
+        _cuentas_con_reconstruccion_final([0, 1, 2]),
+    )
+
+    assert cert.estado == "parcial"
+    assert cert.reconstruccion_final_revisable is False
+    assert cert.proporcion_finales_reconstruidos == 0.15
+
+
 def test_perdida_y_puente_de_cierre_se_validan_con_signos_correctos():
     lines = [
         "110101 Caja 50 0 0 0 50 0 0 0",

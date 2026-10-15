@@ -80,7 +80,9 @@ class KBAdapter:
     def _classify_accounts(self, ctx: DocumentContext, raw_accounts: list[Any]) -> list[dict[str, Any]]:
         from adapters.account_adapter import AccountAdapter
         from interpreters.balance_interpreter import BalanceInterpreter
-        from parsers.account_type_resolver import AccountTypeResolver
+        from parsers.account_type_resolver import (
+            AccountTypeResolver, account_type_from_explicit_section,
+        )
 
         type_resolver = AccountTypeResolver()
         classified = []
@@ -96,6 +98,11 @@ class KBAdapter:
             account_tipo = getattr(tipo_result, "account_type", tipo_result)
             if hasattr(account_tipo, "value"):
                 account_tipo = account_tipo.value
+            tipo_seccion = account_type_from_explicit_section(
+                getattr(cr, "seccion_contable", None),
+            )
+            if tipo_seccion is not None:
+                account_tipo = tipo_seccion.value
 
             if classification_amount is None:
                 classified.append({
@@ -140,6 +147,16 @@ class KBAdapter:
                 "account_name": ab.account_name,
                 "nature": getattr(interp, "nature", ab.account_code).value if hasattr(getattr(interp, "nature", ab.account_code), "value") else "",
                 "classification_amount": classification_amount,
+                "origen_columna": getattr(
+                    getattr(cr, "origen_columna", None), "value", "",
+                ),
+                "seccion_contable": getattr(cr, "seccion_contable", None) or "",
+                "origen_columna_efectiva": (
+                    tipo_seccion.value.lower()
+                    if tipo_seccion is not None
+                    else getattr(getattr(cr, "origen_columna", None), "value", "")
+                ),
+                "estado_financiero": getattr(cr, "estado_financiero", None) or "",
                 "standard_code": classification.get("standard_code"),
                 "final_code": final_code,
                 "confidence": classification.get("confidence", 0.0),

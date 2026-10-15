@@ -1,7 +1,9 @@
 from io import BytesIO
 import pytest
 import pypdfium2 as pdfium
-from document_scope import parse_pages, page_count, select_pdf, render_page
+from document_scope import (
+    parse_pages, page_count, render_page, select_pdf, sugerir_periodos_balance,
+)
 
 
 def pdf_bytes():
@@ -30,6 +32,36 @@ def test_selection_preserves_original_order():
         assert doc[1].get_width() == 300
     assert select_pdf(original, [1, 2, 3]) == original
     assert render_page(original, 2).startswith(b"\x89PNG")
+
+
+def test_sugiere_periodos_distintos_sin_incluir_pies_aislados(monkeypatch):
+    import document_scope
+
+    monkeypatch.setattr(document_scope, "_extraer_textos_paginas", lambda _content: [
+        "BALANCE TRIBUTARIO Desde:01-10-2017 Hasta:01-10-2018\n1101001 Caja",
+        "2101001 Proveedores",
+        "Página 4 de 4",
+        "BALANCE TRIBUTARIO Desde 01-10-2018 hasta 01-10-2019\n1101001 Caja",
+        "2101001 Proveedores",
+        "6101001 Gastos",
+        "Página 4 de 4",
+    ])
+
+    assert sugerir_periodos_balance(b"pdf") == [
+        {"periodo": "01-10-2017 a 01-10-2018", "paginas": [1, 2]},
+        {"periodo": "01-10-2018 a 01-10-2019", "paginas": [4, 5, 6]},
+    ]
+
+
+def test_no_sugiere_un_unico_periodo(monkeypatch):
+    import document_scope
+
+    monkeypatch.setattr(document_scope, "_extraer_textos_paginas", lambda _content: [
+        "BALANCE TRIBUTARIO Desde 01-10-2017 hasta 01-10-2018",
+        "1101001 Caja",
+    ])
+
+    assert sugerir_periodos_balance(b"pdf") == []
 
 
 def test_scope_ui_does_not_extract_before_confirmation():
@@ -69,6 +101,40 @@ def test_scope_ui_does_not_extract_before_confirmation():
     at.button[0].click().run()
     assert at.session_state.resultados == {"otro.xlsx": "conservar"}
     assert at.session_state.document_pages["balance.pdf"] == [1]
+
+
+def test_scope_ui_aplica_sugerencia_de_periodo_solo_al_confirmarla():
+    from streamlit.testing.v1 import AppTest
+
+    def run(content):
+        import streamlit as st
+        from io import BytesIO
+        import app_validacion as app
+
+        source = BytesIO(content)
+        source.name = "balance.pdf"
+        previous_visor = app._visor_documento
+        previous_sugerencia = app.sugerir_periodos_balance
+        app._visor_documento = lambda *args, **kwargs: None
+        app.sugerir_periodos_balance = lambda _content: [{
+            "periodo": "01-01-2020 a 31-12-2020", "paginas": [1, 2],
+        }]
+        try:
+            if app._confirmar_alcance_documentos([source]):
+                st.success("Listo para extraer")
+        finally:
+            app._visor_documento = previous_visor
+            app.sugerir_periodos_balance = previous_sugerencia
+
+    at = AppTest.from_function(run, args=(pdf_bytes(),)).run()
+    assert not at.exception and not at.success
+    at.selectbox[1].set_value(
+        "01-01-2020 a 31-12-2020 (págs. 1, 2)",
+    )
+    at.button[0].click().run()
+    assert not at.exception
+    assert at.session_state.document_pages["balance.pdf"] == [1, 2]
+    assert at.success
 
 
 def test_extractor_receives_only_selected_pdf(monkeypatch):

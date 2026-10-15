@@ -28,8 +28,8 @@ REGLAS_REGEX = [
     (r"\b(indemnizacion(es)?\s*(por\s*)?a[ñn]os?\s*(de\s*)?servicio|provision(es)?\s*lp|impuesto(s)?\s*diferido(s)?\s*lp)\b", "PNC.05", 0.85),
     (r"\b(capital\s*(pagado|suscrito|social|propio)?|aporte(s)?\s*(de\s*)?(capital|socios?))\b", "PAT.01", 0.90),
     (r"\b(reserva(s)?(\s*legal)?|prima\s*de\s*emision)\b", "PAT.02", 0.88),
-    (r"\b(utilidad(es)?\s*(acumulada(s)?|retenida(s)?)|ganancia(s)?\s*acumulada(s)?|resultado(s)?\s*acumulado(s)?|p[eé]rdida(s)?\s*acumulada(s)?)\b", "PAT.03", 0.90),
-    (r"\butilidad\s*del\s*(ejercicio|periodo|a[ñn]o)|resultado\s*del\s*(ejercicio|periodo)|p[eé]rdida\s*del\s*(ejercicio|periodo)|utilidad\s*[/(]?\s*p[eé]rdida\b", "PAT.04", 0.92),
+    (r"\b(utilidad(es)?\s*(acumulada(s)?|retenida(s)?)|ganancia(s)?\s*acumulada(s)?|resultado(s)?\s*(acumulado(s)?|retenido(s)?)|p[eé]rdida(s)?\s*acumulada(s)?)\b", "PAT.03", 0.90),
+    (r"\butilidad\s*del\s*(ejercicio|periodo|a[ñn]o)|resultado\s*del\s*(ejercicio|periodo)|p[eé]rdida\s*del\s*(ejercicio|periodo)|utilidad\s*(?:o\s*)?[/(]?\s*p[eé]rdida\b", "PAT.04", 0.92),
     (r"\b(venta(s)?|ingreso(s)?\s*(por\s*venta|operacional|del\s*giro)|facturacion)\b", "ER.01", 0.90),
     (r"\bcosto(s)?\s*(de\s*)?(venta(s)?|explotacion|produccion|mercader[ií]a|motos?\s*(usadas?)?|repuestos?(\s+y\s+accesorios)?|servicio\s+taller)\b", "ER.02", 0.92),
     (r"\bgasto(s)?\s*(de\s*)?(administracion|general(es)?|gestion)\b", "ER.04", 0.88),
@@ -40,5 +40,24 @@ REGLAS_REGEX = [
     (r"\butilidad\s*neta|resultado\s*neto|net\s*income|ganancia\s*neta", "ER.11", 0.92),
     (r"\b(depreciaci[oó]n(?:es)?|amortizaci[oó]n(?:es)?|deterioro)\s+acumulad[ao]s?\b", "ANC.01.01", 0.90),
 ]
+
+# Estas reglas son las únicas habilitadas como fallback general del pipeline.
+# Se identifican por código, no por posición en REGLAS_REGEX: al agregar o
+# reordenar una regla no se puede cambiar silenciosamente qué patrones se
+# aplican en producción.
+CODIGOS_REGEX_FALLBACK_AUDITADOS = (
+    "PC.05",
+    "PC.08",
+    "PAT.02",
+    "ER.04",
+    "ER.09",
+    "ER.10",
+    "ER.11",
+)
+
+REGLAS_REGEX_FALLBACK_AUDITADAS = tuple(
+    regla for regla in REGLAS_REGEX
+    if regla[1] in CODIGOS_REGEX_FALLBACK_AUDITADOS
+)
 
 REGLAS_COMPILADAS = [(re.compile(p, re.IGNORECASE | re.UNICODE), c, conf) for p, c, conf in REGLAS_REGEX]

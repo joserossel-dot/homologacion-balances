@@ -11,17 +11,39 @@ if str(root_dir) not in sys.path:
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
+from pilot_mode import pilot_mode_active
 from src.core.orquestador import PipelineOrquestador
 from src.db_repository import RepositorioDiccionario
 
 
 repositorio: RepositorioDiccionario | None = None
 
+_PILOT_DISABLED_DETAIL = "API no disponible durante el piloto"
+_PILOT_HEALTH_PATH = "/health"
+
+
+def _respuesta_api_deshabilitada_en_piloto() -> JSONResponse:
+    """Return a path-free, non-retryable response for the no-write pilot."""
+    return JSONResponse(
+        status_code=503,
+        content={"detail": _PILOT_DISABLED_DETAIL},
+    )
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global repositorio
+
+    # The API endpoint persists through RepositorioDiccionario when a database
+    # is configured.  The internal pilot deliberately uses the Streamlit flow
+    # with its no-write controls, so do not even construct the repository here:
+    # its initialization can create PostgreSQL tables.
+    if pilot_mode_active():
+        repositorio = None
+        yield
+        return
 
     repositorio = RepositorioDiccionario()
     try:
@@ -57,8 +79,28 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def bloquear_api_en_piloto(request, call_next):
+    """Block every API route except health before FastAPI parses request data.
+
+    This guard runs ahead of route dependencies, including multipart parsing,
+    which means uploaded customer files are not read while PILOT_MODE is active.
+    Keeping health available lets an operator distinguish an intentional pilot
+    block from a process outage without exposing repository-backed data.
+    """
+    if pilot_mode_active() and request.url.path != _PILOT_HEALTH_PATH:
+        return _respuesta_api_deshabilitada_en_piloto()
+    return await call_next(request)
+
+
 @app.get("/health")
 async def health():
+    if pilot_mode_active():
+        return {
+            "status": "pilot_disabled",
+            "repositorio": False,
+            "pilot_mode": True,
+        }
     return {"status": "ok", "repositorio": repositorio is not None}
 
 
@@ -68,6 +110,12 @@ async def procesar_analisis(
     file_balance: UploadFile = File(...),
     giro_empresa: str = Form(...),
 ):
+    # Defense in depth for direct invocation or a future route composition that
+    # bypasses the HTTP middleware.  The HTTP guard above is what prevents
+    # multipart request parsing before this function is entered.
+    if pilot_mode_active():
+        raise HTTPException(status_code=503, detail=_PILOT_DISABLED_DETAIL)
+
     if repositorio is None:
         raise HTTPException(status_code=503, detail="Repositorio no disponible")
 

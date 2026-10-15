@@ -26,7 +26,7 @@ jobs:
       - name: Validate package and release configuration
         run: |
           poetry check
-          poetry run python -m py_compile app_validacion.py persistence/neon_store.py pipeline/homologation_pipeline.py
+          poetry run python -m py_compile app_validacion.py src/api/main.py persistence/neon_store.py pipeline/homologation_pipeline.py pilot_manifest.py scripts/validate_pilot_manifest.py
           git diff --check
       - name: Run certified functional suite
         run: >-
@@ -51,6 +51,21 @@ jobs:
           tests/test_report_integrity.py
           tests/test_extraction_controls.py
           tests/test_homologation_column_gate.py
+          tests/test_extraction_certification.py
+          tests/test_accounting_quadrature.py
+          tests/test_no_code_classification.py
+          tests/test_delivery_readiness.py
+          tests/test_delivery_contract_json.py
+          tests/test_format_support.py
+          tests/test_local_dictionary_recovery.py
+          tests/test_ocr_resilience.py
+          tests/test_pilot_no_write.py
+          tests/test_certify_local_corpus.py
+          tests/test_document_period_confirmation.py
+          tests/test_pilot_manifest.py
+          tests/test_pilot_manifest_cli.py
+          tests/test_pilot_manifest_ui.py
+          tests/test_api_pilot_guard.py
           -k "not test_no_se_crea_runtime_en_import"
       - name: Require Neon secret
         run: test -n "$DATABASE_URL"

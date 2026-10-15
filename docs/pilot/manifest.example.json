@@ -1,0 +1,57 @@
+{
+  "schema_version": "1.0",
+  "pilot": {
+    "pilot_id": "pilot-opaque-001",
+    "client_id": "client-opaque-001",
+    "mode": "internal_no_write",
+    "max_authorized_documents": 10,
+    "created_at": "2026-10-15T00:00:00Z",
+    "authorized_by": "pilot-owner-opaque"
+  },
+  "execution": {
+    "branch": "approved-branch-placeholder",
+    "commit": "0000000000000000000000000000000000000000",
+    "pilot_mode_required": true,
+    "review_required_for_all_accounts": true,
+    "learning_and_promotion_allowed": false,
+    "dictionary_writes_allowed": false
+  },
+  "storage": {
+    "classification": "external_restricted",
+    "reference": "restricted-storage://pilot-opaque-001",
+    "access": "authorized-pilot-team-only",
+    "git_policy": "no_customer_data"
+  },
+  "documents": [
+    {
+      "document_id": "doc-opaque-001",
+      "storage_object_id": "object-opaque-001",
+      "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "media_type": "application/pdf",
+      "status": "AUTHORIZED",
+      "selected_pages": [
+        1,
+        2
+      ],
+      "period_label": null,
+      "confirmed_closing_year": 2024,
+      "closing_year_evidence": "visible-document-heading",
+      "accepted_at": "2026-10-15T00:00:00Z"
+    }
+  ],
+  "allowed_delivery_states": [
+    "NO_LEGIBLE",
+    "LECTURA_NO_RESPALDADA",
+    "EXTRACCION_NO_VALIDADA",
+    "REVISION_EXTRACCION_REQUERIDA",
+    "FORMATO_NO_SOPORTADO",
+    "COBERTURA_INSUFICIENTE",
+    "LISTO_PARA_REVISION_ANALISTA",
+    "LISTO_PARA_INTEGRAR"
+  ],
+  "closeout": {
+    "report_storage_object_id": null,
+    "retention_policy_reference": "external-policy-reference-required",
+    "status": "PENDING"
+  }
+}

@@ -73,6 +73,22 @@ class TestAlternativasRevision:
         assert [item['codigo'] for item in alternativas] == ['AC.03']
         assert alternativas[0]['score'] == 1.0
 
+    def test_muestra_pat03_para_resultado_historico_y_oculta_resultados(self):
+        catalogo = {
+            'PAT.03': {'nombre_estandar': 'Utilidades Retenidas'},
+            'PAT.04': {'nombre_estandar': 'Resultado del Ejercicio'},
+            'ER.04': {'nombre_estandar': 'Gastos de Administración'},
+        }
+
+        alternativas = _alternativas_revision(
+            nombre='RESULTADO AÑO 2022', sugerido='PAT.03', confianza=0.90,
+            origen_columna='activo', monto=1_119_156_832,
+            catalogo=catalogo, motor=MotorHibridoLocal([]),
+            codigo_original='2402-12', anio_cierre=2024,
+        )
+
+        assert [item['codigo'] for item in alternativas] == ['PAT.03']
+
 
 class TestSeleccionLote:
     def test_reemplaza_agrega_y_quita_sin_mutar_el_original(self):
@@ -267,9 +283,30 @@ class TestOrigenContableEnRevision:
     def test_pasivo_sigue_rechazando_activos(self):
         assert not _codigo_compatible_con_origen('AC.01', 'pasivo', 100)
 
+    def test_seccion_explicita_patrimonio_restringe_las_opciones_del_lado_derecho(self):
+        assert _origen_efectivo(
+            'pasivo', 100, 'Capital emitido', 'patrimonio',
+        ) == 'patrimonio'
+        assert _etiqueta_origen(
+            'pasivo', 100, 'Capital emitido', 'patrimonio',
+        ) == 'PASIVO → PATRIMONIO (sección observada)'
+        assert _codigo_compatible_con_origen(
+            'PAT.01', 'pasivo', 100, 'Capital emitido',
+            seccion_contable='patrimonio',
+        )
+        assert not _codigo_compatible_con_origen(
+            'PC.01', 'pasivo', 100, 'Capital emitido',
+            seccion_contable='patrimonio',
+        )
+
     def test_depreciacion_acumulada_en_pasivo_permite_activo_fijo(self):
         assert _codigo_compatible_con_origen(
             'ANC.01.01', 'pasivo', 8371044, 'Depreciación Acumulada'
+        )
+
+    def test_depreciacion_abreviada_acreedora_permite_activo_fijo(self):
+        assert _codigo_compatible_con_origen(
+            'ANC.01.01', 'pasivo', 472611756, 'DEP.CONSTRUCCIONES',
         )
 
     def test_pasivo_comun_no_permite_activo_fijo(self):
@@ -305,6 +342,123 @@ class TestOrigenContableEnRevision:
             'PAT.03', 'activo', monto, 'Pérdidas acumuladas'
         )
 
+    def test_resultados_retenidos_se_tratan_como_patrimonio_acumulado(self):
+        assert _origen_efectivo(
+            'pasivo', 100, 'Resultado Retenidos',
+        ) == 'patrimonio'
+        assert _codigo_compatible_con_origen(
+            'PAT.03', 'pasivo', 100, 'Resultado Retenidos',
+        )
+
+    def test_resultado_anual_historico_2402_prevalece_sobre_seccion_activo(self):
+        contexto = {
+            'codigo_original': '2402-12',
+            'anio_cierre': 2024,
+        }
+
+        assert _origen_efectivo(
+            'activo', 1_119_156_832, 'RESULTADO AÑO 2022', 'activo', **contexto,
+        ) == 'patrimonio'
+        assert _etiqueta_origen(
+            'activo', 1_119_156_832, 'RESULTADO AÑO 2022', 'activo', **contexto,
+        ) == 'ACTIVO → PATRIMONIO (naturaleza de la cuenta)'
+        assert _codigo_compatible_con_origen(
+            'PAT.03', 'activo', 1_119_156_832,
+            'RESULTADO AÑO 2022', seccion_contable='activo', **contexto,
+        )
+        assert not _codigo_compatible_con_origen(
+            'PAT.04', 'activo', 1_119_156_832,
+            'RESULTADO AÑO 2022', seccion_contable='activo', **contexto,
+        )
+        assert not _codigo_compatible_con_origen(
+            'ER.04', 'activo', 1_119_156_832,
+            'RESULTADO AÑO 2022', seccion_contable='activo', **contexto,
+        )
+
+    def test_resultado_anual_historico_exige_codigo_2402(self):
+        contexto = {
+            'codigo_original': '1101-01',
+            'anio_cierre': 2024,
+        }
+
+        assert _origen_efectivo(
+            'activo', 100, 'RESULTADO AÑO 2022', **contexto,
+        ) == 'activo'
+        assert not _codigo_compatible_con_origen(
+            'PAT.03', 'activo', 100, 'RESULTADO AÑO 2022', **contexto,
+        )
+        # Tampoco una sección patrimonial aislada habilita PAT.03 sin la
+        # evidencia conjunta de glosa, año de cierre y familia 2402-.
+        assert not _codigo_compatible_con_origen(
+            'PAT.03', 'activo', 100, 'RESULTADO AÑO 2022',
+            seccion_contable='patrimonio', **contexto,
+        )
+
+    def test_resultado_anual_del_cierre_2402_prevalece_sobre_seccion_activo(self):
+        contexto = {
+            'codigo_original': '2402-13',
+            'anio_cierre': 2024,
+        }
+
+        assert _origen_efectivo(
+            'activo', 98_416_930, 'RESULTADO AÑO 2024', 'activo', **contexto,
+        ) == 'patrimonio'
+        assert _codigo_compatible_con_origen(
+            'PAT.04', 'activo', 98_416_930,
+            'RESULTADO AÑO 2024', seccion_contable='activo', **contexto,
+        )
+        assert not _codigo_compatible_con_origen(
+            'PAT.03', 'activo', 98_416_930,
+            'RESULTADO AÑO 2024', seccion_contable='activo', **contexto,
+        )
+        assert not _codigo_compatible_con_origen(
+            'ER.04', 'activo', 98_416_930,
+            'RESULTADO AÑO 2024', seccion_contable='activo', **contexto,
+        )
+
+    def test_resultado_anual_del_cierre_sin_2402_no_admite_pat04(self):
+        contexto = {
+            'codigo_original': '1101-01',
+            'anio_cierre': 2024,
+        }
+
+        assert _origen_efectivo(
+            'activo', 100, 'RESULTADO AÑO 2024', 'activo', **contexto,
+        ) == 'activo'
+        assert not _codigo_compatible_con_origen(
+            'PAT.04', 'activo', 100, 'RESULTADO AÑO 2024',
+            seccion_contable='activo', **contexto,
+        )
+        # La sección patrimonial por sí sola tampoco reemplaza la evidencia
+        # 2402- para tratar la glosa explícita como PAT.04.
+        assert not _codigo_compatible_con_origen(
+            'PAT.04', 'activo', 100, 'RESULTADO AÑO 2024',
+            seccion_contable='patrimonio', **contexto,
+        )
+        assert not _codigo_compatible_con_origen(
+            'PAT.03', 'activo', 100, 'RESULTADO AÑO 2024',
+            seccion_contable='patrimonio', **contexto,
+        )
+
+    def test_resultado_anual_posterior_al_cierre_permanece_bloqueado(self):
+        contexto = {
+            'codigo_original': '2402-14',
+            'anio_cierre': 2024,
+        }
+
+        assert _origen_efectivo(
+            'activo', 100, 'RESULTADO AÑO 2025', **contexto,
+        ) == 'activo'
+        assert not _codigo_compatible_con_origen(
+            'PAT.03', 'activo', 100, 'RESULTADO AÑO 2025', **contexto,
+        )
+        assert not _codigo_compatible_con_origen(
+            'PAT.04', 'activo', 100, 'RESULTADO AÑO 2025', **contexto,
+        )
+        assert not _codigo_compatible_con_origen(
+            'ER.04', 'activo', 100, 'RESULTADO AÑO 2025', **contexto,
+        )
+
     def test_reserva_incobrables_no_se_trata_como_patrimonio(self):
         assert not _codigo_compatible_con_origen(
             'PAT.02', 'activo', 100, 'Reserva para cuentas incobrables'
@@ -313,6 +467,17 @@ class TestOrigenContableEnRevision:
     def test_cuenta_socios_en_activo_permite_pat10(self):
         assert _codigo_compatible_con_origen(
             'PAT.10', 'activo', 13037263, 'Cuenta Particular Socio L Figueroa'
+        )
+
+    def test_obligacion_bancaria_deudora_admite_contra_pasivo(self):
+        assert _codigo_compatible_con_origen(
+            'PC.02', 'activo', 242655,
+            'OBLIG .CON BCO E INST. FINANCIERA C/P',
+        )
+
+    def test_activo_generico_no_admite_contra_pasivo(self):
+        assert not _codigo_compatible_con_origen(
+            'PC.02', 'activo', 242655, 'Caja',
         )
 
     def test_activo_generico_no_permite_pat10(self):

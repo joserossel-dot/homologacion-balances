@@ -72,6 +72,7 @@ review_workspace/
 *.bak
 
 # Reportes generados
+reports/pilot/
 reports/**/cache/
 reports/**/*_cache.json
 reports/**/*.pkl
