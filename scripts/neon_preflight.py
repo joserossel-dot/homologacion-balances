@@ -36,10 +36,21 @@ def main() -> int:
 
     stats = store.learning_statistics()
     pipeline = HomologationPipeline()
+    # ``learning_statistics`` cuenta todas las filas activas, incluidas las
+    # marcas internas ``__EXCLUIR__``. El pipeline las filtra deliberadamente
+    # antes de clasificar, por lo que la comparación de integridad debe usar
+    # el mismo conjunto efectivo y conservar el conteo bruto sólo como señal
+    # operativa.
+    usable_dictionary_entries = sum(
+        1
+        for entry in store.load_dictionary()
+        if entry.get("codigo_estandar") != "__EXCLUIR__"
+    )
     checks = {
         "neon": True,
         "catalog_entries": stats["catalog_entries"],
         "dictionary_entries": stats["dictionary_entries"],
+        "usable_dictionary_entries": usable_dictionary_entries,
         "pipeline_dictionary_entries": len(pipeline._dictionary),
         "history_accessible": isinstance(store.dictionary_history(1), list),
         "conflicts_accessible": isinstance(store.conflicts(), list),
@@ -47,7 +58,10 @@ def main() -> int:
     ok = (
         checks["catalog_entries"] >= 62
         and checks["dictionary_entries"] >= 876
-        and checks["pipeline_dictionary_entries"] == checks["dictionary_entries"]
+        and (
+            checks["pipeline_dictionary_entries"]
+            == checks["usable_dictionary_entries"]
+        )
     )
     print(json.dumps(checks, ensure_ascii=False, sort_keys=True))
     print("PASS" if ok else "FAIL")
