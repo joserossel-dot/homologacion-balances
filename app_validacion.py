@@ -4682,6 +4682,10 @@ def _payload_entrega_json(
         detalle: pd.DataFrame) -> dict:
     """Contrato compartido por el archivo Excel y el JSON descargable."""
     estado_exportacion = _aplicar_guardia_piloto_entrega(estado_entrega)
+    permite_paquete_revision = bool(
+        estado_exportacion.get("exportacion_final_permitida")
+        or estado_exportacion.get("exportacion_revision_permitida")
+    )
     emision_exportacion = {
         "definitivo": bool(emision["definitivo"]),
         "motivos": list(emision["motivos"]),
@@ -4719,8 +4723,16 @@ def _payload_entrega_json(
             "periodo_hasta": getattr(meta, "periodo_hasta", "") if meta else "",
             "moneda": getattr(meta, "moneda", "") if meta else "",
         },
-        "balance_homologado": _tabla_para_json(presentacion),
-        "cuentas_origen": _tabla_para_json(detalle),
+        # Un diagnóstico bloqueado puede explicar por qué no se entrega, pero
+        # no debe convertirse en un vaciado reutilizable por contener las
+        # filas extraídas. Sólo los paquetes expresamente habilitados para
+        # revisión o integración incluyen cifras homologadas y de origen.
+        "balance_homologado": (
+            _tabla_para_json(presentacion) if permite_paquete_revision else []
+        ),
+        "cuentas_origen": (
+            _tabla_para_json(detalle) if permite_paquete_revision else []
+        ),
     }
     if referencia_piloto is not None:
         payload["documento_piloto"] = referencia_piloto
@@ -5815,6 +5827,35 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
             st.metric(f"Subtotal", f"{sub['monto_total'].sum():,.0f}")
         st.divider()
 
+    meta = st.session_state.get('metadata_files', {}).get(archivo_nombre)
+    if not estado_entrega["exportacion_revision_permitida"]:
+        # No se arma un Excel ni se serializan sus filas cuando la extracción
+        # está bloqueada. El diagnóstico conserva el motivo y la trazabilidad,
+        # pero no entrega un vaciado que pueda reutilizarse aguas abajo.
+        nombre_diagnostico = (
+            _nombre_descarga_piloto(archivo_nombre, "DIAGNOSTICO")
+            if _modo_piloto_activo()
+            else f"DIAGNOSTICO-{Path(archivo_nombre).stem}"
+        )
+        payload_diagnostico = _payload_entrega_json(
+            archivo_nombre=archivo_nombre,
+            meta=meta,
+            estado_entrega=estado_entrega,
+            emision=emision,
+            presentacion=pd.DataFrame(),
+            detalle=pd.DataFrame(),
+        )
+        st.download_button(
+            "Descargar diagnóstico (JSON)",
+            data=json.dumps(
+                payload_diagnostico, ensure_ascii=False, indent=2,
+                default=str,
+            ).encode("utf-8"),
+            file_name=f"{nombre_diagnostico}.json",
+            mime="application/json",
+        )
+        return
+
     # Ajuste Patrimonio Efectivo
     pat = agrupado[agrupado['categoria'] == 'patrimonio']
     ac06s = agrupado[agrupado['codigo_clasificado'] == 'AC.06S']
@@ -5832,7 +5873,6 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
     from openpyxl.styles import Font, PatternFill
     
     export_df = presentacion[["codigo_clasificado", "nombre_estandar", "monto_total", "num_cuentas"]].copy()
-    meta = st.session_state.get('metadata_files', {}).get(archivo_nombre)
     referencia_piloto = (
         _referencia_exportacion_piloto(archivo_nombre)
         if _modo_piloto_activo() else None
