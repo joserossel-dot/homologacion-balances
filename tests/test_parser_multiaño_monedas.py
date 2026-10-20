@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -13,7 +14,30 @@ from parser_universal import (
 )
 
 
-FIXTURES_DIR = Path(__file__).parent / "fixtures" / "balances_reales"
+DEFAULT_FIXTURES_DIR = Path(__file__).parent / "fixtures" / "balances_reales"
+FIXTURES_DIR_ENV = os.environ.get("BALANCE_REAL_TEST_DIR")
+FIXTURES_DIR = Path(FIXTURES_DIR_ENV) if FIXTURES_DIR_ENV else DEFAULT_FIXTURES_DIR
+
+
+def _directorio_fixtures_reales() -> Path:
+    """Devuelve la matriz privada o deja explícito que no está disponible.
+
+    Los balances reales se excluyen del repositorio por contener información
+    sensible. Si se configuró ``BALANCE_REAL_TEST_DIR``, una ruta inválida es
+    un error de configuración y debe fallar. Sin esa variable, esta cobertura
+    de integración se omite de manera visible, sin fingir que se ejecutó.
+    """
+    if FIXTURES_DIR.is_dir():
+        return FIXTURES_DIR
+    if FIXTURES_DIR_ENV:
+        pytest.fail(
+            "BALANCE_REAL_TEST_DIR no apunta a un directorio válido: "
+            f"{FIXTURES_DIR}"
+        )
+    pytest.skip(
+        "Fixtures reales privados no disponibles; configure "
+        "BALANCE_REAL_TEST_DIR para ejecutar esta cobertura de integración."
+    )
 
 
 @pytest.fixture
@@ -21,9 +45,10 @@ def parser():
     return ParserPDF()
 
 
+@pytest.mark.real_fixtures
 def test_fixtures_exist():
-    assert FIXTURES_DIR.exists(), f"Fixtures directory not found: {FIXTURES_DIR}"
-    files = list(FIXTURES_DIR.glob("*"))
+    fixtures_dir = _directorio_fixtures_reales()
+    files = list(fixtures_dir.glob("*"))
     assert len(files) >= 4, f"Expected at least 4 test files, found: {len(files)}"
 
 
@@ -99,8 +124,9 @@ def test_safe_footer_descarta_control_aunque_tenga_monto(label):
     assert qualified == [{"name": "Caja", "columns": {"activo": 100.0}}]
 
 
+@pytest.mark.real_fixtures
 def test_mar_vivo_pdf(parser):
-    pdf_path = FIXTURES_DIR / "Balance 2017 - Mar Vivo.pdf"
+    pdf_path = _directorio_fixtures_reales() / "Balance 2017 - Mar Vivo.pdf"
     assert pdf_path.exists(), f"Missing: {pdf_path}"
 
     res = parser.parsear(pdf_path)
@@ -125,8 +151,9 @@ def test_mar_vivo_pdf(parser):
     assert deuda.montos_periodos["USD"] == 1514356.0
 
 
+@pytest.mark.real_fixtures
 def test_naviera_orca_pdf(parser):
-    pdf_path = FIXTURES_DIR / "Balance 2017 - Naviera Orca.pdf"
+    pdf_path = _directorio_fixtures_reales() / "Balance 2017 - Naviera Orca.pdf"
     assert pdf_path.exists(), f"Missing: {pdf_path}"
 
     res = parser.parsear(pdf_path)
@@ -137,9 +164,11 @@ def test_naviera_orca_pdf(parser):
     ), "Should populate currency keys in montos_periodos"
 
 
+@pytest.mark.real_fixtures
 def test_inagal_excel():
     excel_path = (
-        FIXTURES_DIR / "Pre-Balance al 31-12-2020_Inagal 76 273 859-7.xlsx"
+        _directorio_fixtures_reales()
+        / "Pre-Balance al 31-12-2020_Inagal 76 273 859-7.xlsx"
     )
     assert excel_path.exists(), f"Missing: {excel_path}"
 
@@ -154,8 +183,11 @@ def test_inagal_excel():
     ).estado == "no_evaluable"
 
 
+@pytest.mark.real_fixtures
 def test_agricola_general_excel():
-    excel_path = FIXTURES_DIR / "BALANCE GENERAL AGRICOLA 2013.xlsx"
+    excel_path = (
+        _directorio_fixtures_reales() / "BALANCE GENERAL AGRICOLA 2013.xlsx"
+    )
     assert excel_path.exists(), f"Missing: {excel_path}"
 
     cuentas = parsear_excel(excel_path)
@@ -175,8 +207,9 @@ def test_agricola_general_excel():
     assert all(value == 0 for value in certification.diferencias.values())
 
 
+@pytest.mark.real_fixtures
 def test_los_maitenes_pdf(parser):
-    pdf_path = FIXTURES_DIR / "EEFF- 2017 Los Maitenes.pdf"
+    pdf_path = _directorio_fixtures_reales() / "EEFF- 2017 Los Maitenes.pdf"
     assert pdf_path.exists(), f"Missing: {pdf_path}"
 
     res = parser.parsear(pdf_path)

@@ -3671,6 +3671,29 @@ def _diagnosticar_filas_extraccion(
     return diagnostics
 
 
+def _mensaje_bloqueo_extraccion(certification) -> str:
+    """Entrega una instrucción segura para una extracción bloqueada.
+
+    La etiqueta ``SUBTOTAL_IMPRESO_NO_VERIFICABLE`` no identifica una cuenta
+    equivocada ni autoriza completar un importe por suma. El mensaje debe
+    separar ese caso de un descuadre ordinario para no inducir al analista a
+    alterar cuentas que ya podrían estar correctamente leídas.
+    """
+    diagnostico = str(getattr(certification, "diagnostico", "") or "")
+    if diagnostico == "SUBTOTAL_IMPRESO_NO_VERIFICABLE":
+        return (
+            "El formato fue reconocido, pero un subtotal impreso no se pudo "
+            "verificar íntegramente desde el documento. La clasificación y la "
+            "entrega quedan bloqueadas: no complete el subtotal por suma ni "
+            "cambie las clasificaciones. Solicite una copia legible antes de "
+            "reintentar la extracción."
+        )
+    return (
+        "La extracción no reproduce los totales impresos del balance. "
+        "El documento no será homologado hasta corregir filas o columnas."
+    )
+
+
 def _permite_clasificar_extraccion(certification) -> bool:
     return bool(certification) and (
         certification.estado in {"certificada", "parcial"}
@@ -3823,6 +3846,15 @@ def _mostrar_correccion_extraccion(filename: str) -> None:
             "total": bool(cuenta.es_total),
         })
     if not rows:
+        if getattr(certification, "diagnostico", "") == (
+            "SUBTOTAL_IMPRESO_NO_VERIFICABLE"
+        ):
+            st.warning(
+                "Este formato no expone una grilla de ocho columnas para "
+                "editar. El subtotal de control no se puede reconstruir de "
+                "forma segura desde las cuentas extraídas; cargue una copia "
+                "legible del documento."
+            )
         st.warning("OCR no produjo filas tabulares que puedan corregirse.")
         return
     source = pd.DataFrame(rows).sort_values(
@@ -4077,10 +4109,7 @@ def _extraer_cuentas(archivo) -> tuple[list[CuentaRaw], object]:
         certificacion = getattr(resultado, 'certificacion_extraccion', None)
         st.session_state.setdefault("extraction_certifications", {})[archivo.name] = certificacion
         if certificacion is not None and certificacion.estado == 'fallida' and not _permite_clasificar_extraccion(certificacion):
-            st.error(
-                "La extracción no reproduce los totales impresos del balance. "
-                "El documento no será homologado hasta corregir filas o columnas."
-            )
+            st.error(_mensaje_bloqueo_extraccion(certificacion))
             if getattr(certificacion, 'ecuacion_contable_fuente_valida', None) is True:
                 st.info(
                     "La ecuación del subtotal observado sí cuadra, pero el "

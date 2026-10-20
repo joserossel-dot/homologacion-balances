@@ -53,6 +53,24 @@ def test_extraccion_no_certificada_fuerza_revision_y_control_no_se_clasifica():
     assert fila["requiere_revision"] is False
 
 
+def test_bloqueo_de_subtotal_no_verificable_no_induce_reconstruccion():
+    mensaje = app._mensaje_bloqueo_extraccion(SimpleNamespace(
+        diagnostico="SUBTOTAL_IMPRESO_NO_VERIFICABLE",
+    ))
+
+    assert "formato fue reconocido" in mensaje
+    assert "no complete el subtotal por suma" in mensaje
+    assert "copia legible" in mensaje
+
+
+def test_bloqueo_generico_conserva_instruccion_de_correccion():
+    mensaje = app._mensaje_bloqueo_extraccion(SimpleNamespace(
+        diagnostico="CONTROLES_NO_CONCILIAN",
+    ))
+
+    assert "no reproduce los totales impresos" in mensaje
+
+
 @pytest.mark.parametrize("nombre", ["Resultado positivo", "Resultado 'positivo", "Resultado negativo"])
 def test_resultado_de_cierre_se_reconoce_sin_confundir_cuenta_codificada(nombre):
     control = parser.parsear_linea(f"{nombre} 0 0 0 0 0 60 60 0", 1, parser.FormatoCodigo.COMPACTO, ".")
