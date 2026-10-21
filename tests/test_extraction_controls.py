@@ -249,6 +249,10 @@ def test_control_ocr_de_ocho_columnas_se_canoniza_y_detiene_el_pie():
         "Utilidad j",
         [None, None, None, None, None, {"token": "60"}, {"token": "60"}, None],
     ) == "UTILIDAD DEL EJERCICIO"
+    assert parser._normalizar_etiqueta_control_ocr(
+        "PERDIDA DEL EJERCICIO l :",
+        [None, None, None, None, {"token": "60"}, None, None, {"token": "60"}],
+    ) == "PERDIDA DEL EJERCICIO"
 
 
 def test_conserva_subtotal_anonimo_anclado_por_utilidad_del_ejercicio():

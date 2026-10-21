@@ -2644,6 +2644,66 @@ def test_fusion_ocr_recupera_control_partido_por_solapamiento_independiente():
     }
 
 
+def test_fusion_ocr_recompone_sumas_iguales_partidas_con_lectura_independiente():
+    coordinate = [
+        "Sumas Iguales 1.000 0 120.000 0 100.000 0 40.000 0",
+        "IIA 0 1.000 0 120.000 0 120.000 0 20.000",
+    ]
+    alternative = "\n".join([
+        "Sumas Iguales 1.000 120.000 100.000 40.000",
+        "1.000 120.000 120.000 20.000",
+    ])
+
+    recovered, count = parser.recuperar_filas_tabla_ocr(coordinate, alternative)
+    total = parser.parsear_linea(
+        recovered[0], 0, parser.FormatoCodigo.SIN_CODIGO, ".", 0.75,
+    )
+
+    assert count == 1
+    assert recovered[1] == ""
+    assert total is not None
+    assert total.es_total
+    assert total.montos_columnas == {
+        "debitos": 1_000,
+        "creditos": 1_000,
+        "saldo_deudor": 120_000,
+        "saldo_acreedor": 120_000,
+        "activo": 100_000,
+        "pasivo": 120_000,
+        "perdida": 40_000,
+        "ganancia": 20_000,
+    }
+
+
+def test_recomposicion_ocr_no_fusiona_una_cuenta_como_continuacion_de_control():
+    lines = [
+        "Sumas Iguales 1.000 200 110 90",
+        "Banco 1.000 200 110 90",
+    ]
+
+    recovered, count = parser.recomponer_controles_finales_ocr_partidos(lines)
+
+    assert count == 0
+    assert recovered == lines
+
+
+def test_descarta_pie_sin_codigo_solo_despues_de_un_cierre_final_explicito():
+    cuentas = [
+        parser.CuentaRaw(1, "110101", "Caja", 100),
+        parser.CuentaRaw(2, None, "SUMAS IGUALES", 100, es_total=True),
+        parser.CuentaRaw(
+            3, None, "Firma del representante", 27_790,
+            montos_columnas={"creditos": 27_790},
+        ),
+        parser.CuentaRaw(4, "999999", "Cuenta codificada posterior", 10),
+    ]
+
+    filtered, count = parser.descartar_pie_no_contable_despues_cierre(cuentas)
+
+    assert count == 1
+    assert [cuenta.linea for cuenta in filtered] == [1, 2, 4]
+
+
 def test_relectura_focal_corrige_un_digito_solo_con_identidades_y_controles():
     lineas = [
         "1.01.01.01 Caja 100 0 100 0 100 0 0 0",

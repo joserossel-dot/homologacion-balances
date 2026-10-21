@@ -809,6 +809,10 @@ ACCOUNT_TYPE_CONFIDENCE_THRESHOLD = 0.7
 # Rasterizar a 250 DPI y entregar imágenes sin límite a Tesseract podía bloquear
 # una página durante más de dos minutos y abortar la carga completa.
 OCR_RENDER_DPI = 200
+# Sólo para un cierre final partido que ya falló la lectura primaria. La
+# segunda rasterización de una página no participa en cuentas de detalle y se
+# acepta exclusivamente si devuelve ambas mitades observadas y cuadradas.
+OCR_FINAL_CONTROL_FALLBACK_DPI = 170
 OCR_MAX_PIXELS = 3_500_000
 OCR_RETRY_MAX_PIXELS = 1_200_000
 OCR_PAGE_TIMEOUT_SECONDS = 120
@@ -3210,6 +3214,46 @@ def fusionar_control_total_general_partido(
     return fusionadas, cantidad
 
 
+def descartar_pie_no_contable_despues_cierre(
+    cuentas: list[CuentaRaw],
+) -> tuple[list[CuentaRaw], int]:
+    """Descarta ruido OCR sin código que aparece después del cierre final.
+
+    Sólo se aplica después de un control final explícito de ocho columnas. No
+    elimina cuentas codificadas ni controles posteriores: el propósito es
+    evitar que números de firmas, timbres o QR se presenten como partidas
+    monetarias tras ``SUMAS IGUALES``.
+    """
+    claves_cierre = {
+        "totalgeneral", "sumasiguales", "totalesiguales", "sumastotales",
+    }
+
+    def clave(cuenta: CuentaRaw) -> str:
+        return re.sub(
+            r"[^a-z0-9]+", "", _sin_acentos(cuenta.nombre).lower(),
+        )
+
+    ultimo_cierre = max(
+        (
+            indice for indice, cuenta in enumerate(cuentas)
+            if cuenta.es_total and clave(cuenta) in claves_cierre
+        ),
+        default=None,
+    )
+    if ultimo_cierre is None:
+        return cuentas, 0
+
+    filtradas = [
+        cuenta for indice, cuenta in enumerate(cuentas)
+        if not (
+            indice > ultimo_cierre
+            and not cuenta.codigo
+            and not cuenta.es_total
+        )
+    ]
+    return filtradas, len(cuentas) - len(filtradas)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # PARSER DE LÍNEAS DE TEXTO → CUENTAS
 # ─────────────────────────────────────────────────────────────────────────────
@@ -3331,6 +3375,12 @@ def _normalizar_etiqueta_control_ocr(
         and all(len(token) == 1 for token in resto)
     ):
         return "UTILIDAD DEL EJERCICIO"
+    if (
+        celdas_observadas >= 2
+        and tokens[:3] == ["perdida", "del", "ejercicio"]
+        and all(len(token) == 1 for token in tokens[3:])
+    ):
+        return "PERDIDA DEL EJERCICIO"
     return nombre
 
 
@@ -6152,20 +6202,211 @@ def _conservar_evidencia_celdas_no_reemplazada(
     ]
 
 
+_CONTROLES_FINALES_PARTIDOS_OCR = {
+    "totalgeneral": "TOTAL GENERAL",
+    "sumasiguales": "SUMAS IGUALES",
+    "totalesiguales": "TOTALES IGUALES",
+    "sumastotales": "SUMAS TOTALES",
+}
+
+
+def _etiqueta_control_final_partido_ocr(linea: str) -> Optional[str]:
+    """Devuelve la etiqueta canónica de un cierre que puede partirse.
+
+    Algunos balances escaneados imprimen la mitad izquierda de un control
+    final junto a su rótulo y la mitad derecha en el renglón siguiente, sin
+    repetir el nombre. Esta función sólo admite los cuatro cierres conocidos;
+    un subtotal ordinario o una cuenta nunca entra por esta vía.
+    """
+    normalizada = normalizar_linea_ocr_tabla(linea)
+    primer_importe = PATRON_MONTOS.search(normalizada)
+    etiqueta = (
+        normalizada[:primer_importe.start()]
+        if primer_importe is not None else normalizada
+    )
+    clave = re.sub(
+        r"[^a-z0-9]+", "", _sin_acentos(etiqueta).lower(),
+    )
+    return _CONTROLES_FINALES_PARTIDOS_OCR.get(clave)
+
+
+def _importes_ocr_partidos(linea: str) -> list[float] | None:
+    """Lee exactamente cuatro importes observados de una mitad OCR."""
+    normalizada = normalizar_linea_ocr_tabla(linea)
+    tokens = PATRON_MONTOS.findall(normalizada)
+    if len(tokens) != 4:
+        return None
+    importes: list[float] = []
+    for token in tokens:
+        monto = parsear_monto(token, ".")
+        if monto is None:
+            return None
+        importes.append(float(monto))
+    return importes
+
+
+def _es_continuacion_numerica_ocr(linea: str) -> bool:
+    """Acepta sólo una continuación sin glosa contable.
+
+    Tesseract puede dejar un residuo de hasta tres letras, por ejemplo
+    ``IIA``. Una palabra real se conserva como posible cuenta y no se fusiona.
+    """
+    normalizada = normalizar_linea_ocr_tabla(linea)
+    primer_importe = PATRON_MONTOS.search(normalizada)
+    if primer_importe is None:
+        return False
+    prefijo = normalizada[:primer_importe.start()].strip()
+    return not prefijo or bool(re.fullmatch(r"[A-Za-z]{1,3}", prefijo))
+
+
+def _control_final_ocr_cuadra(cuenta: CuentaRaw) -> bool:
+    """Valida las igualdades propias de un cierre de ocho columnas.
+
+    Una fila ``SUMAS IGUALES`` puede incorporar el puente de resultado y por
+    eso no siempre cumple la identidad de una cuenta individual entre saldos
+    y clasificación. El control final sí debe mostrar pares iguales y la
+    ecuación Activo + Pérdida = Pasivo + Ganancia. Activo no tiene por qué
+    coincidir aisladamente con Pasivo, ni Pérdida con Ganancia.
+    """
+    valores = cuenta.montos_columnas
+    if set(valores) != set(RAW_MONETARY_COLUMNS):
+        return False
+    pares = (
+        ("debitos", "creditos"),
+        ("saldo_deudor", "saldo_acreedor"),
+    )
+    return bool(
+        all(
+            abs(
+                float(valores[izquierda] or 0.0)
+                - float(valores[derecha] or 0.0)
+            ) <= 10
+            for izquierda, derecha in pares
+        )
+        and abs(
+            float(valores["activo"] or 0.0)
+            + float(valores["perdida"] or 0.0)
+            - float(valores["pasivo"] or 0.0)
+            - float(valores["ganancia"] or 0.0)
+        ) <= 10
+    )
+
+
+def _control_final_ocr_incompleto(cuenta: Optional[CuentaRaw]) -> bool:
+    """Indica si una mitad de cierre dejó uno de sus pares vacío."""
+    if cuenta is None:
+        return True
+    return any(
+        (
+            float(cuenta.montos_columnas.get(izquierda, 0.0) or 0.0) == 0
+        ) != (
+            float(cuenta.montos_columnas.get(derecha, 0.0) or 0.0) == 0
+        )
+        for izquierda, derecha in (
+            ("debitos", "creditos"),
+            ("saldo_deudor", "saldo_acreedor"),
+            ("activo", "pasivo"),
+            ("perdida", "ganancia"),
+        )
+    )
+
+
+def _es_continuacion_derecha_control_ocr(linea: str) -> bool:
+    """Reconoce el renglón sin etiqueta que acompaña a un cierre partido."""
+    normalizada = normalizar_linea_ocr_tabla(linea)
+    primer_importe = PATRON_MONTOS.search(normalizada)
+    if primer_importe is None:
+        return False
+    prefijo = normalizada[:primer_importe.start()].strip()
+    return bool(
+        len(PATRON_MONTOS.findall(normalizada)) >= 4
+        and (
+            not prefijo
+            or bool(re.fullmatch(r"[A-Za-z]{1,3}", prefijo))
+        )
+    )
+
+
+def recomponer_controles_finales_ocr_partidos(
+    lineas: list[str],
+) -> tuple[list[str], int]:
+    """Reconstruye cierres OCR partidos sólo con pares complementarios.
+
+    La primera línea debe contener exactamente los cuatro importes izquierdos
+    (Debe, saldo deudor, Activo y Pérdida) y la inmediata siguiente los cuatro
+    derechos. La candidata se vuelve a parsear y debe satisfacer las dos
+    igualdades impresas. Por tanto no infiere una cifra ni fusiona una cuenta
+    que esté simplemente cerca de un total.
+    """
+    recompuestas: list[str] = []
+    cantidad = 0
+    indice = 0
+    while indice < len(lineas):
+        actual = normalizar_linea_ocr_tabla(lineas[indice])
+        siguiente = (
+            normalizar_linea_ocr_tabla(lineas[indice + 1])
+            if indice + 1 < len(lineas) else ""
+        )
+        etiqueta = _etiqueta_control_final_partido_ocr(actual)
+        izquierdos = _importes_ocr_partidos(actual) if etiqueta else None
+        derechos = _importes_ocr_partidos(siguiente)
+        if (
+            etiqueta is not None
+            and izquierdos is not None
+            and derechos is not None
+            and _es_continuacion_numerica_ocr(siguiente)
+            and any(abs(valor) > 0.01 for valor in izquierdos)
+            and any(abs(valor) > 0.01 for valor in derechos)
+        ):
+            valores = [
+                izquierdos[0], derechos[0],
+                izquierdos[1], derechos[1],
+                izquierdos[2], derechos[2],
+                izquierdos[3], derechos[3],
+            ]
+            candidata = (
+                f"{etiqueta} "
+                + " ".join(str(int(round(valor))) for valor in valores)
+            )
+            cuenta = parsear_linea(
+                candidata, indice, FormatoCodigo.SIN_CODIGO, ".", 0.75,
+            )
+            if (
+                cuenta is not None
+                and cuenta.es_total
+                and _control_final_ocr_cuadra(cuenta)
+            ):
+                recompuestas.append(candidata)
+                cantidad += 1
+                indice += 2
+                continue
+        recompuestas.append(actual)
+        indice += 1
+    return recompuestas, cantidad
+
+
 def recuperar_filas_tabla_ocr(
     lineas_coordenadas: list[str], texto_alternativo: str,
+    *,
+    solo_controles_finales: bool = False,
 ) -> tuple[list[str], int]:
     """Recupera celdas omitidas usando PSM 4 sin duplicar la tabla.
 
     Exige glosas compatibles y dos identidades contables válidas. La alternativa
     puede completar una fila vacía, movimientos Debe/Haber omitidos o una fila
     completa que el OCR geométrico no vio, siempre que no exista ya el mismo
-    código ni una glosa equivalente.
+    código ni una glosa equivalente. ``solo_controles_finales`` restringe la
+    recuperación a cierres partidos, para una relectura OCR adicional que no
+    debe alterar cuentas de detalle.
     """
+    lineas_alternativas, _ = recomponer_controles_finales_ocr_partidos(
+        texto_alternativo.splitlines(),
+    )
     alternatives: dict[str, tuple[str, CuentaRaw]] = {}
     ordered_alternatives: list[tuple[str, CuentaRaw]] = []
     alternative_controls: dict[str, str] = {}
-    for index, line in enumerate(texto_alternativo.splitlines()):
+    alternative_final_controls: dict[str, str] = {}
+    for index, line in enumerate(lineas_alternativas):
         account = _cuenta_desde_candidato_ocr(line, index)
         if account is not None:
             alternatives[_codigo_contable_canonico(account.codigo)] = (line, account)
@@ -6176,6 +6417,9 @@ def recuperar_filas_tabla_ocr(
         )
         if control_match:
             alternative_controls[control_match.group(1).lower()] = normalized_control
+        etiqueta_final = _etiqueta_control_final_partido_ocr(normalized_control)
+        if etiqueta_final is not None:
+            alternative_final_controls[etiqueta_final] = normalized_control
 
     current_accounts = [
         account
@@ -6188,8 +6432,44 @@ def recuperar_filas_tabla_ocr(
     ]
     recovered: list[str] = []
     replacements = 0
+    continuaciones_suprimidas: set[int] = set()
     for index, line in enumerate(lineas_coordenadas):
+        if index in continuaciones_suprimidas:
+            # Preserva el índice de las evidencias TSV, pero evita que una
+            # mitad sin etiqueta se convierta luego en una cuenta espuria.
+            recovered.append("")
+            continue
         normalized_current = normalizar_linea_ocr_tabla(line)
+        etiqueta_final_actual = _etiqueta_control_final_partido_ocr(
+            normalized_current,
+        )
+        alternate_final = (
+            alternative_final_controls.get(etiqueta_final_actual)
+            if etiqueta_final_actual is not None else None
+        )
+        if alternate_final is not None:
+            control_alternativo = parsear_linea(
+                alternate_final, index, FormatoCodigo.SIN_CODIGO, ".", 0.75,
+            )
+            control_actual = parsear_linea(
+                normalized_current, index, FormatoCodigo.SIN_CODIGO, ".", 0.75,
+            )
+            if (
+                control_alternativo is not None
+                and control_alternativo.es_total
+                and _control_final_ocr_cuadra(control_alternativo)
+                and _control_final_ocr_incompleto(control_actual)
+            ):
+                recovered.append(alternate_final)
+                replacements += 1
+                if (
+                    index + 1 < len(lineas_coordenadas)
+                    and _es_continuacion_derecha_control_ocr(
+                        lineas_coordenadas[index + 1],
+                    )
+                ):
+                    continuaciones_suprimidas.add(index + 1)
+                continue
         current_control_match = re.match(
             r"^\W*(sumas?|subtotales?)\b", normalized_current, re.I,
         )
@@ -6198,6 +6478,25 @@ def recuperar_filas_tabla_ocr(
                 current_control_match.group(1).lower(),
             )
             if alternate_control:
+                control_alternativo = parsear_linea(
+                    alternate_control, index, FormatoCodigo.SIN_CODIGO, ".", 0.75,
+                )
+                control_actual = parsear_linea(
+                    normalized_current, index, FormatoCodigo.SIN_CODIGO, ".", 0.75,
+                )
+                if (
+                    control_alternativo is not None
+                    and control_alternativo.es_total
+                    and _control_final_ocr_cuadra(control_alternativo)
+                    and (
+                        control_actual is None
+                        or _error_identidades_cuenta(control_actual) > 10
+                        or _control_final_ocr_incompleto(control_actual)
+                    )
+                ):
+                        recovered.append(alternate_control)
+                        replacements += 1
+                        continue
                 current_amounts = [
                     float(parsear_monto(token.replace(",", "."), ".") or 0.0)
                     for token in _MONTO_AGRUPADO_OCR.findall(normalized_current)
@@ -6231,6 +6530,10 @@ def recuperar_filas_tabla_ocr(
                         recovered.append(combined_line)
                         replacements += 1
                         continue
+
+        if solo_controles_finales:
+            recovered.append(line)
+            continue
 
         current = _cuenta_desde_candidato_ocr(
             line, index, exigir_consistencia=False,
@@ -6305,6 +6608,9 @@ def recuperar_filas_tabla_ocr(
             replacements += 1
         else:
             recovered.append(line)
+
+    if solo_controles_finales:
+        return recovered, replacements
 
     # PSM 6 por coordenadas puede omitir una línea completa aunque PSM 4 la
     # lea con sus ocho columnas. Se incorpora únicamente evidencia contable
@@ -6500,6 +6806,32 @@ def debe_preferirse_texto_nativo_ocho_columnas(
         return False
     coincidencia = len(codigos_coordenadas & codigos_nativos) / comparables
     return coincidencia >= 0.95
+
+
+def _tabla_ocr_tiene_control_final_incompleto(lineas: list[str]) -> bool:
+    """Detecta un cierre con sólo una de sus dos mitades observadas."""
+    for indice, linea in enumerate(lineas):
+        if _etiqueta_control_final_partido_ocr(linea) is None:
+            continue
+        cuenta = parsear_linea(
+            normalizar_linea_ocr_tabla(linea), indice,
+            FormatoCodigo.SIN_CODIGO, ".", 0.75,
+        )
+        if cuenta is None or not cuenta.es_total:
+            continue
+        for izquierda, derecha in (
+            ("debitos", "creditos"),
+            ("saldo_deudor", "saldo_acreedor"),
+            ("activo", "pasivo"),
+            ("perdida", "ganancia"),
+        ):
+            if (
+                float(cuenta.montos_columnas.get(izquierda, 0.0) or 0.0) == 0
+            ) != (
+                float(cuenta.montos_columnas.get(derecha, 0.0) or 0.0) == 0
+            ):
+                return True
+    return False
 
 
 def _tabla_ocr_necesita_recuperacion(lineas: list[str]) -> bool:
@@ -7169,6 +7501,9 @@ class ParserPDF:
 
         cuentas, cuentas_partidas = fusionar_cuentas_partidas(cuentas)
         cuentas, controles_finales_partidos = fusionar_control_total_general_partido(cuentas)
+        cuentas, pie_no_contable_descartado = (
+            descartar_pie_no_contable_despues_cierre(cuentas)
+        )
         jerarquicos = marcar_subtotales_jerarquicos(cuentas)
         if jerarquicos:
             advertencias.append(
@@ -7184,6 +7519,12 @@ class ParserPDF:
             advertencias.append(
                 f"Se reconstruyeron {controles_finales_partidos} control(es) "
                 "TOTAL GENERAL partidos en dos columnas físicas."
+            )
+        if pie_no_contable_descartado:
+            advertencias.append(
+                f"Se descartaron {pie_no_contable_descartado} fila(s) sin "
+                "código posteriores al cierre final; corresponden a pie, "
+                "firma o metadatos OCR, no a cuentas contables."
             )
 
         secciones_anotadas = anotar_secciones_balance_clasificado(cuentas)
@@ -7906,6 +8247,66 @@ class ParserPDF:
                             f"Página {pagina}: se recuperaron {replacements} filas "
                             "por verificación cruzada de dos lecturas OCR."
                         )
+                if (
+                    tabla_coordenadas_usada
+                    and _tabla_ocr_tiene_control_final_incompleto(
+                        texto.splitlines(),
+                    )
+                ):
+                    # Algunos cierres partidos se leen mejor con una
+                    # rasterización ligeramente menor: la cifra de la mitad
+                    # derecha puede quedar pegada a una regla vertical a 200
+                    # DPI. Esta pasada sólo entrega evidencia textual a la
+                    # recuperación de controles; nunca sustituye detalle.
+                    prefijo_control = tmpdir_path / (
+                        f"pg{pagina}-control-final"
+                    )
+                    try:
+                        raster_control = subprocess.run(
+                            [
+                                pdftoppm_bin, "-png", "-singlefile",
+                                "-r", str(OCR_FINAL_CONTROL_FALLBACK_DPI),
+                                "-f", str(pagina), "-l", str(pagina),
+                                str(path), str(prefijo_control),
+                            ],
+                            capture_output=True,
+                            timeout=min(OCR_PAGE_TIMEOUT_SECONDS, 30),
+                        )
+                    except (OSError, subprocess.TimeoutExpired):
+                        raster_control = None
+                    imagenes_control = (
+                        [prefijo_control.with_suffix(".png")]
+                        if (
+                            raster_control is not None
+                            and raster_control.returncode == 0
+                            and prefijo_control.with_suffix(".png").exists()
+                        ) else []
+                    )
+                    if imagenes_control:
+                        texto_control = ocr_pagina(
+                            imagenes_control[0], rotacion,
+                        )
+                        lineas_antes_recuperacion = texto.splitlines()
+                        recovered, replacements = recuperar_filas_tabla_ocr(
+                            lineas_antes_recuperacion,
+                            texto_control,
+                            solo_controles_finales=True,
+                        )
+                        if replacements:
+                            texto = "\n".join(recovered)
+                            evidencia_celdas_pagina = (
+                                _conservar_evidencia_celdas_no_reemplazada(
+                                    lineas_antes_recuperacion,
+                                    evidencia_celdas_pagina,
+                                    recovered,
+                                )
+                            )
+                            self._ocr_advertencias.append(
+                                f"Página {pagina}: se recompusieron "
+                                f"{replacements} control(es) final(es) "
+                                "partido(s) mediante una segunda "
+                                "rasterización OCR; requieren revisión humana."
+                            )
                 # Una tabla reconstruida por coordenadas ya contiene la misma
                 # pagina. Fusionarla con PSM 4 duplicaba sus cuentas y montos.
                 if (
