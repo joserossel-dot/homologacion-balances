@@ -1,6 +1,8 @@
 import os
 from pathlib import Path
 import sqlite3
+import subprocess
+import sys
 
 import pytest
 
@@ -114,3 +116,29 @@ def test_account_database_is_rejected_inside_repository():
 
     with pytest.raises(LocalAccountError, match="fuera del repositorio"):
         LocalAccountStore(repository_root / "local-accounts-test.sqlite3")
+
+
+def test_bootstrap_script_runs_directly_outside_project_root(tmp_path):
+    """El comando documentado debe poder importar la capa de cuentas."""
+    private_dir = tmp_path / "private"
+    private_dir.mkdir(mode=0o700)
+    private_dir.chmod(0o700)
+    environment = os.environ.copy()
+    environment["HOMOLOGACION_LOCAL_ACCOUNTS_DB"] = str(
+        private_dir / "accounts.sqlite3"
+    )
+    script = Path(__file__).resolve().parents[1] / "scripts" / "bootstrap_local_admin.py"
+
+    result = subprocess.run(
+        [sys.executable, str(script)],
+        cwd=tmp_path,
+        input="owner\nOwner\nshort\nshort\n",
+        text=True,
+        capture_output=True,
+        env=environment,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "ModuleNotFoundError" not in result.stderr
+    assert "No se pudo crear el administrador" in result.stdout

@@ -7,6 +7,17 @@ La contraseña se solicita por terminal y no se imprime ni se guarda en texto.
 from __future__ import annotations
 
 from getpass import getpass
+from pathlib import Path
+import sys
+
+
+# Al ejecutar este archivo directamente, Python sólo incorpora ``scripts/`` a
+# la ruta de importación. La aplicación mantiene ``local_accounts.py`` en la
+# raíz del proyecto, por lo que se incorpora explícitamente antes de importar
+# los componentes de acceso local.
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from local_accounts import LocalAccountError, LocalAccountStore, default_local_accounts_path
 
