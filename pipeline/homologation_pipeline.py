@@ -67,12 +67,22 @@ def _lineas_revision_extraccion(certificacion: Any) -> set[int] | None:
     """
     if getattr(certificacion, "estado", "") == "certificada":
         return set()
-    if not bool(getattr(certificacion, "reconstruccion_final_revisable", False)):
+    if getattr(certificacion, "orientacion_certificada", None) is False:
+        return None
+    if bool(getattr(certificacion, "reconstruccion_final_revisable", False)):
+        reconstrucciones = getattr(
+            certificacion, "reconstrucciones_finales", [],
+        ) or []
+    elif bool(getattr(
+        certificacion, "reconstruccion_movimientos_revisable", False,
+    )):
+        reconstrucciones = getattr(
+            certificacion, "reconstrucciones_movimientos", [],
+        ) or []
+    else:
         return None
     lineas: set[int] = set()
-    for reconstruccion in (
-        getattr(certificacion, "reconstrucciones_finales", []) or []
-    ):
+    for reconstruccion in reconstrucciones:
         try:
             lineas.add(int(reconstruccion["linea"]))
         except (KeyError, TypeError, ValueError):
@@ -126,6 +136,38 @@ _SUGERENCIAS_CONTEXTUALES_EXACTAS: dict[tuple[str, str], tuple[str, str]] = {
     ("PERDIDA", "gastos varios"): (
         "ER.18", "gastos varios",
     ),
+}
+
+# Estas reglas sólo cubren glosas cuya naturaleza se determina por el texto y
+# la columna física juntos. A diferencia de las sugerencias contextuales, no
+# dependen del giro de la entidad ni de decidir entre costos, administración o
+# venta; por eso pueden conservar una decisión automática y trazable. No son
+# entradas del diccionario compartido: una validación humana o una equivalencia
+# de código compatible siempre tiene prioridad sobre esta capa.
+_REGLAS_CONTABLES_EXACTAS_AUTOMATICAS: dict[
+    tuple[str, str], tuple[str, str]
+] = {
+    (
+        "PASIVO", "cotizaciones previsionales",
+    ): ("PC.06", "cotizaciones previsionales por pagar"),
+    (
+        "PASIVO", "retenciones al personal",
+    ): ("PC.06", "retenciones de remuneraciones"),
+    (
+        "PASIVO", "retenciones honorarios y dietas",
+    ): ("PC.05", "retenciones tributarias de honorarios y dietas"),
+    (
+        "PASIVO", "retenciones impto unico 2 categ",
+    ): ("PC.05", "impuesto único de segunda categoría retenido"),
+    (
+        "PASIVO", "ingresos anticipados escuela",
+    ): ("PC.08", "ingresos anticipados registrados como pasivo"),
+    (
+        "PERDIDA", "interes prestamos bancarios",
+    ): ("ER.09", "interés de préstamos bancarios"),
+    (
+        "GANANCIA", "reajuste fiscal",
+    ): ("ER.14", "reajuste presentado como resultado"),
 }
 
 
@@ -576,6 +618,38 @@ class HomologationPipeline:
                 }
         return None
 
+    def _classify_by_exact_accounting_rule(
+        self, account_name: str, account_tipo: str | None,
+    ) -> dict[str, Any] | None:
+        """Clasifica expresiones exactas, inequívocas y tipo-acotadas.
+
+        La regla se consulta después de código, diccionario, aprendizaje y
+        fallback auditado. Así, una decisión humana o una equivalencia local
+        compatible conserva precedencia sobre una regla general.
+        """
+        if not account_name or not account_tipo:
+            return None
+        normalized = self._normalize_name(account_name)
+        canonical = "".join(
+            char for char in unicodedata.normalize("NFKD", normalized)
+            if not unicodedata.combining(char)
+        )
+        rule = _REGLAS_CONTABLES_EXACTAS_AUTOMATICAS.get(
+            (str(account_tipo).upper(), canonical),
+        )
+        if rule is None:
+            return None
+        code, evidence = rule
+        return {
+            "standard_code": code,
+            "confidence": 0.99,
+            "method": "accounting_exact_rule",
+            "reason": (
+                f"Regla contable exacta: {evidence} en columna "
+                f"{account_tipo} → {code}"
+            ),
+        }
+
     @staticmethod
     def _classify_by_origin_fallback(
         account_code: str, account_tipo: str | None, *,
@@ -740,6 +814,11 @@ class HomologationPipeline:
             result = self._classify_by_regex(account_name, account_tipo)
 
         if result is None:
+            result = self._classify_by_exact_accounting_rule(
+                account_name, account_tipo,
+            )
+
+        if result is None:
             result = self._classify_by_regex_contextual(
                 account_name, account_tipo, account_code,
             )
@@ -845,6 +924,12 @@ class HomologationPipeline:
         # automática: lleva ``requires_review`` y una confianza inferior al
         # umbral automático.
         if decision.codigo_final is None:
+            exact_accounting = self._classify_by_exact_accounting_rule(
+                account_name, account_tipo,
+            )
+            if exact_accounting is not None:
+                exact_accounting["decision_engine"] = decision.to_dict()
+                return exact_accounting
             contextual = self._classify_by_regex_contextual(
                 account_name, account_tipo, account_code,
             )
@@ -942,8 +1027,11 @@ class HomologationPipeline:
         certification_state = (
             getattr(certification, "estado", "") or "no_evaluable"
         )
-        extraction_review_required = certification_state != "certificada"
         extraction_review_lines = _lineas_revision_extraccion(certification)
+        extraction_review_required = certification_state != "certificada"
+        extraction_global_review_required = bool(
+            extraction_review_required and extraction_review_lines is None,
+        )
         accounts_total = len(resultado.cuentas)
         logger.info("accounts_total: %d", accounts_total)
 
@@ -1213,10 +1301,10 @@ class HomologationPipeline:
 
             confidence = float(classification.get("confidence") or 0.0)
             account_extraction_review_required = bool(
-                extraction_review_required
-                and (
-                    extraction_review_lines is None
-                    or cr.linea in extraction_review_lines
+                extraction_global_review_required
+                or (
+                    extraction_review_lines is not None
+                    and cr.linea in extraction_review_lines
                 )
             )
             review_required = bool(
@@ -1296,7 +1384,11 @@ class HomologationPipeline:
             "accounts_ignored": accounts_ignored,
             "accounts_without_dictionary_match": accounts_without_dictionary_match,
             "extraction_certification_state": certification_state,
-            "automatic_decisions_allowed": not extraction_review_required,
+            # La certificación global puede continuar como parcial y bloquear
+            # la integración, aun cuando el parser haya delimitado las únicas
+            # filas cuyo OCR exige cotejo. Esta bandera sólo informa si una
+            # cuenta fuera de esa lista puede conservar su decisión automática.
+            "automatic_decisions_allowed": not extraction_global_review_required,
             "homologated_balance_certified": accounting_quadrature["certificada"],
             "accounting_quadrature": accounting_quadrature,
             "delivery_readiness": delivery_readiness,

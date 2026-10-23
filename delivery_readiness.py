@@ -25,7 +25,8 @@ módulo las convierte en una decisión única y serializable para el cliente:
 
 No modifica cuentas, montos ni decisiones. Es deliberadamente una capa de
 lectura para que la misma decisión pueda aparecer en la interfaz, Excel y
-JSON.
+JSON. La aceptación comercial se informa en un bloque separado: no cuenta una
+confirmación humana como cobertura automática o sugerida.
 """
 
 from __future__ import annotations
@@ -35,8 +36,29 @@ from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
 
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION = "1.1"
 DEFAULT_REVIEW_COVERAGE = 0.60
+# Este umbral responde a una pregunta distinta de ``umbral_revision``: mide
+# cuánto del documento puede llegar al analista como resultado automático o
+# propuesta algorítmica con evidencia. No incorpora decisiones humanas ya
+# tomadas, ni siquiera si fueron propagadas dentro del mismo lote.
+DEFAULT_COMMERCIAL_ASSISTED_COVERAGE = 0.60
+DEFAULT_COMMERCIAL_SUGGESTION_CONFIDENCE = 0.80
+
+# Sólo estos métodos tienen reglas de negocio acotadas y trazables que pueden
+# presentarse como sugerencia comercial. La lista es deliberadamente cerrada:
+# un método nuevo debe ser auditado e incorporado explícitamente antes de
+# aumentar la cobertura. Los métodos automáticos sin revisión conservan su
+# criterio técnico existente; esta allowlist aplica únicamente a propuestas
+# que todavía requieren validación humana.
+METODOS_SUGERENCIA_COMERCIAL_ADMITIDOS = frozenset({
+    "contextual_accounting_suggestion",
+    "contextual_credit_balance_depreciation",
+    "current_result_year",
+    "dictionary_exact_contra_pasivo",
+    "dictionary_fuzzy",
+    "regex_contextual",
+})
 
 ESTADOS = {
     "NO_LEGIBLE": "No legible",
@@ -133,9 +155,139 @@ def _requiere_revision(fila: Mapping[str, Any]) -> bool:
     )
 
 
+def _metodo(fila: Mapping[str, Any]) -> str:
+    return str(fila.get("metodo") or fila.get("method") or "").strip().lower()
+
+
 def _es_decision_analista(fila: Mapping[str, Any]) -> bool:
-    metodo = str(fila.get("metodo") or fila.get("method") or "").lower()
+    metodo = _metodo(fila)
     return any(token in metodo for token in ("validacion_humana", "manual", "analista"))
+
+
+def _es_verdadero(valor: Any) -> bool:
+    """Interpreta banderas serializadas sin aceptar ``\"false\"`` como verdad."""
+    if isinstance(valor, str):
+        return valor.strip().lower() in {"1", "true", "si", "sí", "yes"}
+    return bool(valor)
+
+
+def _confianza(fila: Mapping[str, Any]) -> float | None:
+    valor = _primer_valor(fila, "confianza", "confidence")
+    try:
+        confianza = float(valor)
+    except (TypeError, ValueError):
+        return None
+    return confianza if math.isfinite(confianza) else None
+
+
+def _campo_traza_sugerencia(fila: Mapping[str, Any]) -> str | None:
+    """Devuelve el campo de evidencia o regla no vacío de una sugerencia.
+
+    El pipeline actual serializa su justificación como ``reason`` y, cuando
+    corresponde, una regla especial como ``special_rule``. Se aceptan además
+    los nombres españoles e ingleses de esos campos para contratos ya
+    serializados. No se aceptan objetos ni valores numéricos: una sugerencia
+    comercial debe dejar una explicación legible y auditable.
+    """
+    for campo in (
+        "evidencia",
+        "evidence",
+        "regla",
+        "rule",
+        "razon",
+        "reason",
+        "special_rule",
+    ):
+        valor = fila.get(campo)
+        if isinstance(valor, str) and valor.strip():
+            return campo
+    return None
+
+
+def _es_propagacion(fila: Mapping[str, Any]) -> bool:
+    metodo = _metodo(fila)
+    origen = _primer_valor(
+        fila,
+        "propagacion_origen_archivo",
+        "propagation_source_file",
+        "propagation_source",
+    )
+    return (
+        "propag" in metodo
+        or bool(str(origen or "").strip())
+        or _propagacion_historica_confirmada(fila)
+    )
+
+
+def _propagacion_historica_confirmada(fila: Mapping[str, Any]) -> bool:
+    """Exige una bandera explícita antes de llamar histórica a una propagación."""
+    return _es_verdadero(_primer_valor(
+        fila,
+        "propagacion_confirmada_historial",
+        "propagated_from_confirmed_history",
+        "historical_propagation_confirmed",
+    ))
+
+
+def _categoria_cobertura_comercial(
+    fila: Mapping[str, Any],
+    codigo: str,
+    compatible: bool,
+    *,
+    umbral_confianza_sugerencia: float,
+) -> str:
+    """Clasifica una fila para la métrica comercial, sin modificarla.
+
+    La cobertura comercial es deliberadamente más estricta que la cobertura
+    usada para organizar la revisión. Una confirmación humana, por lote o
+    propagada, puede ser útil al analista, pero no prueba automatización del
+    documento que se está midiendo.
+    """
+    if codigo == "__EXCLUIR__":
+        return "excluidas"
+    if not codigo:
+        return "sin_clasificar"
+    if not compatible:
+        return "incompatibles"
+
+    metodo = _metodo(fila)
+    if _es_propagacion(fila):
+        if _propagacion_historica_confirmada(fila):
+            return "asistencia_derivada_humano_historial_confirmado"
+        origen = _primer_valor(
+            fila,
+            "propagacion_origen_archivo",
+            "propagation_source_file",
+            "propagation_source",
+        )
+        if str(origen or "").strip():
+            return "asistencia_derivada_humano_lote"
+        return "propagacion_sin_traza_confirmada"
+
+    if _es_decision_analista(fila):
+        if "lote" in metodo or "batch" in metodo:
+            return "decisiones_humanas_lote"
+        return "decisiones_humanas_individuales"
+
+    # ``origin_fallback`` es una categoría residual desde la columna física.
+    # Aunque tenga código compatible, no se presenta como sugerencia que ayude
+    # al objetivo comercial: su propia regla exige revisión contable.
+    if metodo == "origin_fallback":
+        return "origin_fallback_en_revision"
+
+    if not _requiere_revision(fila):
+        return "automaticas_estrictas"
+
+    if metodo not in METODOS_SUGERENCIA_COMERCIAL_ADMITIDOS:
+        return "sugerencias_metodo_no_admitido"
+
+    if _campo_traza_sugerencia(fila) is None:
+        return "sugerencias_sin_evidencia_trazable"
+
+    confianza = _confianza(fila)
+    if confianza is None or confianza < umbral_confianza_sugerencia:
+        return "sugerencias_confianza_insuficiente"
+    return "sugeridas_automatizadas"
 
 
 def _es_relevante(fila: Mapping[str, Any]) -> tuple[bool, float]:
@@ -198,6 +350,23 @@ def _certificacion_resumen(certificacion: Any) -> dict[str, Any]:
         "final_reconstruction_reviewable",
         defecto=False,
     ))
+    reconstrucciones_movimientos = _lista(_primer_atributo(
+        certificacion,
+        "reconstrucciones_movimientos",
+        "movement_reconstructions",
+    ))
+    proporcion_movimientos_reconstruidos = _primer_atributo(
+        certificacion,
+        "proporcion_movimientos_reconstruidos",
+        "movement_reconstruction_ratio",
+        defecto=0.0,
+    )
+    reconstruccion_movimientos_revisable = bool(_primer_atributo(
+        certificacion,
+        "reconstruccion_movimientos_revisable",
+        "movement_reconstruction_reviewable",
+        defecto=False,
+    ))
     filas_inconsistentes = _lista(_primer_atributo(
         certificacion,
         "filas_inconsistentes",
@@ -252,6 +421,13 @@ def _certificacion_resumen(certificacion: Any) -> dict[str, Any]:
         "reconstrucciones_finales": reconstrucciones_finales,
         "proporcion_finales_reconstruidos": proporcion_finales_reconstruidos,
         "reconstruccion_final_revisable": reconstruccion_final_revisable,
+        "reconstrucciones_movimientos": reconstrucciones_movimientos,
+        "proporcion_movimientos_reconstruidos": (
+            proporcion_movimientos_reconstruidos
+        ),
+        "reconstruccion_movimientos_revisable": (
+            reconstruccion_movimientos_revisable
+        ),
         "filas_inconsistentes": filas_inconsistentes,
         "diagnostico": diagnostico,
         "etiqueta_diagnostico": ETIQUETAS_DIAGNOSTICO.get(
@@ -267,12 +443,319 @@ def _certificacion_resumen(certificacion: Any) -> dict[str, Any]:
     }
 
 
+_ESTADOS_TECNICOS_BLOQUEANTES_COMERCIALES = frozenset({
+    "NO_LEGIBLE",
+    "LECTURA_NO_RESPALDADA",
+    "EXTRACCION_NO_VALIDADA",
+    "REVISION_EXTRACCION_REQUERIDA",
+    "FORMATO_NO_SOPORTADO",
+    "COBERTURA_INSUFICIENTE",
+})
+
+
+def evaluar_aceptacion_comercial(
+    filas: Iterable[Mapping[str, Any]],
+    estado_entrega: Mapping[str, Any],
+    *,
+    umbral_cobertura: float = DEFAULT_COMMERCIAL_ASSISTED_COVERAGE,
+    umbral_confianza_sugerencia: float = (
+        DEFAULT_COMMERCIAL_SUGGESTION_CONFIDENCE
+    ),
+    compatibilidad: Callable[[Mapping[str, Any]], bool] | None = None,
+) -> dict[str, Any]:
+    """Resume si un documento alcanza el criterio comercial de asistencia.
+
+    Este resumen no autoriza una integración ni reemplaza la revisión del
+    analista. Se limita a contestar dos preguntas auditables por documento:
+
+    * qué parte fue clasificada sin una decisión humana por cuenta;
+    * si esa parte alcanza el umbral acordado sin ocultar decisiones humanas,
+      propagaciones o categorías residuales.
+
+    ``estado_entrega`` debe provenir de :func:`evaluar_entregabilidad` o de un
+    contrato serializado equivalente. Los gates técnicos conservan prioridad:
+    una cobertura suficiente nunca compensa extracción, formato o cuadratura
+    no validados.
+    """
+    if not 0 < umbral_cobertura <= 1:
+        raise ValueError("umbral_cobertura debe estar entre 0 y 1")
+    if not 0 <= umbral_confianza_sugerencia <= 1:
+        raise ValueError(
+            "umbral_confianza_sugerencia debe estar entre 0 y 1"
+        )
+
+    categorias = (
+        "elegibles",
+        "automaticas_estrictas",
+        "sugeridas_automatizadas",
+        "decisiones_humanas_individuales",
+        "decisiones_humanas_lote",
+        "asistencia_derivada_humano_lote",
+        "asistencia_derivada_humano_historial_confirmado",
+        "propagacion_sin_traza_confirmada",
+        "origin_fallback_en_revision",
+        "sugerencias_metodo_no_admitido",
+        "sugerencias_sin_evidencia_trazable",
+        "sugerencias_confianza_insuficiente",
+        "sin_clasificar",
+        "incompatibles",
+        "excluidas",
+        "otras_en_revision",
+    )
+    cuentas = {categoria: 0 for categoria in categorias}
+    importes = {categoria: 0.0 for categoria in categorias}
+
+    for fila_original in filas:
+        fila = dict(fila_original)
+        relevante, importe = _es_relevante(fila)
+        if not relevante:
+            continue
+        codigo = _codigo(fila)
+        compatible = _es_compatible(fila, codigo, compatibilidad)
+        categoria = _categoria_cobertura_comercial(
+            fila,
+            codigo,
+            compatible,
+            umbral_confianza_sugerencia=umbral_confianza_sugerencia,
+        )
+        cuentas["elegibles"] += 1
+        importes["elegibles"] += importe
+        cuentas[categoria] += 1
+        importes[categoria] += importe
+
+    cobertura_cuentas = (
+        cuentas["automaticas_estrictas"]
+        + cuentas["sugeridas_automatizadas"]
+    )
+    cobertura_importes = (
+        importes["automaticas_estrictas"]
+        + importes["sugeridas_automatizadas"]
+    )
+    total = cuentas["elegibles"]
+    total_importe = importes["elegibles"]
+    porcentaje = cobertura_cuentas / total if total else 0.0
+    porcentaje_monetario = (
+        cobertura_importes / total_importe if total_importe else 0.0
+    )
+    minimo_cuentas = math.ceil(total * umbral_cobertura) if total else 0
+    brecha_cuentas = max(0, minimo_cuentas - cobertura_cuentas)
+    cumple_umbral = bool(total) and porcentaje >= umbral_cobertura
+
+    estado_tecnico = str(
+        estado_entrega.get("estado_tecnico")
+        or estado_entrega.get("estado")
+        or ""
+    )
+    certificacion = dict(estado_entrega.get("certificacion_extraccion") or {})
+    cuadratura = dict(estado_entrega.get("cuadratura_homologada") or {})
+    formato = dict(estado_entrega.get("formato") or {})
+    bloqueos_finales = [
+        str(bloqueo)
+        for bloqueo in estado_entrega.get("bloqueos_finales", []) or []
+        if str(bloqueo)
+    ]
+    # ``NO_EVALUADO`` y ``RECONOCIDO_PENDIENTE_VALIDACION`` no equivalen a
+    # formato soportado: para aceptación comercial se exige evidencia de un
+    # perfil registrado y una extracción ya certificada.
+    formato_soportado = formato.get("estado") == "SOPORTADO"
+    extraccion_apta = bool(certificacion.get("apta_revision_asistida", False))
+    cuadratura_cuadra = bool(cuadratura.get("cuadra", False))
+    cuadratura_certificada = bool(cuadratura.get("certificada", False))
+
+    gates_tecnicos = {
+        "estado_entrega": estado_tecnico,
+        "extraccion_apta_para_revision": extraccion_apta,
+        "formato_soportado": formato_soportado,
+        "cuadratura_cuadra": cuadratura_cuadra,
+        "cuadratura_certificada": cuadratura_certificada,
+        "bloqueos_finales": bloqueos_finales,
+    }
+    motivos: list[str] = []
+    siguiente_accion: list[str] = []
+    gates_superados = True
+
+    if estado_tecnico in _ESTADOS_TECNICOS_BLOQUEANTES_COMERCIALES:
+        gates_superados = False
+        motivos.append(
+            f"El estado técnico {estado_tecnico} no habilita aceptación comercial."
+        )
+    if not extraccion_apta:
+        gates_superados = False
+        motivos.append(
+            "La extracción no está apta para revisión asistida según sus controles."
+        )
+    if not formato_soportado:
+        gates_superados = False
+        motivos.append(
+            "El formato no tiene evidencia de perfil soportado para este documento."
+        )
+    if not cuadratura_cuadra:
+        gates_superados = False
+        motivos.append("La cuadratura homologada no cuadra.")
+    if bloqueos_finales:
+        gates_superados = False
+        motivos.append("Existen bloqueos finales antes de la entrega.")
+
+    if not gates_superados:
+        estado = "NO_APTO_POR_GATES_TECNICOS"
+        siguiente_accion.append(
+            "Resolver primero los controles técnicos indicados por el estado de entrega."
+        )
+    elif not cumple_umbral:
+        estado = "NO_APTO_POR_COBERTURA_COMERCIAL"
+        motivos.append(
+            "La cobertura automática estricta o sugerida con evidencia es "
+            f"{porcentaje:.1%}; se requiere al menos {umbral_cobertura:.0%}."
+        )
+        siguiente_accion.append(
+            "Aumentar cobertura sólo con reglas, código o diccionario auditables; "
+            "no reclasificar decisiones humanas como automáticas."
+        )
+    elif (
+        estado_tecnico == "LISTO_PARA_INTEGRAR"
+        and cuadratura_certificada
+    ):
+        estado = "CUMPLE_CRITERIO_COMERCIAL_FINAL"
+        siguiente_accion.append(
+            "Emitir la salida revisada conforme al protocolo operativo vigente."
+        )
+    else:
+        estado = "CUMPLE_CRITERIO_COMERCIAL_PARA_REVISION"
+        siguiente_accion.append(
+            "Entregar sólo un paquete de revisión y completar la aprobación del analista."
+        )
+
+    if cuentas["origin_fallback_en_revision"]:
+        siguiente_accion.append(
+            "Revisar las categorías origin_fallback por separado; no cuentan "
+            "como sugerencia comercial."
+        )
+    if cuentas["sugerencias_metodo_no_admitido"]:
+        motivos.append(
+            "Hay sugerencias con un método no admitido por la allowlist comercial."
+        )
+        siguiente_accion.append(
+            "Auditar el método antes de incorporarlo a la allowlist; no usarlo "
+            "para aumentar la cobertura mientras tanto."
+        )
+    if cuentas["sugerencias_sin_evidencia_trazable"]:
+        motivos.append(
+            "Hay sugerencias sin una evidencia o regla trazable no vacía."
+        )
+        siguiente_accion.append(
+            "Registrar la evidencia o regla que sustenta cada sugerencia antes "
+            "de usarla en la cobertura comercial."
+        )
+    if cuentas["sugerencias_confianza_insuficiente"]:
+        motivos.append(
+            "Hay sugerencias con confianza inválida o bajo el umbral configurado."
+        )
+        siguiente_accion.append(
+            "Mantener esas sugerencias en revisión hasta contar con una "
+            "confianza finita y suficiente, respaldada por una regla trazable."
+        )
+    decisiones_humanas = (
+        cuentas["decisiones_humanas_individuales"]
+        + cuentas["decisiones_humanas_lote"]
+    )
+    if decisiones_humanas:
+        siguiente_accion.append(
+            "Mantener las decisiones humanas individuales o por lote fuera "
+            "del indicador de automatización."
+        )
+    asistencias_humanas = (
+        cuentas["asistencia_derivada_humano_lote"]
+        + cuentas["asistencia_derivada_humano_historial_confirmado"]
+        + cuentas["propagacion_sin_traza_confirmada"]
+    )
+    if asistencias_humanas:
+        siguiente_accion.append(
+            "Cotejar la evidencia de las propagaciones humanas; se informan "
+            "aparte y no aumentan la cobertura comercial."
+        )
+    pendientes = (
+        cuentas["sugeridas_automatizadas"]
+        + cuentas["origin_fallback_en_revision"]
+        + cuentas["sugerencias_metodo_no_admitido"]
+        + cuentas["sugerencias_sin_evidencia_trazable"]
+        + cuentas["sugerencias_confianza_insuficiente"]
+        + cuentas["sin_clasificar"]
+        + cuentas["incompatibles"]
+        + cuentas["excluidas"]
+        + cuentas["otras_en_revision"]
+        + cuentas["propagacion_sin_traza_confirmada"]
+    )
+    if pendientes:
+        motivos.append(
+            f"{pendientes} cuenta(s) requieren revisión o decisión explícita."
+        )
+
+    return {
+        "schema_version": "1.1",
+        "estado": estado,
+        "umbral_cobertura": umbral_cobertura,
+        "umbral_confianza_sugerencia": umbral_confianza_sugerencia,
+        "metrica": (
+            "automaticas_estrictas_mas_sugeridas_automatizadas_con_evidencia"
+        ),
+        "criterio_sugerencia": {
+            "metodos_admitidos": sorted(
+                METODOS_SUGERENCIA_COMERCIAL_ADMITIDOS,
+            ),
+            "campos_trazabilidad_admitidos": [
+                "evidencia",
+                "evidence",
+                "regla",
+                "rule",
+                "razon",
+                "reason",
+                "special_rule",
+            ],
+            "requiere_confianza_finita": True,
+        },
+        "cumple_umbral": cumple_umbral,
+        "apto_para_revision_comercial": gates_superados and cumple_umbral,
+        "apto_para_entrega_revisada": bool(
+            gates_superados
+            and cumple_umbral
+            and estado_tecnico == "LISTO_PARA_INTEGRAR"
+            and cuadratura_certificada
+        ),
+        "gates_tecnicos": gates_tecnicos,
+        "cobertura": {
+            "cuentas": {
+                **cuentas,
+                "automaticas_o_sugeridas": cobertura_cuentas,
+                "fuera_del_numerador": total - cobertura_cuentas,
+                "porcentaje": round(porcentaje, 4),
+                "minimo_cuentas_umbral": minimo_cuentas,
+                "brecha_cuentas": brecha_cuentas,
+            },
+            "monto_absoluto": {
+                **{clave: round(valor, 2) for clave, valor in importes.items()},
+                "automaticas_o_sugeridas": round(cobertura_importes, 2),
+                "fuera_del_numerador": round(
+                    total_importe - cobertura_importes,
+                    2,
+                ),
+                "porcentaje": round(porcentaje_monetario, 4),
+            },
+        },
+        "motivos": list(dict.fromkeys(motivos)),
+        "siguiente_accion": list(dict.fromkeys(siguiente_accion)),
+    }
+
+
 def evaluar_entregabilidad(
     filas: Iterable[Mapping[str, Any]],
     certificacion_extraccion: Any = None,
     cuadratura_homologada: Mapping[str, Any] | None = None,
     *,
     umbral_revision: float = DEFAULT_REVIEW_COVERAGE,
+    umbral_cobertura_comercial: float = DEFAULT_COMMERCIAL_ASSISTED_COVERAGE,
+    umbral_confianza_sugerencia_comercial: float = (
+        DEFAULT_COMMERCIAL_SUGGESTION_CONFIDENCE
+    ),
     compatibilidad: Callable[[Mapping[str, Any]], bool] | None = None,
     bloqueos_finales: Iterable[str] = (),
     formato: Mapping[str, Any] | None = None,
@@ -281,10 +764,17 @@ def evaluar_entregabilidad(
 
     ``sugerida`` significa que existe un código compatible, pero la cuenta aún
     requiere confirmación. No se cuentan como sugeridas las cuentas sin código,
-    excluidas o incompatibles con su columna de origen.
+    excluidas o incompatibles con su columna de origen. ``umbral_revision``
+    conserva la cobertura técnica para organizar la cola de revisión. El
+    criterio comercial separado no incorpora decisiones humanas y se expone en
+    ``aceptacion_comercial``.
     """
     if not 0 < umbral_revision <= 1:
         raise ValueError("umbral_revision debe estar entre 0 y 1")
+    # Materializar el iterable una vez: el resumen técnico y el comercial deben
+    # medir exactamente el mismo universo de cuentas incluso si llega un
+    # generador desde un integrador.
+    filas_lista = [dict(fila) for fila in filas]
 
     certificacion = _certificacion_resumen(certificacion_extraccion)
     cuentas = {
@@ -298,8 +788,7 @@ def evaluar_entregabilidad(
     }
     importes = {clave: 0.0 for clave in cuentas}
 
-    for fila_original in filas:
-        fila = dict(fila_original)
+    for fila in filas_lista:
         relevante, importe = _es_relevante(fila)
         if not relevante:
             continue
@@ -462,7 +951,7 @@ def evaluar_entregabilidad(
         "LISTO_PARA_INTEGRAR",
     }
 
-    return {
+    resultado = {
         "schema_version": SCHEMA_VERSION,
         "estado": estado,
         "etiqueta": ESTADOS[estado],
@@ -499,5 +988,16 @@ def evaluar_entregabilidad(
                 "porcentaje": round(cobertura_monetaria, 4),
             },
         },
+        "bloqueos_finales": bloqueos,
         "razones": razones_unicas,
     }
+    resultado["aceptacion_comercial"] = evaluar_aceptacion_comercial(
+        filas_lista,
+        resultado,
+        umbral_cobertura=umbral_cobertura_comercial,
+        umbral_confianza_sugerencia=(
+            umbral_confianza_sugerencia_comercial
+        ),
+        compatibilidad=compatibilidad,
+    )
+    return resultado

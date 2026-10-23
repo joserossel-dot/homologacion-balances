@@ -47,7 +47,7 @@ def test_export_has_summary_metadata_units_formulas_and_full_income():
     summary = workbook["Resumen"]
     assert summary["B5"].value == "$"
     assert summary["B6"].value
-    assert summary["B7"].value is None
+    assert summary["B7"].value == "No informado"
     summary_rows = {r[0].value: r[1].value for r in summary}
     for label in ("TOTAL ACTIVOS", "TOTAL PASIVOS", "TOTAL PATRIMONIO", "Diferencia de cuadratura", "Cuadratura aritmética"):
         assert summary_rows[label].startswith("=")

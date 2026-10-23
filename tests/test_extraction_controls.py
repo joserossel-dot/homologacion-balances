@@ -158,6 +158,67 @@ def test_reconoce_variantes_ocr_de_acreedor_y_pasivo_en_encabezado():
     assert lines == ["Proveedores 0 100 0 100 0 100 0 0"]
 
 
+def test_reconoce_haber_con_rastro_de_saldo_deudor_en_encabezado():
+    headers = [
+        "Cuenta", "Debe", "Haber___S", "Deudor", "Acreedor", "Activo",
+        "Pasivo", "Pérdidas", "Ganancias",
+    ]
+    words = [
+        {"text": text, "x0": index * 70, "x1": index * 70 + 40, "top": 10}
+        for index, text in enumerate(headers)
+    ]
+    words += [
+        {"text": text, "x0": index * 70, "x1": index * 70 + 40, "top": 30}
+        for index, text in enumerate(
+            ["Caja", "100", "0", "100", "0", "100", "0", "0", "0"],
+        )
+    ]
+
+    lines, centers = parser._extraer_tabla_balance_por_coordenadas(
+        SimpleNamespace(extract_words=lambda **kwargs: words),
+    )
+
+    assert centers is not None
+    assert lines == ["Caja 100 0 100 0 100 0 0 0"]
+
+
+def test_celda_geometrica_repara_separador_de_miles_omitido_sin_desplazarla():
+    headers = [
+        "Cuenta", "Debe", "Haber", "Deudor", "Acreedor", "Activo",
+        "Pasivo", "Pérdidas", "Ganancias",
+    ]
+    words = [
+        {"text": text, "x0": index * 70, "x1": index * 70 + 40, "top": 10}
+        for index, text in enumerate(headers)
+    ]
+    words += [
+        {"text": text, "x0": index * 70, "x1": index * 70 + 40, "top": 30}
+        for index, text in enumerate([
+            "Caja", "3.732989.407", "0", "3.732989.407", "0",
+            "3.732989.407", "0", "0", "0",
+        ])
+    ]
+
+    lines, _ = parser._extraer_tabla_balance_por_coordenadas(
+        SimpleNamespace(extract_words=lambda **kwargs: words),
+    )
+    cuenta = parser.parsear_linea(
+        parser.normalizar_linea_ocr_tabla(lines[0]),
+        1,
+        parser.FormatoCodigo.COMPACTO,
+        ".",
+        0.75,
+    )
+
+    assert lines == [
+        "Caja 3.732.989.407 0 3.732.989.407 0 3.732.989.407 0 0 0",
+    ]
+    assert cuenta is not None
+    assert cuenta.montos_columnas["debitos"] == 3_732_989_407
+    assert cuenta.montos_columnas["creditos"] == 0
+    assert cuenta.montos_columnas["activo"] == 3_732_989_407
+
+
 def test_reconoce_variantes_ocr_de_encabezado_con_mayor_resolucion():
     headers = ["Cuenta", "Dche", "Haber", "Deudor", "Vervedor", "Aclivo", "Pasivo", "Perdida", "Ganancia"]
     words = [

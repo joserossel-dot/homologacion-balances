@@ -161,6 +161,46 @@ def test_sugerencias_contextuales_exactas_siempre_requieren_revision(tmp_path):
         assert result['requires_review'] is True
 
 
+def test_reglas_contables_exactas_automaticas_exigen_texto_y_columna(tmp_path):
+    pipeline = HomologationPipeline(db_path=tmp_path / 'gold.db')
+
+    cases = (
+        ('Cotizaciones Previsionales', 'PASIVO', 'PC.06'),
+        ('Retenciones Honorarios y Dietas', 'PASIVO', 'PC.05'),
+        ('Retenciones Impto. Unico 2* Categ', 'PASIVO', 'PC.05'),
+        ('Ingresos Anticipados Escuela', 'PASIVO', 'PC.08'),
+        ('Interés Prestamos Bancarios', 'PERDIDA', 'ER.09'),
+        ('Reajuste Fiscal', 'GANANCIA', 'ER.14'),
+    )
+    for name, account_type, expected_code in cases:
+        result = pipeline._classify_by_exact_accounting_rule(name, account_type)
+        assert result is not None
+        assert result['standard_code'] == expected_code
+        assert result['method'] == 'accounting_exact_rule'
+        assert result['confidence'] >= 0.99
+        assert 'requires_review' not in result
+
+    assert pipeline._classify_by_exact_accounting_rule(
+        'Cotizaciones Previsionales', 'ACTIVO',
+    ) is None
+
+
+def test_motor_de_decision_conserva_regla_contable_exacta_automatica(tmp_path):
+    pipeline = HomologationPipeline(
+        db_path=tmp_path / 'gold.db',
+        features=CMCCFeatureFlags(ENABLE_DECISION_ENGINE=True),
+    )
+    pipeline._dictionary = []
+
+    result = pipeline._classify_account(
+        '21080504', 'Cotizaciones Previsionales', 'PASIVO',
+    )
+
+    assert result['standard_code'] == 'PC.06'
+    assert result['method'] == 'accounting_exact_rule'
+    assert result['decision_engine']['codigo_final'] is None
+
+
 def test_motor_de_decision_conserva_sugerencia_contextual_revisable(tmp_path):
     pipeline = HomologationPipeline(
         db_path=tmp_path / 'gold.db',
@@ -219,6 +259,19 @@ def test_reconstruccion_final_acotada_delimita_la_revision_de_extraccion():
     ) is None
 
 
+def test_reconstruccion_movimiento_acotada_delimita_la_revision_de_extraccion():
+    certificacion = CertificacionExtraccion(
+        estado='parcial',
+        reconstruccion_movimientos_revisable=True,
+        reconstrucciones_movimientos=[{
+            'linea': 7, 'cuenta': 'Terreno', 'columnas': ['debitos'],
+            'importe': 100,
+        }],
+    )
+
+    assert _lineas_revision_extraccion(certificacion) == {7}
+
+
 def test_pipeline_solo_fuerza_revision_en_fila_final_reconstruida(tmp_path):
     pipeline = HomologationPipeline(db_path=tmp_path / 'gold.db')
     cuentas = [
@@ -261,9 +314,57 @@ def test_pipeline_solo_fuerza_revision_en_fila_final_reconstruida(tmp_path):
     result = pipeline.process(tmp_path / 'balance.pdf')
     filas = {fila['account_name']: fila for fila in result['classified']}
 
-    assert result['automatic_decisions_allowed'] is False
+    assert result['automatic_decisions_allowed'] is True
     assert filas['Caja revisable']['extraction_review_required'] is True
     assert filas['Caja revisable']['review_required'] is True
+    assert filas['Banco observado']['extraction_review_required'] is False
+    assert filas['Banco observado']['review_required'] is False
+
+
+def test_pipeline_solo_fuerza_revision_en_movimiento_reconstruido(tmp_path):
+    pipeline = HomologationPipeline(db_path=tmp_path / 'gold.db')
+    cuentas = [
+        CuentaRaw(
+            linea=1, codigo='110101', nombre='Caja revisable', monto=100,
+            origen_columna=OrigenColumna.ACTIVO,
+        ),
+        CuentaRaw(
+            linea=2, codigo='110102', nombre='Banco observado', monto=100,
+            origen_columna=OrigenColumna.ACTIVO,
+        ),
+    ]
+    certificacion = CertificacionExtraccion(
+        estado='parcial', metodo='ocr_coordinates_8_amounts',
+        orientacion_certificada=True,
+        reconstruccion_movimientos_revisable=True,
+        reconstrucciones_movimientos=[{
+            'linea': 1, 'cuenta': 'Caja revisable', 'columnas': ['debitos'],
+            'importe': 100,
+        }],
+    )
+    pipeline._parser.parsear = MagicMock(return_value=ResultadoParseo(
+        archivo='balance.pdf', formato_codigo=FormatoCodigo.SIN_CODIGO,
+        separador_miles='.', requirio_ocr=False, rotacion_aplicada=0,
+        cuentas=cuentas, certificacion_extraccion=certificacion,
+    ))
+    pipeline._classify_account = MagicMock(return_value={
+        'standard_code': 'AC.01', 'confidence': 0.98,
+        'method': 'dictionary_exact', 'reason': 'prueba', '_cmcc_score': -1,
+    })
+    pipeline._semantic_engine.interpret = MagicMock(
+        return_value=SimpleNamespace(to_dict=lambda: {
+            'semantic_type': 'unknown', 'confidence': 0.0,
+        })
+    )
+    pipeline._rule_processor.aplicar = MagicMock(return_value=SimpleNamespace(
+        aplica=False, codigo_final='AC.01', nota='', requiere_revision=False,
+    ))
+
+    result = pipeline.process(tmp_path / 'balance.pdf')
+    filas = {fila['account_name']: fila for fila in result['classified']}
+
+    assert result['automatic_decisions_allowed'] is True
+    assert filas['Caja revisable']['extraction_review_required'] is True
     assert filas['Banco observado']['extraction_review_required'] is False
     assert filas['Banco observado']['review_required'] is False
 

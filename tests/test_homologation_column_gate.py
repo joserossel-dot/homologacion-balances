@@ -205,6 +205,28 @@ def test_reconstruccion_final_no_es_revisable_si_supera_el_tope():
     assert cert.proporcion_finales_reconstruidos == 0.15
 
 
+def test_reconstruccion_de_movimiento_acota_revision_sin_certificar():
+    cuentas = _cuentas_con_reconstruccion_final([])
+    cuentas[0].columnas_derivadas = ["debitos"]
+    # El subtotal queda parcialmente leído, pero sus columnas finales siguen
+    # observadas y el cierre de ocho columnas conserva sus controles.
+    cuentas[-3].columnas_derivadas = ["saldo_deudor"]
+
+    cert = parser.certificar_extraccion_columnas(cuentas)
+
+    assert cert.estado == "parcial"
+    assert cert.columnas_finales_validadas is True
+    assert cert.reconstruccion_final_revisable is False
+    assert cert.reconstrucciones_movimientos == [{
+        "linea": 1,
+        "cuenta": "Activo 0",
+        "columnas": ["debitos"],
+        "importe": 100.0,
+    }]
+    assert cert.proporcion_movimientos_reconstruidos == 0.05
+    assert cert.reconstruccion_movimientos_revisable is True
+
+
 def test_perdida_y_puente_de_cierre_se_validan_con_signos_correctos():
     lines = [
         "110101 Caja 50 0 0 0 50 0 0 0",

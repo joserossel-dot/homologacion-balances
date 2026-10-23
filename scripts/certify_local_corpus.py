@@ -505,6 +505,15 @@ def certify(
                 "final_reconstruction_reviewable": (
                     certification.reconstruccion_final_revisable
                 ),
+                "movement_reconstructions": (
+                    certification.reconstrucciones_movimientos
+                ),
+                "movement_reconstruction_ratio": (
+                    certification.proporcion_movimientos_reconstruidos
+                ),
+                "movement_reconstruction_reviewable": (
+                    certification.reconstruccion_movimientos_revisable
+                ),
                 "inconsistent_rows": certification.filas_inconsistentes,
                 "diagnosis": certification.diagnostico,
                 "diagnostic_signals": certification.senales_diagnostico,
@@ -515,6 +524,13 @@ def certify(
         "classification": classification,
         "accounting_quadrature": accounting_quadrature,
         "delivery_readiness": delivery_readiness,
+        # Alias explícito por documento para consumidores del informe de
+        # corpus. Conserva el bloque dentro de delivery_readiness como fuente
+        # de verdad y evita que una cobertura técnica se confunda con el
+        # criterio comercial más estricto.
+        "commercial_acceptance": delivery_readiness.get(
+            "aceptacion_comercial", {}
+        ),
         "elapsed_seconds": round(time.perf_counter() - started, 3),
     }
 
@@ -594,6 +610,8 @@ def main() -> int:
                     f"auto={result['classification']['automatic']} "
                     f"revision={result['classification']['review']} "
                     f"entrega={result['delivery_readiness']['estado']} "
+                    "comercial="
+                    f"{result['commercial_acceptance'].get('estado', 'n/a')} "
                     f"tiempo={result['elapsed_seconds']}s",
                     flush=True,
                 )

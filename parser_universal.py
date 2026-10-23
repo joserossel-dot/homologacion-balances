@@ -337,7 +337,7 @@ def _agrupar_palabras_por_linea(words: list[dict], tolerancia: float = 2.5) -> l
 _HEADER_ALIASES = {
     "nombre": {"CUENTA", "CUENTAS", "NOMBRE", "DESCRIPCION", "DETALLE"},
     "debitos": {"DEBITOS", "DEBITO", "DEBE", "DCHE", "PEBITOS", "DEBIT0S"},
-    "creditos": {"CREDITOS", "CREDITO", "HABER"},
+    "creditos": {"CREDITOS", "CREDITO", "HABER", "HABERS"},
     "saldo_deudor": {"DEUDOR", "SDEUDOR", "SALDODEUDOR"},
     "saldo_acreedor": {"ACREEDOR", "ACREEEDOR", "SACREEDOR", "SALDOACREEDOR", "VERCEDOR", "VERVEDOR"},
     "activo": {"ACTIVO", "ACTIVOS", "ACLIVO"},
@@ -528,7 +528,7 @@ def _extraer_tabla_balance_por_coordenadas(
         for word in grupo:
             token = str(word["text"]).strip()
             xmid = (float(word["x0"]) + float(word["x1"])) / 2
-            token_normalizado = normalizar_token_ocr(token).replace("$", "")
+            token_normalizado = _normalizar_token_monetario_geometrico(token)
             es_monto = token == "-" or bool(PATRON_MONTOS.fullmatch(token_normalizado))
             # En tablas escaneadas Tesseract suele leer el cero aislado como
             # pequeños glifos sin dígitos (``o``, ``]``, ``»``...). Sólo los
@@ -566,7 +566,7 @@ def _extraer_tabla_balance_por_coordenadas(
         celdas_evidencia: list[Optional[dict[str, Any]]] = []
         for cell in amount_cells:
             token = "".join(str(w["text"]) for w in sorted(cell, key=lambda w: w["x0"])).strip()
-            token_normalizado = normalizar_token_ocr(token).replace("$", "")
+            token_normalizado = _normalizar_token_monetario_geometrico(token)
             amounts.append(
                 token_normalizado
                 if token != "-" and PATRON_MONTOS.fullmatch(token_normalizado)
@@ -940,6 +940,15 @@ class CertificacionExtraccion:
     # Autoriza exclusivamente un paquete para que el analista contraste estas
     # filas con el original. Nunca certifica extracción ni integración.
     reconstruccion_final_revisable: bool = False
+    # Filas cuyo Debe/Haber o saldo se recompuso, mientras el importe de
+    # clasificación final permaneció observado. Conserva la evidencia de la
+    # excepción sin presentar al documento como certificado.
+    reconstrucciones_movimientos: list[dict[str, Any]] = field(default_factory=list)
+    proporcion_movimientos_reconstruidos: float = 0.0
+    # Delimita el cotejo a estas filas sólo cuando los controles finales y la
+    # ecuación fuente son independientes y concordantes. Nunca habilita la
+    # integración definitiva.
+    reconstruccion_movimientos_revisable: bool = False
     observaciones_auxiliares: list[dict] = field(default_factory=list)
     # Diagnóstico de la evidencia observada, no una afirmación sobre la causa
     # del documento. Permite separar, por ejemplo, un subtotal no detectado de
@@ -2416,8 +2425,10 @@ def certificar_extraccion_columnas(
         or ecuacion_subtotal_invalida
     )
     filas_derivadas = [cuenta.linea for cuenta in filas_detalle if cuenta.columnas_derivadas]
+    columnas_movimiento = set(RAW_MONETARY_COLUMNS[:4])
     columnas_finales = set(RAW_MONETARY_COLUMNS[4:])
     reconstrucciones_finales = []
+    reconstrucciones_movimientos = []
     filas_monetarias = 0
     for cuenta in filas_detalle:
         try:
@@ -2430,13 +2441,24 @@ def certificar_extraccion_columnas(
             set(cuenta.columnas_derivadas).intersection(columnas_finales),
         )
         if not columnas_reconstruidas or abs(monto) <= tolerancia_absoluta:
-            continue
-        reconstrucciones_finales.append({
-            "linea": cuenta.linea,
-            "cuenta": cuenta.nombre,
-            "columnas": columnas_reconstruidas,
-            "importe": monto,
-        })
+            columnas_reconstruidas = []
+        if columnas_reconstruidas:
+            reconstrucciones_finales.append({
+                "linea": cuenta.linea,
+                "cuenta": cuenta.nombre,
+                "columnas": columnas_reconstruidas,
+                "importe": monto,
+            })
+        movimientos_reconstruidos = sorted(
+            set(cuenta.columnas_derivadas).intersection(columnas_movimiento),
+        )
+        if movimientos_reconstruidos and abs(monto) > tolerancia_absoluta:
+            reconstrucciones_movimientos.append({
+                "linea": cuenta.linea,
+                "cuenta": cuenta.nombre,
+                "columnas": movimientos_reconstruidos,
+                "importe": monto,
+            })
     total_derivado = bool(
         subtotal_referencia.columnas_derivadas or fila_final_incompleta
     )
@@ -2459,6 +2481,10 @@ def certificar_extraccion_columnas(
         len(reconstrucciones_finales) / filas_monetarias
         if filas_monetarias else 0.0
     )
+    proporcion_movimientos_reconstruidos = (
+        len(reconstrucciones_movimientos) / filas_monetarias
+        if filas_monetarias else 0.0
+    )
     controles_finales_reconstruidos = any(
         set(control.columnas_derivadas).intersection(columnas_finales)
         for control in [subtotal_referencia, *finales, *puentes_resultado]
@@ -2470,6 +2496,17 @@ def certificar_extraccion_columnas(
         and ecuacion_contable_fuente_valida is True
         and not controles_finales_reconstruidos
         and proporcion_finales_reconstruidos
+        <= MAX_PROPORCION_FINALES_RECONSTRUIDOS_PARA_REVISION
+    )
+    reconstruccion_movimientos_revisable = bool(
+        reconstrucciones_movimientos
+        and not reconstrucciones_finales
+        and not failed
+        and totales_finales_validos is True
+        and ecuacion_contable_fuente_valida is True
+        and columnas_finales_validadas
+        and not controles_finales_reconstruidos
+        and proporcion_movimientos_reconstruidos
         <= MAX_PROPORCION_FINALES_RECONSTRUIDOS_PARA_REVISION
     )
     observaciones_auxiliares = []
@@ -2525,6 +2562,9 @@ def certificar_extraccion_columnas(
         reconstrucciones_finales=reconstrucciones_finales,
         proporcion_finales_reconstruidos=proporcion_finales_reconstruidos,
         reconstruccion_final_revisable=reconstruccion_final_revisable,
+        reconstrucciones_movimientos=reconstrucciones_movimientos,
+        proporcion_movimientos_reconstruidos=proporcion_movimientos_reconstruidos,
+        reconstruccion_movimientos_revisable=reconstruccion_movimientos_revisable,
         observaciones_auxiliares=observaciones_auxiliares,
         diagnostico=diagnostico,
         senales_diagnostico=senales_diagnostico,
@@ -3317,6 +3357,47 @@ def normalizar_token_ocr(token: str) -> str:
     # Los dos puntos aparecen como sustituto del punto de miles en escaneos
     # tenues (p. ej. ``3.732:989.407``). Se limita al contexto entre dígitos.
     return re.sub(r"(?<=\d):(?=\d)", ".", token)
+
+
+_PATRON_SEPARADOR_MILES_OMITIDO_INTERMEDIO = re.compile(
+    r"^(?P<signo>-?)(?P<inicio>\d{1,3})[.,](?P<grupo>\d{6})[.,](?P<fin>\d{3})$"
+)
+_PATRON_SEPARADOR_MILES_OMITIDO_FINAL = re.compile(
+    r"^(?P<signo>-?)(?P<inicio>\d{1,3})[.,](?P<grupo>\d{3})[.,](?P<fin>\d{6})$"
+)
+
+
+def _normalizar_token_monetario_geometrico(token: str) -> str:
+    """Repara un separador de miles omitido dentro de una celda física.
+
+    La reconstrucción por coordenadas ya determinó que cada ``token`` pertenece
+    a una sola columna monetaria. Por eso ``3.732989.407`` puede normalizarse
+    como un importe de cuatro grupos, sin confundirlo con dos importes pegados.
+    La normalización textual general conserva su regla histórica de separar dos
+    montos concatenados, porque fuera de una celda geométrica esa distinción no
+    está observada.
+    """
+    normalizado = normalizar_token_ocr(token).replace("$", "")
+    for patron in (
+        _PATRON_SEPARADOR_MILES_OMITIDO_INTERMEDIO,
+        _PATRON_SEPARADOR_MILES_OMITIDO_FINAL,
+    ):
+        coincidencia = patron.fullmatch(normalizado)
+        if coincidencia is None:
+            continue
+        inicio = coincidencia.group("inicio")
+        grupo = coincidencia.group("grupo")
+        fin = coincidencia.group("fin")
+        if patron is _PATRON_SEPARADOR_MILES_OMITIDO_INTERMEDIO:
+            return (
+                f"{coincidencia.group('signo')}{inicio}."
+                f"{grupo[:3]}.{grupo[3:]}.{fin}"
+            )
+        return (
+            f"{coincidencia.group('signo')}{inicio}.{grupo}."
+            f"{fin[:3]}.{fin[3:]}"
+        )
+    return normalizado
 
 PATRON_TOTAL = re.compile(
     r'^(?:total(?:es)?|sub[-\s]?total(?:es)?|sumas?(?: iguales)?)\b|'

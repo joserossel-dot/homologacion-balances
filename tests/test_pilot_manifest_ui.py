@@ -159,6 +159,30 @@ def test_manifiesto_con_documento_extra_bloquea_y_limpia_estado_derivado(
     assert source_sha not in mensajes[0]
 
 
+def test_manifiesto_con_documento_faltante_indica_solo_las_cantidades(
+        monkeypatch,
+):
+    monkeypatch.setenv("PILOT_MODE", "1")
+    mensajes = _errores_silenciosos(monkeypatch)
+    state = _estado()
+    monkeypatch.setattr(app.st, "session_state", state)
+    primero = _archivo("primero-visible.pdf", b"primer contenido")
+    segundo = _archivo("segundo-visible.pdf", b"segundo contenido")
+    manifiesto = _manifiesto([
+        _documento("doc-opaque-primero", primero.getvalue(), 2023),
+        _documento("doc-opaque-segundo", segundo.getvalue(), 2024),
+    ])
+
+    assert not app._autorizar_lote_piloto([primero], manifiesto)
+    assert mensajes == [
+        "No se procesó el lote. Códigos: missing_uploaded_document. "
+        "El manifiesto autoriza 2 documento(s) y se cargaron 1. "
+        "Cargue todos los documentos autorizados juntos.",
+    ]
+    assert "primero-visible.pdf" not in mensajes[0]
+    assert "doc-opaque-segundo" not in mensajes[0]
+
+
 def test_cambio_de_manifiesto_invalida_solo_autorizacion_efectiva_distinta(
         monkeypatch,
 ):

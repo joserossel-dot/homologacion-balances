@@ -24,7 +24,17 @@ def certificacion(
     )
 
 
-def fila(nombre, monto, codigo, *, revision=False, compatible=True, metodo="diccionario_exacto"):
+def fila(
+    nombre,
+    monto,
+    codigo,
+    *,
+    revision=False,
+    compatible=True,
+    metodo="diccionario_exacto",
+    confianza=0.99,
+    **adicionales,
+):
     return {
         "nombre_original": nombre,
         "monto": monto,
@@ -32,7 +42,19 @@ def fila(nombre, monto, codigo, *, revision=False, compatible=True, metodo="dicc
         "requiere_revision": revision,
         "compatible": compatible,
         "metodo": metodo,
+        "confianza": confianza,
         "es_total": False,
+        **adicionales,
+    }
+
+
+def formato_soportado():
+    return {
+        "estado": "SOPORTADO",
+        "id": "BALANCE_TRIBUTARIO_8_COLUMNAS_OCR",
+        "familia": "Balance tributario de ocho columnas con OCR",
+        "metodo": "ocr_coordinates_8_amounts",
+        "mensaje": "Formato soportado para la prueba.",
     }
 
 
@@ -258,3 +280,213 @@ def test_contrato_serializa_el_cierre_fuente_usado_en_cuadratura():
 def test_umbral_invalido_falla_explicito(threshold):
     with pytest.raises(ValueError, match="umbral_revision"):
         evaluar_entregabilidad([], certificacion(), umbral_revision=threshold)
+
+
+def test_aceptacion_comercial_cuenta_solo_sugerencia_algoritmica_con_evidencia():
+    resultado = evaluar_entregabilidad(
+        [
+            fila("Caja", 100, "AC.01"),
+            fila(
+                "Obligación bancaria", 100, "PC.02", revision=True,
+                metodo="contextual_accounting_suggestion", confianza=0.84,
+                reason="Regla contextual compatible con pasivo.",
+            ),
+        ],
+        certificacion(),
+        {"certificada": False, "cuadra": True},
+        formato=formato_soportado(),
+    )
+
+    comercial = resultado["aceptacion_comercial"]
+    assert comercial["estado"] == "CUMPLE_CRITERIO_COMERCIAL_PARA_REVISION"
+    assert comercial["cumple_umbral"] is True
+    assert comercial["cobertura"]["cuentas"]["automaticas_estrictas"] == 1
+    assert comercial["cobertura"]["cuentas"]["sugeridas_automatizadas"] == 1
+    assert comercial["cobertura"]["cuentas"]["porcentaje"] == 1.0
+
+
+def test_aceptacion_comercial_excluye_sugerencia_de_metodo_desconocido():
+    resultado = evaluar_entregabilidad(
+        [
+            fila(
+                "Propuesta nueva", 100, "PC.02", revision=True,
+                metodo="modelo_experimental_no_auditado", confianza=0.99,
+                reason="El modelo generó esta propuesta.",
+            ),
+        ],
+        certificacion(),
+        {"certificada": False, "cuadra": True},
+        formato=formato_soportado(),
+    )
+
+    comercial = resultado["aceptacion_comercial"]
+    cuentas = comercial["cobertura"]["cuentas"]
+    assert cuentas["sugerencias_metodo_no_admitido"] == 1
+    assert cuentas["sugeridas_automatizadas"] == 0
+    assert cuentas["automaticas_o_sugeridas"] == 0
+    assert comercial["estado"] == "NO_APTO_POR_COBERTURA_COMERCIAL"
+
+
+def test_aceptacion_comercial_excluye_sugerencia_sin_traza_no_vacia():
+    resultado = evaluar_entregabilidad(
+        [
+            fila(
+                "Propuesta sin respaldo", 100, "PC.02", revision=True,
+                metodo="contextual_accounting_suggestion", confianza=0.99,
+                evidencia=" ", regla="", reason="", special_rule=None,
+            ),
+        ],
+        certificacion(),
+        {"certificada": False, "cuadra": True},
+        formato=formato_soportado(),
+    )
+
+    cuentas = resultado["aceptacion_comercial"]["cobertura"]["cuentas"]
+    assert cuentas["sugerencias_sin_evidencia_trazable"] == 1
+    assert cuentas["sugeridas_automatizadas"] == 0
+
+
+@pytest.mark.parametrize("confianza", [float("nan"), float("inf"), float("-inf")])
+def test_aceptacion_comercial_excluye_sugerencia_con_confianza_no_finita(confianza):
+    resultado = evaluar_entregabilidad(
+        [
+            fila(
+                "Propuesta con confianza inválida", 100, "PC.02", revision=True,
+                metodo="contextual_accounting_suggestion", confianza=confianza,
+                reason="Regla contextual compatible con pasivo.",
+            ),
+        ],
+        certificacion(),
+        {"certificada": False, "cuadra": True},
+        formato=formato_soportado(),
+    )
+
+    cuentas = resultado["aceptacion_comercial"]["cobertura"]["cuentas"]
+    assert cuentas["sugerencias_confianza_insuficiente"] == 1
+    assert cuentas["sugeridas_automatizadas"] == 0
+
+
+def test_aceptacion_comercial_no_infla_decisiones_humanas_lote_ni_propagacion():
+    resultado = evaluar_entregabilidad(
+        [
+            fila("Caja", 100, "AC.01"),
+            fila("Banco", 100, "AC.01"),
+            fila(
+                "Capital", 100, "PAT.01", metodo="validacion_humana",
+                confianza=1.0,
+            ),
+            fila(
+                "Proveedor", 100, "PC.01", metodo="validacion_humana_lote",
+                confianza=1.0,
+            ),
+            fila(
+                "Honorarios", 100, "PC.05",
+                metodo="validacion_humana_propagada", confianza=1.0,
+                propagacion_origen_archivo="origen-del-lote.pdf",
+            ),
+        ],
+        certificacion(),
+        {"certificada": True, "cuadra": True},
+        formato=formato_soportado(),
+    )
+
+    comercial = resultado["aceptacion_comercial"]
+    cuentas = comercial["cobertura"]["cuentas"]
+    assert resultado["estado"] == "LISTO_PARA_INTEGRAR"
+    assert comercial["estado"] == "NO_APTO_POR_COBERTURA_COMERCIAL"
+    assert cuentas["automaticas_estrictas"] == 2
+    assert cuentas["sugeridas_automatizadas"] == 0
+    assert cuentas["decisiones_humanas_individuales"] == 1
+    assert cuentas["decisiones_humanas_lote"] == 1
+    assert cuentas["asistencia_derivada_humano_lote"] == 1
+    assert cuentas["porcentaje"] == 0.4
+
+
+def test_aceptacion_comercial_expone_propagacion_historica_confirmada_aparte():
+    resultado = evaluar_entregabilidad(
+        [
+            fila(
+                "Gasto histórico", 100, "ER.04",
+                metodo="dictionary_exact", confianza=1.0,
+                propagacion_confirmada_historial=True,
+            ),
+        ],
+        certificacion(),
+        {"certificada": True, "cuadra": True},
+        formato=formato_soportado(),
+    )
+
+    cuentas = resultado["aceptacion_comercial"]["cobertura"]["cuentas"]
+    assert cuentas["asistencia_derivada_humano_historial_confirmado"] == 1
+    assert cuentas["automaticas_o_sugeridas"] == 0
+    assert resultado["aceptacion_comercial"]["cumple_umbral"] is False
+
+
+def test_aceptacion_comercial_mantiene_origin_fallback_fuera_del_numerador():
+    resultado = evaluar_entregabilidad(
+        [
+            fila("Caja", 100, "AC.01"),
+            fila(
+                "Cuenta sin homologar", 100, "AC.08", revision=True,
+                metodo="origin_fallback", confianza=0.99,
+            ),
+        ],
+        certificacion(),
+        {"certificada": False, "cuadra": True},
+        formato=formato_soportado(),
+    )
+
+    comercial = resultado["aceptacion_comercial"]
+    cuentas = comercial["cobertura"]["cuentas"]
+    assert cuentas["origin_fallback_en_revision"] == 1
+    assert cuentas["sugeridas_automatizadas"] == 0
+    assert cuentas["porcentaje"] == 0.5
+    assert comercial["estado"] == "NO_APTO_POR_COBERTURA_COMERCIAL"
+
+
+def test_aceptacion_comercial_no_sustituye_gate_de_cuadratura():
+    resultado = evaluar_entregabilidad(
+        [fila("Caja", 100, "AC.01"), fila("Banco", 100, "AC.01")],
+        certificacion(),
+        {"certificada": False, "cuadra": False},
+        formato=formato_soportado(),
+    )
+
+    comercial = resultado["aceptacion_comercial"]
+    assert comercial["cumple_umbral"] is True
+    assert comercial["estado"] == "NO_APTO_POR_GATES_TECNICOS"
+    assert comercial["gates_tecnicos"]["cuadratura_cuadra"] is False
+
+
+def test_aceptacion_comercial_permite_configurar_umbral_sin_contar_humanas():
+    resultado = evaluar_entregabilidad(
+        [
+            fila("Caja", 100, "AC.01"),
+            fila("Banco", 100, "AC.01"),
+            fila(
+                "Capital", 100, "PAT.01", metodo="validacion_humana",
+                confianza=1.0,
+            ),
+        ],
+        certificacion(),
+        {"certificada": True, "cuadra": True},
+        formato=formato_soportado(),
+        umbral_cobertura_comercial=0.70,
+    )
+
+    comercial = resultado["aceptacion_comercial"]
+    assert comercial["umbral_cobertura"] == 0.70
+    assert comercial["cobertura"]["cuentas"]["brecha_cuentas"] == 1
+    assert comercial["estado"] == "NO_APTO_POR_COBERTURA_COMERCIAL"
+
+
+@pytest.mark.parametrize("threshold", [0, -0.1, 1.1])
+def test_umbral_comercial_invalido_falla_explicito(threshold):
+    with pytest.raises(ValueError, match="umbral_cobertura"):
+        evaluar_entregabilidad(
+            [fila("Caja", 100, "AC.01")],
+            certificacion(),
+            {"certificada": True, "cuadra": True},
+            formato=formato_soportado(),
+            umbral_cobertura_comercial=threshold,
+        )

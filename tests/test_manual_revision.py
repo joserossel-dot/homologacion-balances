@@ -1,27 +1,148 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pandas as pd
 import pytest
 import streamlit as st
 
 from app_validacion import (
     MotorHibridoLocal,
+    _agregar_entrada_diccionario_sesion,
+    _archivo_activo_preferido,
     _alternativas_revision,
     _aplicar_correcciones_extraccion,
     _codigo_compatible_con_origen,
     _con_saldo_relevante,
     _diagnosticar_cuadratura,
+    _etiqueta_estado_archivo_cargado,
     _etiqueta_origen,
+    _lineas_revision_por_extraccion,
     _monto_presentacion,
     _origen_efectivo,
     _pendientes_revision,
     _resultado_periodo,
     _reabrir_incompatibles,
+    _requiere_revision_por_extraccion,
+    _resumen_estructura_extraida,
+    _resumen_revision_operativa,
+    _seleccion_activa_para_lote,
     _seleccion_lote_actualizada,
     propagar_clasificacion_resultados,
 )
 from parser_universal import CuentaRaw, OrigenColumna
 from reglas_especiales import ProcesadorReglasEspeciales, calcular_patrimonio_efectivo
+
+
+class TestSeleccionDeDocumento:
+    def test_prefiere_documento_con_cuentas_si_el_primero_esta_bloqueado(self):
+        resultados = {
+            "balance-2023.pdf": pd.DataFrame(),
+            "balance-2024.pdf": pd.DataFrame([{"cuenta": "Caja"}]),
+        }
+
+        assert _archivo_activo_preferido(
+            ["balance-2023.pdf", "balance-2024.pdf"], resultados,
+        ) == "balance-2024.pdf"
+
+    def test_conserva_primer_documento_si_ninguno_tiene_cuentas(self):
+        resultados = {
+            "balance-2023.pdf": pd.DataFrame(),
+            "balance-2024.pdf": pd.DataFrame(),
+        }
+
+        assert _archivo_activo_preferido(
+            ["balance-2023.pdf", "balance-2024.pdf"], resultados,
+        ) == "balance-2023.pdf"
+
+    def test_lote_nuevo_reemplaza_la_seleccion_heredada_bloqueada(self):
+        nombres = ["balance-2023.pdf", "balance-2024.pdf"]
+        resultados = {
+            "balance-2023.pdf": pd.DataFrame(),
+            "balance-2024.pdf": pd.DataFrame([{"cuenta": "Caja"}]),
+        }
+
+        assert _seleccion_activa_para_lote(
+            nombres, resultados, None, "balance-2023.pdf",
+        ) == "balance-2024.pdf"
+
+    def test_conserva_la_eleccion_manual_en_el_mismo_lote(self):
+        nombres = ["balance-2023.pdf", "balance-2024.pdf"]
+        resultados = {
+            "balance-2023.pdf": pd.DataFrame(),
+            "balance-2024.pdf": pd.DataFrame([{"cuenta": "Caja"}]),
+        }
+
+        assert _seleccion_activa_para_lote(
+            nombres, resultados, tuple(nombres), "balance-2023.pdf",
+        ) == "balance-2023.pdf"
+
+    def test_etiqueta_extraccion_fallida_sin_confundirla_con_procesando(self):
+        certificacion = SimpleNamespace(estado="fallida")
+
+        assert _etiqueta_estado_archivo_cargado(
+            pd.DataFrame(), certificacion,
+        ) == "bloqueado: extracción no validada"
+
+    def test_etiqueta_parcial_indica_revision_asistida(self):
+        certificacion = SimpleNamespace(estado="parcial")
+
+        assert _etiqueta_estado_archivo_cargado(
+            pd.DataFrame([{"cuenta": "Caja"}]), certificacion,
+        ) == "revisión asistida"
+
+
+class TestInformacionEstructura:
+    def test_distingue_estructura_ocr_reconocida_de_su_certificacion(self):
+        estructura, validacion, metodo = _resumen_estructura_extraida({
+            "estado": "RECONOCIDO_PENDIENTE_VALIDACION",
+            "familia": "Balance tributario de ocho columnas con OCR",
+            "metodo": "ocr_coordinates_8_amounts",
+        })
+
+        assert estructura == "Balance tributario de ocho columnas con OCR"
+        assert validacion == "Estructura reconocida, extracción no certificada"
+        assert metodo == "ocr_coordinates_8_amounts"
+
+    def test_no_presenta_un_formato_sin_perfil_como_reconocido(self):
+        estructura, validacion, metodo = _resumen_estructura_extraida({
+            "estado": "NO_RECONOCIDO",
+            "familia": "",
+            "metodo": "nuevo_extractor",
+        })
+
+        assert estructura == "Estructura no reconocida"
+        assert validacion == "No certificada"
+        assert metodo == "nuevo_extractor"
+
+
+class TestRevisionDeExtraccion:
+    def test_reconstruccion_movimiento_solo_revisa_su_fila(self):
+        certificacion = SimpleNamespace(
+            estado="parcial",
+            orientacion_certificada=True,
+            reconstruccion_movimientos_revisable=True,
+            reconstrucciones_movimientos=[{
+                "linea": 7,
+                "cuenta": "Caja",
+                "columnas": ["debitos"],
+                "importe": 100,
+            }],
+        )
+
+        assert _lineas_revision_por_extraccion(certificacion) == {7}
+        assert _requiere_revision_por_extraccion(certificacion, 7) is True
+        assert _requiere_revision_por_extraccion(certificacion, 8) is False
+
+    def test_orientacion_sin_respaldo_no_admite_acotacion(self):
+        certificacion = SimpleNamespace(
+            estado="parcial",
+            orientacion_certificada=False,
+            reconstruccion_movimientos_revisable=True,
+            reconstrucciones_movimientos=[{"linea": 7}],
+        )
+
+        assert _lineas_revision_por_extraccion(certificacion) is None
 
 
 class TestAlternativasRevision:
@@ -519,6 +640,45 @@ class TestCuentaCorrienteSocios:
 
 
 class TestPropagacionCompatible:
+    def test_reintento_no_duplica_entrada_local_del_diccionario(self):
+        entrada = {
+            'cuenta_original': 'ACTIVO FIJO',
+            'codigo_estandar': 'ANC.01',
+            'fuente': 'validacion_humana',
+        }
+        st.session_state['diccionario'] = []
+        st.session_state['correcciones'] = []
+
+        assert _agregar_entrada_diccionario_sesion(entrada)
+        assert not _agregar_entrada_diccionario_sesion(entrada)
+        assert st.session_state['diccionario'] == [entrada]
+        assert st.session_state['correcciones'] == [entrada]
+
+    def test_ignora_documento_sin_detalle_al_propagarse(self):
+        df = pd.DataFrame([
+            {
+                'nombre_original': 'BOLETAS DE GARANTIA',
+                'origen_columna': 'activo', 'monto': 160000000,
+                'codigo_clasificado': '', 'metodo': '',
+                'confianza': 0.0, 'requiere_revision': True,
+            },
+        ])
+        bloqueado = pd.DataFrame()
+        st.session_state['resultados'] = {
+            'balance-revisable.pdf': df,
+            'balance-bloqueado.pdf': bloqueado,
+        }
+
+        propagar_clasificacion_resultados(
+            'BOLETAS DE GARANTIA', 'AC.08',
+            'validacion_humana_propagada',
+        )
+
+        resultado = st.session_state['resultados']['balance-revisable.pdf']
+        assert resultado.at[0, 'codigo_clasificado'] == 'AC.08'
+        assert not resultado.at[0, 'requiere_revision']
+        assert st.session_state['resultados']['balance-bloqueado.pdf'].empty
+
     def test_no_propaga_activo_a_cuenta_homonima_del_pasivo(self):
         df = pd.DataFrame([
             {
@@ -710,6 +870,59 @@ class TestPendientesRevision:
 
         assert 0 not in relevantes.index
         assert 1 in relevantes.index
+
+
+class TestResumenRevisionOperativa:
+    def test_separa_revision_contable_de_cotejo_ocr(self):
+        df = pd.DataFrame([
+            {
+                'es_total': False, 'monto': 100,
+                'codigo_clasificado': 'AC.01', 'requiere_revision': False,
+                'revision_extraccion': False,
+            },
+            {
+                'es_total': False, 'monto': 100,
+                'codigo_clasificado': 'PC.01', 'requiere_revision': True,
+                'revision_extraccion': False,
+            },
+            {
+                'es_total': False, 'monto': 100,
+                'codigo_clasificado': 'ANC.01', 'requiere_revision': True,
+                'revision_extraccion': True,
+            },
+            {
+                'es_total': False, 'monto': 100,
+                'codigo_clasificado': '', 'requiere_revision': True,
+                'revision_extraccion': False,
+            },
+            {
+                'es_total': True, 'monto': 100,
+                'codigo_clasificado': '', 'requiere_revision': False,
+                'revision_extraccion': False,
+            },
+            {
+                'es_total': False, 'monto': 0,
+                'codigo_clasificado': 'AC.01', 'requiere_revision': False,
+                'revision_extraccion': False,
+            },
+        ])
+
+        assert _resumen_revision_operativa(df) == {
+            'operables': 4,
+            'automaticas': 1,
+            'revision_contable': 2,
+            'cotejo_ocr': 1,
+            'propuestas_bloqueadas_extraccion': 1,
+            'sin_clasificar': 1,
+            'cola_total': 3,
+        }
+
+    def test_tolera_dataframe_sin_monto(self):
+        df = pd.DataFrame([{
+            'codigo_clasificado': 'AC.01', 'requiere_revision': False,
+        }])
+
+        assert _resumen_revision_operativa(df)['automaticas'] == 1
 
 
 class TestVisualNameChange:

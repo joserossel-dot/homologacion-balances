@@ -872,6 +872,23 @@ def _etiqueta_alcance_diccionario() -> str:
     return "Agregar al diccionario"
 
 
+def _agregar_entrada_diccionario_sesion(entrada: dict) -> bool:
+    """Agrega una decisión local sólo si no está ya representada.
+
+    Una confirmación puede alcanzar a registrar la decisión antes de que un
+    rerun posterior falle. El reintento debe ser seguro: no corresponde dejar
+    dos entradas equivalentes sólo porque se repitió el botón.
+    """
+
+    diccionario = st.session_state.setdefault("diccionario", [])
+    correcciones = st.session_state.setdefault("correcciones", [])
+    if entrada in diccionario:
+        return False
+    diccionario.append(entrada)
+    correcciones.append(entrada)
+    return True
+
+
 def _proponer_para_diccionario_equipo(
     *, nombre: str, codigo: str, nota: str,
 ) -> bool:
@@ -1010,6 +1027,34 @@ def _nombres_afectados_por_autorizacion_piloto(
     }
 
 
+def _mensaje_error_autorizacion_piloto(match, archivos) -> str:
+    """Resume un rechazo del manifiesto sin filtrar datos del lote.
+
+    La interfaz puede informar cuántos documentos autorizó el manifiesto y
+    cuántos fueron cargados. No expone nombres, rutas, hashes ni ids opacos;
+    esa información no es necesaria para corregir una carga incompleta.
+    """
+    codigos = sorted({error.code for error in match.errors})
+    mensaje = "No se procesó el lote. Códigos: " + ", ".join(
+        codigos or ["invalid_pilot_manifest"],
+    )
+    if "missing_uploaded_document" not in codigos:
+        return mensaje
+
+    esperados = len(getattr(match, "documents", ()) or ())
+    cargados = len(archivos)
+    if esperados > cargados:
+        return (
+            f"{mensaje}. El manifiesto autoriza {esperados} documento(s) y "
+            f"se cargaron {cargados}. Cargue todos los documentos "
+            "autorizados juntos."
+        )
+    return (
+        f"{mensaje}. La cantidad cargada coincide con el manifiesto, pero "
+        "al menos un archivo no coincide con su contenido autorizado."
+    )
+
+
 def _autorizar_lote_piloto(archivos, manifiesto) -> bool:
     """Autoriza el lote del piloto antes de cualquier lectura o procesamiento.
 
@@ -1040,11 +1085,7 @@ def _autorizar_lote_piloto(archivos, manifiesto) -> bool:
 
     if not match.valid:
         _limpiar_autorizacion_piloto_actual(archivos)
-        codigos = sorted({error.code for error in match.errors})
-        st.error(
-            "No se procesó el lote. Códigos: "
-            + ", ".join(codigos or ["invalid_pilot_manifest"]),
-        )
+        st.error(_mensaje_error_autorizacion_piloto(match, archivos))
         return False
 
     contexto_actual = _contexto_autorizacion_piloto(
@@ -1350,7 +1391,21 @@ def propagar_clasificacion_resultados(
     if isinstance(resultados, dict):
         propagaciones = 0
         for fn in list(resultados.keys()):
-            df_res = resultados[fn].copy()
+            resultado = resultados[fn]
+            columnas_requeridas = {
+                'nombre_original', 'requiere_revision',
+                'codigo_clasificado', 'confianza',
+            }
+            # Un documento bloqueado puede conservar un DataFrame vacío sin
+            # columnas mientras otro documento del mismo lote se revisa. No
+            # hay evidencia suficiente para propagar hacia esa tabla y, sobre
+            # todo, no debe impedir confirmar la fila que el analista eligió.
+            if (
+                not isinstance(resultado, pd.DataFrame)
+                or not columnas_requeridas.issubset(resultado.columns)
+            ):
+                continue
+            df_res = resultado.copy()
             names = df_res['nombre_original'].fillna('').apply(normalizar_nombre)
             mask = names == nombre_norm
             mask_target = mask & (
@@ -1812,22 +1867,139 @@ def _pendientes_revision(df: pd.DataFrame) -> pd.DataFrame:
     return pendientes[montos.isna() | montos.ne(0)]
 
 
+def _resumen_revision_operativa(df: pd.DataFrame) -> dict[str, int]:
+    """Separa revisión contable de cotejo acotado de extracción.
+
+    Los controles de extracción y las filas de monto cero no son cuentas
+    operables. La separación evita que una excepción OCR delimitada parezca
+    una revisión masiva de clasificación.
+    """
+    vacio = {
+        'operables': 0,
+        'automaticas': 0,
+        'revision_contable': 0,
+        'cotejo_ocr': 0,
+        'propuestas_bloqueadas_extraccion': 0,
+        'sin_clasificar': 0,
+        'cola_total': 0,
+    }
+    if df.empty:
+        return vacio
+    es_total = (
+        df['es_total'].fillna(False).astype(bool)
+        if 'es_total' in df else pd.Series(False, index=df.index)
+    )
+    montos = (
+        pd.to_numeric(df['monto'], errors='coerce')
+        if 'monto' in df
+        else pd.Series(float('nan'), index=df.index)
+    )
+    operables = df.loc[~es_total & (montos.isna() | montos.ne(0))]
+    if operables.empty:
+        return vacio
+    requiere_revision = (
+        operables['requiere_revision'].fillna(False).astype(bool)
+        if 'requiere_revision' in operables
+        else pd.Series(False, index=operables.index)
+    )
+    codigo = (
+        operables['codigo_clasificado'].fillna('').astype(str).str.strip()
+        if 'codigo_clasificado' in operables
+        else pd.Series('', index=operables.index)
+    )
+    revision_extraccion = (
+        operables['revision_extraccion'].fillna(False).astype(bool)
+        if 'revision_extraccion' in operables
+        else pd.Series(False, index=operables.index)
+    )
+    en_revision = requiere_revision | codigo.eq('')
+    cotejo_ocr = en_revision & revision_extraccion
+    revision_contable = en_revision & ~cotejo_ocr
+    propuestas_bloqueadas_extraccion = cotejo_ocr & codigo.ne('')
+    return {
+        'operables': int(len(operables)),
+        'automaticas': int((~en_revision & codigo.ne('')).sum()),
+        'revision_contable': int(revision_contable.sum()),
+        'cotejo_ocr': int(cotejo_ocr.sum()),
+        'propuestas_bloqueadas_extraccion': int(
+            propuestas_bloqueadas_extraccion.sum(),
+        ),
+        'sin_clasificar': int(codigo.eq('').sum()),
+        'cola_total': int(en_revision.sum()),
+    }
+
+
+def _archivo_activo_preferido(
+        nombres_archivo: list[str], resultados: dict[str, pd.DataFrame],
+) -> str | None:
+    """Prioriza un documento con cuentas cuando otro quedó bloqueado.
+
+    La preferencia se usa sólo al iniciar o cuando la selección anterior ya no
+    pertenece al lote. Una selección explícita del analista siempre prevalece.
+    Así, en un lote mixto, una extracción fallida no oculta un documento que sí
+    puede continuar a revisión asistida.
+    """
+    for nombre in nombres_archivo:
+        resultado = resultados.get(nombre)
+        if resultado is not None and not resultado.empty:
+            return nombre
+    return nombres_archivo[0] if nombres_archivo else None
+
+
+def _seleccion_activa_para_lote(
+        nombres_archivo: list[str], resultados: dict[str, pd.DataFrame],
+        lote_anterior: tuple[str, ...] | None, seleccion_previa: str | None,
+) -> str | None:
+    """Devuelve la selección inicial segura sin pisar una elección vigente."""
+    lote_actual = tuple(nombres_archivo)
+    if lote_anterior == lote_actual and seleccion_previa in nombres_archivo:
+        return seleccion_previa
+    return _archivo_activo_preferido(nombres_archivo, resultados)
+
+
+def _etiqueta_estado_archivo_cargado(resultado, certificacion) -> str:
+    """Resume el estado individual de un documento en la barra lateral."""
+    estado = str(getattr(certificacion, "estado", "") or "")
+    if resultado is not None and not resultado.empty:
+        if estado == "parcial":
+            return "revisión asistida"
+        if estado == "certificada":
+            return "extracción certificada"
+        if estado == "no_evaluable":
+            return "revisión requerida"
+        return "procesado"
+    if estado == "fallida":
+        return "bloqueado: extracción no validada"
+    return "pendiente de procesamiento"
+
+
 def _lineas_revision_por_extraccion(certificacion) -> set[int] | None:
     """Delimita filas reconstruidas sólo cuando el parser las identificó.
 
     ``None`` mantiene la regla histórica segura: toda extracción no
     certificada requiere revisión. Un conjunto no vacío es la excepción
-    documentada de reconstrucciones finales acotadas con controles fuente
-    exactos; permite enfocar el cotejo sin presentar el documento como listo
-    para integrar.
+    documentada de reconstrucciones acotadas con controles fuente exactos;
+    permite enfocar el cotejo sin presentar el documento como listo para
+    integrar.
     """
     if getattr(certificacion, 'estado', '') == 'certificada':
         return set()
-    if not bool(getattr(certificacion, 'reconstruccion_final_revisable', False)):
+    if getattr(certificacion, 'orientacion_certificada', None) is False:
+        return None
+    if bool(getattr(certificacion, 'reconstruccion_final_revisable', False)):
+        reconstrucciones = getattr(
+            certificacion, 'reconstrucciones_finales', [],
+        ) or []
+    elif bool(getattr(
+            certificacion, 'reconstruccion_movimientos_revisable', False,
+    )):
+        reconstrucciones = getattr(
+            certificacion, 'reconstrucciones_movimientos', [],
+        ) or []
+    else:
         return None
     lineas: set[int] = set()
-    for reconstruccion in (
-            getattr(certificacion, 'reconstrucciones_finales', []) or []):
+    for reconstruccion in reconstrucciones:
         try:
             lineas.add(int(reconstruccion['linea']))
         except (KeyError, TypeError, ValueError):
@@ -1850,6 +2022,14 @@ def _nota_revision_por_extraccion(certificacion) -> str:
         return (
             'Cifra final reconstruida con controles fuente concordantes: '
             'coteje esta fila contra el original antes de confirmar.'
+        )
+    if bool(getattr(
+            certificacion, 'reconstruccion_movimientos_revisable', False,
+    )):
+        return (
+            'Movimiento auxiliar reconstruido con controles fuente '
+            'concordantes: coteje esta fila contra el original antes de '
+            'confirmar.'
         )
     estado = getattr(certificacion, 'estado', '') or 'sin certificación'
     return (
@@ -1884,6 +2064,7 @@ def _fila_control_extraccion(cuenta) -> dict:
         'metodo': 'extraction_control',
         'confianza': 1.0,
         'requiere_revision': False,
+        'revision_extraccion': False,
         'nota': 'Control de cuadratura: no se clasifica como cuenta.',
         'confianza_extraccion': cuenta.confianza_extraccion,
         'origen_columna_display': _etiqueta_origen(
@@ -2779,6 +2960,7 @@ def main():
                                 or bool(c.columnas_derivadas)
                                 or revision_extraccion_cuenta
                             ),
+                            'revision_extraccion': revision_extraccion_cuenta,
                             'nota': ' '.join(filter(None, [
                                 r.get('nota_regla_especial', ''),
                                 (
@@ -3065,6 +3247,7 @@ def main():
                             'metodo': metodo,
                             'confianza': confianza,
                             'requiere_revision': requiere_revision,
+                            'revision_extraccion': revision_extraccion_cuenta,
                             'nota': nota,
                             'confianza_extraccion': c.confianza_extraccion,
                             'origen_columna_display': _etiqueta_origen(
@@ -3155,20 +3338,42 @@ def main():
         st.subheader("📁 Balances Cargados")
         for name in nombres_subidos:
             df_f = st.session_state.resultados.get(name)
+            certificacion_f = st.session_state.get(
+                "extraction_certifications", {},
+            ).get(name)
             if df_f is not None and not df_f.empty:
                 pendientes_f = _pendientes_revision(df_f)
                 n_pendientes = len(pendientes_f)
+                etiqueta = _etiqueta_estado_archivo_cargado(
+                    df_f, certificacion_f,
+                )
                 if n_pendientes > 0:
-                    st.caption(f"🔸 `{name}` ({n_pendientes} pendientes)")
+                    st.caption(
+                        f"`{name}` ({etiqueta}; {n_pendientes} pendientes)",
+                    )
                 else:
-                    st.caption(f"✅ `{name}` (completo)")
+                    st.caption(f"`{name}` ({etiqueta})")
             else:
-                st.caption(f"⏳ `{name}` (procesando)")
+                etiqueta = _etiqueta_estado_archivo_cargado(
+                    df_f, certificacion_f,
+                )
+                st.caption(f"`{name}` ({etiqueta})")
 
         st.write("")
+        seleccion_previa = st.session_state.get("archivo_activo_select")
+        lote_actual = tuple(nombres_subidos)
+        archivo_preferido = _seleccion_activa_para_lote(
+            nombres_subidos,
+            st.session_state.resultados,
+            st.session_state.get("archivo_activo_lote"),
+            seleccion_previa,
+        )
+        if archivo_preferido is not None:
+            st.session_state["archivo_activo_select"] = archivo_preferido
+        st.session_state["archivo_activo_lote"] = lote_actual
         archivo_activo_name = st.selectbox(
             "Ver y validar balance:", options=nombres_subidos,
-            index=0 if nombres_subidos else None, key="archivo_activo_select"
+            key="archivo_activo_select",
         )
 
     try:
@@ -3209,6 +3414,9 @@ def main():
             emision=emision_diagnostico,
             presentacion=pd.DataFrame(),
             detalle=pd.DataFrame(),
+            identificacion_caso=_identificacion_caso_exportacion(
+                archivo_activo_name, meta_activo,
+            ),
         )
         st.download_button(
             ("Descargar diagnóstico piloto provisional (JSON)"
@@ -3260,9 +3468,10 @@ def main():
     st.session_state.setdefault("delivery_readiness", {})[archivo_activo_name] = estado_entrega
     _mostrar_estado_entrega(estado_entrega)
 
-    # Sprint 31 — Información del documento (análisis documental, solo lectura)
-    if _doc_ctx is not None:
-        _mostrar_informacion_documento(_doc_ctx)
+    # El contexto previo y la estructura observada son evidencias distintas.
+    _mostrar_informacion_documento(
+        _doc_ctx, estado_entrega.get("formato"),
+    )
 
     col_visor, col_trabajo = st.columns([1, 1], gap="medium")
 
@@ -4223,35 +4432,96 @@ def _extraer_cuentas(archivo) -> tuple[list[CuentaRaw], object]:
         return cuentas, None
 
 
-def _mostrar_informacion_documento(ctx) -> None:
-    """Sección solo-lectura INFORMACIÓN DEL DOCUMENTO (Sprint 31, FASE 5).
+def _resumen_estructura_extraida(
+        formato: dict | None,
+) -> tuple[str, str, str]:
+    """Etiqueta la evidencia posterior a la extracción sin sobreprometerla.
 
-    Muestra la metadata del análisis documental ANTES de los resultados.
-    No modifica ningún resultado: si `ctx` no está disponible, no dibuja nada.
+    El análisis documental previo puede no reconocer un PDF escaneado porque
+    sólo dispone de texto nativo. Esta vista usa el resultado del extractor
+    que sí leyó las filas, pero mantiene explícito si sus controles quedaron
+    pendientes o fallidos.
     """
-    if ctx is None:
-        return
-    try:
-        info = ctx.ui_summary()
-    except Exception:
+    formato = formato or {}
+    estado = str(formato.get("estado") or "")
+    familia = str(formato.get("familia") or "").strip()
+    metodo = str(formato.get("metodo") or "").strip()
+
+    if estado == "SOPORTADO":
+        return (
+            familia or "Estructura registrada",
+            "Extracción certificada",
+            metodo or "No informado",
+        )
+    if estado == "RECONOCIDO_PENDIENTE_VALIDACION":
+        return (
+            familia or "Estructura registrada",
+            "Estructura reconocida, extracción no certificada",
+            metodo or "No informado",
+        )
+    if estado == "NO_ES_BALANCE":
+        return (
+            "No corresponde a un balance completo",
+            "No aplicable",
+            metodo or "No informado",
+        )
+    if estado == "NO_RECONOCIDO":
+        return (
+            "Estructura no reconocida",
+            "No certificada",
+            metodo or "No informado",
+        )
+    return (
+        "Sin evidencia de estructura",
+        "Sin validar",
+        metodo or "No informado",
+    )
+
+
+def _mostrar_informacion_documento(ctx, formato: dict | None = None) -> None:
+    """Muestra evidencia previa y evidencia observada durante extracción.
+
+    No modifica ningún resultado. La estructura posterior a OCR se presenta
+    antes que el análisis previo para no confundir un PDF escaneado sin texto
+    nativo con un formato que el extractor efectivamente reconoció.
+    """
+    info = {}
+    if ctx is not None:
+        try:
+            info = ctx.ui_summary()
+        except Exception:
+            info = {}
+
+    estructura, validacion, metodo = _resumen_estructura_extraida(formato)
+    if not info and not formato:
         return
 
     with st.container(border=True):
-        st.markdown("#### 🧾 INFORMACIÓN DEL DOCUMENTO")
+        st.markdown("#### INFORMACIÓN DEL DOCUMENTO")
         cols = st.columns(4)
         items = [
+            ("Estructura extraída", estructura),
+            ("Validación de extracción", validacion),
+            ("Método de extracción", metodo),
             ("Documento", info.get("Documento", "—")),
-            ("Formato", info.get("Formato", "—")),
-            ("Columnas", info.get("Columnas", "—")),
-            ("Layout", info.get("Layout", "—")),
-            ("OCR", info.get("OCR", "—")),
-            ("Extractor", info.get("Extractor", "—")),
-            ("Confianza", info.get("Confianza", "—")),
-            ("Familia", info.get("Familia", "—")),
         ]
         for i, (label, value) in enumerate(items):
             with cols[i % 4]:
                 st.markdown(f"**{label}**  \n`{value}`")
+
+        if info:
+            with st.expander("Detalle del análisis previo del PDF"):
+                previos = [
+                    ("Formato previo", info.get("Formato", "—")),
+                    ("Columnas previas", info.get("Columnas", "—")),
+                    ("Layout previo", info.get("Layout", "—")),
+                    ("OCR requerido", info.get("OCR", "—")),
+                    ("Extractor previo", info.get("Extractor", "—")),
+                    ("Confianza previa", info.get("Confianza", "—")),
+                    ("Familia previa", info.get("Familia", "—")),
+                ]
+                for label, value in previos:
+                    st.caption(f"{label}: {value}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -4472,17 +4742,28 @@ def _tab_inteligencia() -> None:
 
 
 def _tab_resumen(df: pd.DataFrame):
-    col1, col2, col3, col4 = st.columns(4)
-    total = len(df)
-    pendientes = _pendientes_revision(df)
-    sin_clasificar = (pendientes['codigo_clasificado'] == '').sum()
-    requiere_rev = len(pendientes)
+    col1, col2, col3, col4, col5 = st.columns(5)
+    resumen = _resumen_revision_operativa(df)
     confianza_prom = df.loc[df['confianza'] > 0, 'confianza'].mean()
 
-    col1.metric("Cuentas extraídas", total)
-    col2.metric("Sin clasificar", sin_clasificar)
-    col3.metric("En cola de revisión", int(requiere_rev), delta=f"{100*requiere_rev/total:.0f}%" if total else None, delta_color="inverse")
-    col4.metric("Confianza promedio", f"{confianza_prom:.0%}" if pd.notna(confianza_prom) else "—")
+    col1.metric("Cuentas operables", resumen['operables'])
+    col2.metric("Automáticas", resumen['automaticas'])
+    col3.metric("Revisión contable", resumen['revision_contable'])
+    col4.metric("Cotejo OCR", resumen['cotejo_ocr'])
+    col5.metric("Sin clasificar", resumen['sin_clasificar'])
+    texto_resumen = (
+        f"Cola total: {resumen['cola_total']} cuenta(s). "
+        "La revisión contable y el cotejo OCR se informan por separado."
+    )
+    bloqueadas = resumen['propuestas_bloqueadas_extraccion']
+    if bloqueadas:
+        texto_resumen += (
+            f" {bloqueadas} propuesta(s) de clasificación tienen código, "
+            "pero siguen bloqueadas hasta validar la extracción."
+        )
+    if pd.notna(confianza_prom):
+        texto_resumen += f" Confianza promedio: {confianza_prom:.0%}."
+    st.caption(texto_resumen)
 
     st.subheader("Cobertura por método de clasificación")
     dist = df['metodo'].apply(lambda m: m.split('+')[0]).value_counts()
@@ -4490,12 +4771,81 @@ def _tab_resumen(df: pd.DataFrame):
     dist_df.columns = ['Método', 'Cuentas']
     
     METODO_LABELS = {
-        'codigo': '0 · Código de cuenta', 'diccionario_exacto': '1 · Diccionario (exacto)',
-        'diccionario_fuzzy': '1b · Diccionario (fuzzy)', 'regla_regex': '2 · Reglas regex',
-        'sin_clasificar': '3-4 · Pendiente (embeddings/LLM)',
+        'code': '0 · Código de cuenta',
+        'codigo': '0 · Código de cuenta',
+        'dictionary_exact': '1 · Diccionario exacto',
+        'diccionario_exacto': '1 · Diccionario exacto',
+        'dictionary_fuzzy': '1b · Diccionario aproximado',
+        'diccionario_fuzzy': '1b · Diccionario aproximado',
+        'regex_fallback': '2 · Regla auditada',
+        'regla_regex': '2 · Regla auditada',
+        'accounting_exact_rule': '2a · Regla contable exacta',
+        'regex_contextual': '2b · Regla contextual, revisión',
+        'contextual_accounting_suggestion': '2b · Regla contextual, revisión',
+        'contextual_credit_balance_depreciation': (
+            '2b · Contra-activo, revisión'
+        ),
+        'origin_fallback': '3 · Categoría residual, revisión',
+        'unclassified': '4 · Sin clasificar',
+        'sin_clasificar': '4 · Sin clasificar',
     }
     dist_df['Método'] = dist_df['Método'].map(lambda m: METODO_LABELS.get(m, m))
     st.dataframe(dist_df, use_container_width=True, hide_index=True)
+
+
+_TOLERANCIA_CUADRATURA_CANONICA = 1.0
+_CATEGORIAS_PENDIENTES_COMERCIALES = (
+    "sugeridas_automatizadas",
+    "origin_fallback_en_revision",
+    "sugerencias_metodo_no_admitido",
+    "sugerencias_sin_evidencia_trazable",
+    "sugerencias_confianza_insuficiente",
+    "sin_clasificar",
+    "incompatibles",
+    "excluidas",
+    "otras_en_revision",
+    "propagacion_sin_traza_confirmada",
+)
+
+
+def _incorporar_componentes_cuadratura_canonica(
+        estado: dict, cuadratura: dict, *, tolerancia: float,
+) -> dict:
+    """Expone la misma cuadratura canónica usada para decidir la entrega.
+
+    ``evaluar_entregabilidad`` conserva una vista breve de la cuadratura para
+    decidir sus gates. El contrato de salida necesita, además, los componentes
+    estáticos de esa misma certificación. No usa el diagnóstico visual, que
+    tiene una tolerancia deliberadamente distinta para orientar al analista.
+    """
+    enriquecido = dict(estado)
+    bloque = dict(enriquecido.get("cuadratura_homologada") or {})
+    for campo in (
+        "certificada",
+        "cuadra",
+        "activo",
+        "pasivo",
+        "patrimonio_sin_resultado",
+        "resultado_periodo",
+        "resultado_derivado_incorporado",
+        "resultado_final_fuente_incorporado",
+        "resultado_final_fuente",
+        "pasivo_mas_patrimonio",
+        "diferencia",
+        "filas_relevantes",
+        "filas_clasificadas",
+        "sin_clasificar",
+        "codigos_invalidos",
+        "incompatibles",
+        "pendientes",
+        "motivos",
+    ):
+        if campo in cuadratura:
+            bloque[campo] = cuadratura[campo]
+    bloque["resultado"] = dict(cuadratura.get("resultado") or {})
+    bloque["tolerancia"] = float(tolerancia)
+    enriquecido["cuadratura_homologada"] = bloque
+    return enriquecido
 
 
 def _evaluar_estado_entrega_documento(
@@ -4509,6 +4859,7 @@ def _evaluar_estado_entrega_documento(
     cuadratura = certificar_cuadratura_homologada(
         filas,
         catalogo,
+        tolerancia=_TOLERANCIA_CUADRATURA_CANONICA,
         incluir_resultado_derivado=incluir_resultado_derivado,
         resultado_final_fuente=resultado_final_fuente_certificado(
             certificacion,
@@ -4541,7 +4892,52 @@ def _evaluar_estado_entrega_documento(
         bloqueos_finales=bloqueos_finales,
         formato=evaluar_formato(certificacion, contexto_documental),
     )
+    estado = _incorporar_componentes_cuadratura_canonica(
+        estado,
+        cuadratura,
+        tolerancia=_TOLERANCIA_CUADRATURA_CANONICA,
+    )
     return _aplicar_guardia_piloto_entrega(estado)
+
+
+def _proteger_aceptacion_comercial_piloto(aceptacion: dict) -> dict:
+    """Evita que un piloto presente una aceptación comercial como final.
+
+    La cobertura calculada sigue siendo evidencia útil para el analista. La
+    autorización de entrega revisada, en cambio, queda explícitamente falsa
+    mientras el modo piloto esté activo. La copia conserva el diagnóstico
+    técnico para auditoría y hace la transformación idempotente, ya que el
+    payload puede aplicar la guardia una segunda vez.
+    """
+    protegido = dict(aceptacion)
+    estado_tecnico = protegido.get(
+        "estado_tecnico_comercial", protegido.get("estado"),
+    )
+    apto_tecnico = protegido.get(
+        "apto_para_entrega_revisada_tecnica",
+        protegido.get("apto_para_entrega_revisada", False),
+    )
+    mensaje = (
+        "Piloto interno: la aceptación comercial es informativa y no "
+        "autoriza una entrega revisada ni integración."
+    )
+    protegido["piloto"] = True
+    protegido["estado_tecnico_comercial"] = estado_tecnico
+    protegido["apto_para_entrega_revisada_tecnica"] = bool(apto_tecnico)
+    protegido["estado"] = "PILOTO_PROVISIONAL_NO_INTEGRAR"
+    protegido["apto_para_entrega_revisada"] = False
+    protegido["integracion_autorizada"] = False
+    protegido["mensaje_piloto"] = mensaje
+    motivos = list(protegido.get("motivos") or [])
+    if mensaje not in motivos:
+        motivos.insert(0, mensaje)
+    protegido["motivos"] = motivos
+    siguiente_accion = list(protegido.get("siguiente_accion") or [])
+    accion = "Completar la revisión humana antes de cualquier integración."
+    if accion not in siguiente_accion:
+        siguiente_accion.insert(0, accion)
+    protegido["siguiente_accion"] = siguiente_accion
+    return protegido
 
 
 def _aplicar_guardia_piloto_entrega(estado: dict) -> dict:
@@ -4583,6 +4979,11 @@ def _aplicar_guardia_piloto_entrega(estado: dict) -> dict:
             "para revisión operativa ni integración."
         )
     protegido["mensaje_piloto"] = mensaje
+    aceptacion_comercial = protegido.get("aceptacion_comercial")
+    if isinstance(aceptacion_comercial, dict):
+        protegido["aceptacion_comercial"] = (
+            _proteger_aceptacion_comercial_piloto(aceptacion_comercial)
+        )
     # La etiqueta visible debe ser segura para el cliente. La etiqueta técnica
     # queda explícita en ``etiqueta_tecnica`` para auditoría y diagnóstico.
     protegido["etiqueta"] = protegido["etiqueta_piloto"]
@@ -4622,6 +5023,57 @@ def _mostrar_estado_entrega(estado: dict) -> None:
             f"Formato: {formato['estado'].replace('_', ' ').lower()}. "
             + formato["mensaje"]
         )
+
+        aceptacion_comercial = estado.get("aceptacion_comercial")
+        if isinstance(aceptacion_comercial, dict):
+            cobertura_comercial = dict(
+                aceptacion_comercial.get("cobertura", {}).get("cuentas", {})
+            )
+            automaticas_sugeridas = int(
+                cobertura_comercial.get("automaticas_o_sugeridas", 0) or 0
+            )
+            elegibles_comerciales = int(
+                cobertura_comercial.get("elegibles", 0) or 0
+            )
+            decisiones_humanas = sum(
+                int(cobertura_comercial.get(categoria, 0) or 0)
+                for categoria in (
+                    "decisiones_humanas_individuales",
+                    "decisiones_humanas_lote",
+                    "asistencia_derivada_humano_lote",
+                    "asistencia_derivada_humano_historial_confirmado",
+                )
+            )
+            pendientes_comerciales = sum(
+                int(cobertura_comercial.get(categoria, 0) or 0)
+                for categoria in _CATEGORIAS_PENDIENTES_COMERCIALES
+            )
+            estado_comercial = str(
+                aceptacion_comercial.get("estado", "NO_EVALUADO"),
+            ).replace("_", " ").lower()
+            st.markdown("#### Cobertura comercial de asistencia")
+            comercial_1, comercial_2, comercial_3, comercial_4 = st.columns(4)
+            comercial_1.metric("Estado comercial", estado_comercial)
+            comercial_2.metric(
+                "Automáticas o sugeridas",
+                f"{automaticas_sugeridas}/{elegibles_comerciales}",
+                help=(
+                    "Sólo las automáticas estrictas y sugerencias con "
+                    "evidencia forman el numerador comercial."
+                ),
+            )
+            comercial_3.metric(
+                "Umbral comercial",
+                f"{float(aceptacion_comercial.get('umbral_cobertura', 0)):.0%}",
+            )
+            comercial_4.metric(
+                "Pendientes comerciales", pendientes_comerciales,
+            )
+            st.caption(
+                "Decisiones humanas fuera del indicador comercial: "
+                f"{decisiones_humanas}. Cobertura automática o sugerida: "
+                f"{float(cobertura_comercial.get('porcentaje', 0)):.0%}."
+            )
 
         if estado.get("piloto"):
             st.warning(estado.get(
@@ -4676,10 +5128,199 @@ def _tabla_para_json(df: pd.DataFrame) -> list[dict]:
     return json.loads(df.to_json(orient="records", force_ascii=False))
 
 
+_METADATA_NO_INFORMADA = "No informado"
+
+
+def _valor_documental_exportable(valor):
+    """Normaliza ausencia documental sin sustituirla por un dato supuesto."""
+    if valor is None:
+        return None
+    if isinstance(valor, str):
+        valor = valor.strip()
+        return valor or None
+    return valor
+
+
+def _campo_identificacion_exportacion(valor) -> dict:
+    """Expresa tanto el valor documental como su disponibilidad."""
+    valor_normalizado = _valor_documental_exportable(valor)
+    return {
+        "valor": valor_normalizado,
+        "estado": "informado" if valor_normalizado is not None else "no_informado",
+    }
+
+
+def _analista_exportacion():
+    """Identidad autenticada, si existe; nunca inventa un responsable."""
+    actor = st.session_state.get("local_access_actor")
+    return _valor_documental_exportable(getattr(actor, "actor_id", None))
+
+
+def _identificacion_caso_exportacion(
+        archivo_nombre: str, meta, *, processed_at: str | None = None,
+) -> dict:
+    """Entrega metadatos inequívocos y seguros para Excel y JSON.
+
+    ``metadata`` se conserva como contrato histórico del JSON. Esta estructura
+    añade el estado de cada campo para distinguir un valor ausente de un valor
+    vacío y para no presentar una inferencia como dato documental.
+    """
+    referencia_piloto = (
+        _referencia_exportacion_piloto(archivo_nombre)
+        if _modo_piloto_activo() else None
+    )
+    documento = (
+        referencia_piloto["document_id"]
+        if referencia_piloto is not None else archivo_nombre
+    )
+    return {
+        "documento": _campo_identificacion_exportacion(documento),
+        "empresa": _campo_identificacion_exportacion(
+            getattr(meta, "razon_social", None) if meta else None,
+        ),
+        "rut": _campo_identificacion_exportacion(
+            getattr(meta, "rut", None) if meta else None,
+        ),
+        "periodo_desde": _campo_identificacion_exportacion(
+            getattr(meta, "periodo_desde", None) if meta else None,
+        ),
+        "periodo_hasta": _campo_identificacion_exportacion(
+            getattr(meta, "periodo_hasta", None) if meta else None,
+        ),
+        "moneda_declarada": _campo_identificacion_exportacion(
+            getattr(meta, "moneda", None) if meta else None,
+        ),
+        "giro": _campo_identificacion_exportacion(
+            getattr(meta, "giro", None) if meta else None,
+        ),
+        "analista_id": _campo_identificacion_exportacion(
+            _analista_exportacion(),
+        ),
+        "fecha_proceso": _campo_identificacion_exportacion(processed_at),
+    }
+
+
+def _texto_identificacion_exportacion(campo: dict) -> str:
+    """Representación visible de un campo documental sin semántica ambigua."""
+    valor = campo.get("valor")
+    return str(valor) if valor is not None else _METADATA_NO_INFORMADA
+
+
+def _controles_materializados_exportacion(
+        estado_entrega: dict,
+) -> dict:
+    """Construye controles estáticos, independientes del recálculo del libro.
+
+    Las fórmulas de ``Resumen`` se conservan como una vista auditable. Este
+    bloque es la fuente de entrega para un lector que no ejecuta Excel ni
+    LibreOffice. Procede exclusivamente de la cuadratura homologada canónica
+    que ya decide la entregabilidad, no del diagnóstico visual de cuadratura.
+    """
+    cuadratura = dict(estado_entrega.get("cuadratura_homologada") or {})
+    resultado = dict(cuadratura.get("resultado") or {})
+
+    def importe(campo: str):
+        valor = cuadratura.get(campo)
+        try:
+            return float(valor) if valor is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    activo = importe("activo")
+    pasivo = importe("pasivo")
+    patrimonio_sin_resultado = importe("patrimonio_sin_resultado")
+    resultado_periodo = importe("resultado_periodo")
+    patrimonio = (
+        patrimonio_sin_resultado + resultado_periodo
+        if patrimonio_sin_resultado is not None and resultado_periodo is not None
+        else None
+    )
+    pasivo_patrimonio = importe("pasivo_mas_patrimonio")
+    diferencia = importe("diferencia")
+    tolerancia = importe("tolerancia")
+    cuadra = bool(cuadratura.get("cuadra", False))
+    return {
+        "materializados": True,
+        "requiere_recalculo_del_libro": False,
+        "fuente_cuadratura": "certificacion_homologada_canonica",
+        "total_activos": activo,
+        "total_pasivos": pasivo,
+        "total_patrimonio": patrimonio,
+        "patrimonio_sin_resultado": patrimonio_sin_resultado,
+        "resultado_periodo_incorporado": resultado_periodo,
+        "pasivo_mas_patrimonio": pasivo_patrimonio,
+        "diferencia_activo_menos_pasivo_patrimonio": diferencia,
+        "tolerancia_cuadratura": tolerancia,
+        "estado_cuadratura": (
+            "CUADRA_DENTRO_DE_TOLERANCIA" if cuadra else "NO_CUADRA"
+        ),
+        "resultado_derivado_incorporado": bool(
+            cuadratura.get("resultado_derivado_incorporado", False),
+        ),
+        "resultado_final_fuente_incorporado": bool(
+            cuadratura.get("resultado_final_fuente_incorporado", False),
+        ),
+        "resultado_final_fuente": importe("resultado_final_fuente"),
+        "resultado_segun_columnas_originales": resultado.get(
+            "resultado_origen",
+        ),
+        "resultado_segun_categorias_homologadas": resultado.get(
+            "resultado_homologado",
+        ),
+        "diferencia_resultado": resultado.get("diferencia"),
+    }
+
+
+def _resumen_comercial_para_control(estado_entrega: dict) -> dict:
+    """Resume la métrica comercial sin convertirla en una autorización."""
+    aceptacion = dict(estado_entrega.get("aceptacion_comercial") or {})
+    cobertura = dict(aceptacion.get("cobertura", {}).get("cuentas", {}))
+    pendientes = sum(
+        int(cobertura.get(categoria, 0) or 0)
+        for categoria in _CATEGORIAS_PENDIENTES_COMERCIALES
+    )
+    decisiones_humanas = sum(
+        int(cobertura.get(categoria, 0) or 0)
+        for categoria in (
+            "decisiones_humanas_individuales",
+            "decisiones_humanas_lote",
+            "asistencia_derivada_humano_lote",
+            "asistencia_derivada_humano_historial_confirmado",
+        )
+    )
+    return {
+        "estado": aceptacion.get("estado", "NO_EVALUADO"),
+        "estado_tecnico": aceptacion.get(
+            "estado_tecnico_comercial", aceptacion.get("estado"),
+        ),
+        "umbral": aceptacion.get("umbral_cobertura"),
+        "automaticas_o_sugeridas": cobertura.get(
+            "automaticas_o_sugeridas", 0,
+        ),
+        "elegibles": cobertura.get("elegibles", 0),
+        "porcentaje": cobertura.get("porcentaje", 0.0),
+        "decisiones_humanas": decisiones_humanas,
+        "pendientes": pendientes,
+        "apto_para_revision_comercial": bool(
+            aceptacion.get("apto_para_revision_comercial", False),
+        ),
+        "apto_para_entrega_revisada": bool(
+            aceptacion.get("apto_para_entrega_revisada", False),
+        ),
+        "integracion_autorizada": bool(
+            aceptacion.get(
+                "integracion_autorizada",
+                aceptacion.get("apto_para_entrega_revisada", False),
+            ),
+        ),
+    }
+
+
 def _payload_entrega_json(
         *, archivo_nombre: str, meta, estado_entrega: dict,
         emision: dict, presentacion: pd.DataFrame,
-        detalle: pd.DataFrame) -> dict:
+        detalle: pd.DataFrame, controles_materializados: dict | None = None,
+        identificacion_caso: dict | None = None) -> dict:
     """Contrato compartido por el archivo Excel y el JSON descargable."""
     estado_exportacion = _aplicar_guardia_piloto_entrega(estado_entrega)
     permite_paquete_revision = bool(
@@ -4734,6 +5375,10 @@ def _payload_entrega_json(
             _tabla_para_json(detalle) if permite_paquete_revision else []
         ),
     }
+    if identificacion_caso is not None:
+        payload["identificacion_caso"] = identificacion_caso
+    if controles_materializados is not None:
+        payload["controles_materializados"] = controles_materializados
     if referencia_piloto is not None:
         payload["documento_piloto"] = referencia_piloto
     return payload
@@ -4890,8 +5535,7 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                                 'codigo_estandar': codigo_lote,
                                 'fuente': 'validacion_humana_lote',
                             }
-                            st.session_state.diccionario.append(entrada)
-                            st.session_state.correcciones.append(entrada)
+                            _agregar_entrada_diccionario_sesion(entrada)
                     if agregar_diccionario_lote:
                         propagar_clasificacion_resultados(
                             nombre_orig, codigo_lote,
@@ -5274,7 +5918,7 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                                 'codigo_estandar': '__EXCLUIR__',
                                 'fuente': 'excluido_analista'
                             }
-                            st.session_state.diccionario.append(entrada_exclusion)
+                            _agregar_entrada_diccionario_sesion(entrada_exclusion)
                         persistido = _persistir_validacion(
                             nombre=_nombre_mostrar(row), codigo='__EXCLUIR__',
                             fuente='excluido_analista',
@@ -5352,8 +5996,7 @@ def _tab_revision(df: pd.DataFrame, catalogo: dict, motor: MotorHibridoLocal, ar
                                     'codigo_estandar': codigo_final,
                                     'fuente': 'validacion_humana'
                                 }
-                                st.session_state.diccionario.append(nuevo_dic)
-                                st.session_state.correcciones.append(nuevo_dic)
+                                _agregar_entrada_diccionario_sesion(nuevo_dic)
                                 if not persistido:
                                     with open(BASE_DIR / 'diccionario.json', 'w', encoding='utf-8') as f:
                                         json.dump(st.session_state.diccionario, f, ensure_ascii=False, indent=2)
@@ -5844,6 +6487,9 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
             emision=emision,
             presentacion=pd.DataFrame(),
             detalle=pd.DataFrame(),
+            identificacion_caso=_identificacion_caso_exportacion(
+                archivo_nombre, meta,
+            ),
         )
         st.download_button(
             "Descargar diagnóstico (JSON)",
@@ -5883,6 +6529,16 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
     export_df['Tipo de fila'] = presentacion['codigo_clasificado'].map(
         lambda c: 'Calculado, no sumar al detalle' if catalogo.get(c, {}).get('clasificable') is False else 'Cuenta'
     )
+    processed_at = st.session_state.setdefault("processed_at", {}).setdefault(
+        archivo_nombre, datetime.now().astimezone().isoformat(),
+    )
+    identificacion_caso = _identificacion_caso_exportacion(
+        archivo_nombre, meta, processed_at=processed_at,
+    )
+    controles_materializados = _controles_materializados_exportacion(
+        estado_entrega,
+    )
+    resumen_comercial = _resumen_comercial_para_control(estado_entrega)
     
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
@@ -5908,6 +6564,68 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
         )
         rama_exportacion, commit_exportacion = _trazabilidad_release_local()
         control_filas = [
+            {
+                'Control': 'Contrato de controles',
+                'Valor': (
+                    'Valores materializados por el proceso; no requieren '
+                    'recálculo del libro.'
+                ),
+            },
+            {
+                'Control': 'Requiere recálculo del libro para estos controles',
+                'Valor': controles_materializados[
+                    'requiere_recalculo_del_libro'
+                ],
+            },
+            {
+                'Control': 'Documento de origen',
+                'Valor': _texto_identificacion_exportacion(
+                    identificacion_caso['documento'],
+                ),
+            },
+            {
+                'Control': 'Empresa (metadata documental)',
+                'Valor': _texto_identificacion_exportacion(
+                    identificacion_caso['empresa'],
+                ),
+            },
+            {
+                'Control': 'RUT (metadata documental)',
+                'Valor': _texto_identificacion_exportacion(
+                    identificacion_caso['rut'],
+                ),
+            },
+            {
+                'Control': 'Período desde (metadata documental)',
+                'Valor': _texto_identificacion_exportacion(
+                    identificacion_caso['periodo_desde'],
+                ),
+            },
+            {
+                'Control': 'Período hasta (metadata documental)',
+                'Valor': _texto_identificacion_exportacion(
+                    identificacion_caso['periodo_hasta'],
+                ),
+            },
+            {
+                'Control': 'Moneda declarada (metadata documental)',
+                'Valor': _texto_identificacion_exportacion(
+                    identificacion_caso['moneda_declarada'],
+                ),
+            },
+            {'Control': 'Unidad de presentación', 'Valor': unidad},
+            {
+                'Control': 'Analista (ID autenticado)',
+                'Valor': _texto_identificacion_exportacion(
+                    identificacion_caso['analista_id'],
+                ),
+            },
+            {
+                'Control': 'Fecha de proceso',
+                'Valor': _texto_identificacion_exportacion(
+                    identificacion_caso['fecha_proceso'],
+                ),
+            },
             {'Control': 'Estado de emisión', 'Valor': estado_emision},
             {'Control': 'Modo piloto', 'Valor': _modo_piloto_activo()},
             {'Control': 'Rama de ejecución', 'Valor': rama_exportacion},
@@ -5921,10 +6639,136 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
             },
             {'Control': 'Cobertura para revisión', 'Valor': estado_entrega['cobertura']['cuentas']['porcentaje']},
             {'Control': 'Cobertura monetaria', 'Valor': estado_entrega['cobertura']['monto_absoluto']['porcentaje']},
-            {'Control': 'Resultado según columnas originales', 'Valor': conciliacion['resultado_origen']},
-            {'Control': 'Resultado según categorías homologadas', 'Valor': conciliacion['resultado_homologado']},
-            {'Control': 'Diferencia de resultado', 'Valor': conciliacion['diferencia']},
-            {'Control': 'Diferencia Activo menos Pasivo y Patrimonio', 'Valor': diagnostico['diferencia']},
+            {
+                'Control': 'Estado comercial de asistencia',
+                'Valor': resumen_comercial['estado'],
+            },
+            {
+                'Control': 'Estado técnico comercial',
+                'Valor': resumen_comercial['estado_tecnico'] or 'No informado',
+            },
+            {
+                'Control': 'Umbral de cobertura comercial',
+                'Valor': resumen_comercial['umbral'],
+            },
+            {
+                'Control': (
+                    'Numerador comercial: automáticas estrictas más '
+                    'sugeridas automatizadas'
+                ),
+                'Valor': resumen_comercial['automaticas_o_sugeridas'],
+            },
+            {
+                'Control': 'Universo elegible comercial',
+                'Valor': resumen_comercial['elegibles'],
+            },
+            {
+                'Control': 'Cobertura comercial automática o sugerida',
+                'Valor': resumen_comercial['porcentaje'],
+            },
+            {
+                'Control': 'Decisiones humanas fuera del indicador comercial',
+                'Valor': resumen_comercial['decisiones_humanas'],
+            },
+            {
+                'Control': 'Pendientes comerciales',
+                'Valor': resumen_comercial['pendientes'],
+            },
+            {
+                'Control': 'Apto para revisión comercial',
+                'Valor': resumen_comercial['apto_para_revision_comercial'],
+            },
+            {
+                'Control': 'Apto para entrega revisada comercial',
+                'Valor': resumen_comercial['apto_para_entrega_revisada'],
+            },
+            {
+                'Control': 'Integración autorizada comercial',
+                'Valor': resumen_comercial['integracion_autorizada'],
+            },
+            {
+                'Control': 'Fuente de cuadratura materializada',
+                'Valor': controles_materializados['fuente_cuadratura'],
+            },
+            {
+                'Control': 'Total activos (materializado)',
+                'Valor': controles_materializados['total_activos'],
+            },
+            {
+                'Control': 'Total pasivos (materializado)',
+                'Valor': controles_materializados['total_pasivos'],
+            },
+            {
+                'Control': 'Total patrimonio (materializado)',
+                'Valor': controles_materializados['total_patrimonio'],
+            },
+            {
+                'Control': 'Patrimonio sin resultado del período (materializado)',
+                'Valor': controles_materializados['patrimonio_sin_resultado'],
+            },
+            {
+                'Control': 'Resultado del período incorporado (materializado)',
+                'Valor': controles_materializados[
+                    'resultado_periodo_incorporado'
+                ],
+            },
+            {
+                'Control': 'Pasivo más patrimonio (materializado)',
+                'Valor': controles_materializados['pasivo_mas_patrimonio'],
+            },
+            {
+                'Control': (
+                    'Diferencia Activo menos Pasivo y Patrimonio '
+                    '(materializada)'
+                ),
+                'Valor': controles_materializados[
+                    'diferencia_activo_menos_pasivo_patrimonio'
+                ],
+            },
+            {
+                'Control': 'Tolerancia de cuadratura (materializada)',
+                'Valor': controles_materializados['tolerancia_cuadratura'],
+            },
+            {
+                'Control': 'Estado de cuadratura (materializado)',
+                'Valor': controles_materializados['estado_cuadratura'],
+            },
+            {
+                'Control': 'Resultado derivado incorporado en cuadratura',
+                'Valor': controles_materializados[
+                    'resultado_derivado_incorporado'
+                ],
+            },
+            {
+                'Control': 'Cierre final fuente incorporado en cuadratura',
+                'Valor': controles_materializados[
+                    'resultado_final_fuente_incorporado'
+                ],
+            },
+            {
+                'Control': 'Cierre final certificado de fuente',
+                'Valor': (
+                    controles_materializados['resultado_final_fuente']
+                    if controles_materializados['resultado_final_fuente'] is not None
+                    else 'No informado'
+                ),
+            },
+            {
+                'Control': 'Resultado según columnas originales',
+                'Valor': controles_materializados[
+                    'resultado_segun_columnas_originales'
+                ],
+            },
+            {
+                'Control': 'Resultado según categorías homologadas',
+                'Valor': controles_materializados[
+                    'resultado_segun_categorias_homologadas'
+                ],
+            },
+            {
+                'Control': 'Diferencia de resultado',
+                'Valor': controles_materializados['diferencia_resultado'],
+            },
         ]
         if referencia_piloto is not None:
             control_filas.extend([
@@ -5960,16 +6804,26 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
                 writer, sheet_name='Decisiones de esta sesión', index=False,
             )
 
-        meta = st.session_state.get("metadata_files", {}).get(archivo_nombre)
-        if meta:
-            ws["A1"] = "Empresa:";    ws["B1"] = meta.razon_social or ""
-            ws["A2"] = "RUT:";       ws["B2"] = meta.rut or ""
-            ws["A3"] = "Período:";   ws["B3"] = f'{meta.periodo_desde or ""} al {meta.periodo_hasta or ""}'
-            ws["A4"] = "Giro:";      ws["B4"] = meta.giro or ""
-            ws["A5"] = "Moneda/unidad:"; ws["B5"] = meta.moneda or ""
-            ws["A6"] = "Duración:";  ws["B6"] = (
-                f"{meta.numero_meses} meses" if meta.numero_meses else ""
-            )
+        ws["A1"] = "Empresa (documental):"
+        ws["B1"] = _texto_identificacion_exportacion(
+            identificacion_caso['empresa'],
+        )
+        ws["A2"] = "RUT (documental):"
+        ws["B2"] = _texto_identificacion_exportacion(identificacion_caso['rut'])
+        ws["A3"] = "Período desde (documental):"
+        ws["B3"] = _texto_identificacion_exportacion(
+            identificacion_caso['periodo_desde'],
+        )
+        ws["A4"] = "Período hasta (documental):"
+        ws["B4"] = _texto_identificacion_exportacion(
+            identificacion_caso['periodo_hasta'],
+        )
+        ws["A5"] = "Giro (documental):"
+        ws["B5"] = _texto_identificacion_exportacion(identificacion_caso['giro'])
+        ws["A6"] = "Moneda declarada:"
+        ws["B6"] = _texto_identificacion_exportacion(
+            identificacion_caso['moneda_declarada'],
+        )
 
         ws.column_dimensions["A"].width = 12
         ws.column_dimensions["B"].width = 36
@@ -6050,9 +6904,6 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
         ws.column_dimensions["H"].width = 20
         ws.column_dimensions["I"].width = 22
         ws.column_dimensions["J"].width = 12
-        processed_at = st.session_state.setdefault("processed_at", {}).setdefault(
-            archivo_nombre, datetime.now().astimezone().isoformat(),
-        )
         add_report_sheets(
             writer.book, presentacion, formulas_reporte,
             start_row=FILA_INICIO_BALANCE, unit=unidad, meta=meta,
@@ -6064,6 +6915,40 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
             pages=st.session_state.get("document_pages", {}).get(archivo_nombre),
             definitive=emision["definitivo"], reasons=emision["motivos"],
             tolerance=diagnostico["tolerancia"],
+        )
+        # ``Resumen`` conserva fórmulas auditables de presentación. Sus campos
+        # identificatorios y la referencia a los controles, en cambio, deben
+        # ser visibles aun para un lector que no recalcula el libro.
+        resumen = writer.book["Resumen"]
+        resumen["B2"] = _texto_identificacion_exportacion(
+            identificacion_caso['empresa'],
+        )
+        resumen["B3"] = _texto_identificacion_exportacion(
+            identificacion_caso['rut'],
+        )
+        resumen["B4"] = (
+            "Desde "
+            + _texto_identificacion_exportacion(
+                identificacion_caso['periodo_desde'],
+            )
+            + " hasta "
+            + _texto_identificacion_exportacion(
+                identificacion_caso['periodo_hasta'],
+            )
+        )
+        resumen["B7"] = _texto_identificacion_exportacion(
+            identificacion_caso['analista_id'],
+        )
+        resumen.append([
+            "Fuente de controles",
+            (
+                "La hoja Control de emisión contiene valores materializados "
+                "y no requiere recálculo del libro."
+            ),
+        ])
+        ws["E3"] = "Analista (ID autenticado)"
+        ws["F3"] = _texto_identificacion_exportacion(
+            identificacion_caso['analista_id'],
         )
 
     buf.seek(0)
@@ -6099,6 +6984,8 @@ def _tab_balance(df: pd.DataFrame, catalogo: dict, archivo_nombre: str):
         emision=emision,
         presentacion=presentacion,
         detalle=detalle_completo,
+        controles_materializados=controles_materializados,
+        identificacion_caso=identificacion_caso,
     )
     payload_json_bytes = json.dumps(
         payload_json, ensure_ascii=False, indent=2, default=str,
